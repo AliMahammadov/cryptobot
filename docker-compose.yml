@@ -1,0 +1,12 @@
+version: '3.8'
+
+services:
+  cryptosense:
+    build: .
+    container_name: cryptosense_bot
+    restart: always
+    ports:
+      - "5083:5083"
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Production
+      - ASPNETCORE_URLS=http://+:5083

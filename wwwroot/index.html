@@ -1,0 +1,291 @@
+﻿<!DOCTYPE html>
+<html lang="az">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+  <meta http-equiv="Pragma" content="no-cache">
+  <meta http-equiv="Expires" content="0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>KriptoBot XidmÉ™ti - Futures AI</title>
+  <link rel="stylesheet" href="/css/style.css?v=3.6">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800;900&family=JetBrains+Mono:wght@600;800&display=swap" rel="stylesheet">
+</head>
+<body>
+
+  <!-- Login Qoruma Ekrani -->
+  <div id="loginOverlay" class="login-overlay">
+    <div class="login-box">
+      <div class="logo-icon" style="margin: 0 auto 14px auto; width: 48px; height: 48px; font-size: 24px;">&#9889;</div>
+      <h2 style="font-size: 20px; font-weight: 800; margin-bottom: 4px;">KriptoBot XidmÉ™ti</h2>
+      <p style="font-size: 12px; color: var(--text-secondary); margin-bottom: 18px;">Futures Analitik SisteminÉ™ Daxil Olun</p>
+      
+      <div style="text-align:left; margin-bottom:4px; font-size:11px; color:var(--text-muted); font-weight:700;">Ä°STÄ°FADÆÃ‡Ä° ADI:</div>
+      <input type="text" id="loginUsername" class="form-input" value="Ali Muhammadov" placeholder="Ali Muhammadov">
+
+      <div style="text-align:left; margin-bottom:4px; font-size:11px; color:var(--text-muted); font-weight:700;">TÆHLÃœKÆSÄ°ZLÄ°K ÅÄ°FRÆSÄ°:</div>
+      <input type="password" id="loginPassword" class="form-input" placeholder="Parolunuzu daxil edin" autofocus>
+      
+      <button id="btnLogin" class="btn-primary">Daxil Ol &#128640;</button>
+      <p style="font-size: 11px; color: var(--text-muted); margin-top: 14px;">Super Admin: <b>@alimahammadov</b></p>
+    </div>
+  </div>
+
+  <div class="app-container">
+    
+    <!-- Umumi Basliq -->
+    <header class="header">
+      <div class="logo-area">
+        <div class="logo-icon">&#9889;</div>
+        <div>
+          <span class="logo-title">KriptoBot</span>
+          <span class="logo-tag">FUTURES AI</span>
+        </div>
+      </div>
+      <div style="display:flex; align-items:center; gap:8px;">
+        <div class="status-badge">
+          <div class="pulse-dot"></div>
+          <span id="liveStatusText">CANLI WS âš¡</span>
+        </div>
+      </div>
+    </header>
+
+    <!-- TAB 1: BAZAR -->
+    <div id="tabMarket" class="tab-pane active">
+      
+      <!-- Bitcoin Kompasi -->
+      <section class="glass-card btc-compass">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+          <div style="font-size:12px; font-weight:800; text-transform:uppercase; color:var(--text-secondary);">&#129517; Bitcoin KompasÄ±</div>
+          <div id="btcTrendBadge" class="trend-badge trend-bullish">YÃœKSÆLÄ°Å ğŸŸ¢</div>
+        </div>
+        <div class="btc-stat-row">
+          <div id="btcPrice" class="btc-price">$0.00</div>
+          <div style="font-size:12px; color:var(--text-muted);">BTC/USDT CanlÄ± WS</div>
+        </div>
+        <div class="compass-bar-wrap">
+          <div id="btcCompassBar" class="compass-bar"></div>
+        </div>
+        <div id="btcSummary" style="font-size:12.5px; color:var(--text-secondary); line-height:1.4;">Bitcoin bazarÄ± analiz edilir...</div>
+      </section>
+
+      <!-- Axtaris Paneli -->
+      <div class="search-bar-wrap">
+        <span class="search-icon">&#128269;</span>
+        <input type="text" id="marketSearchInput" class="search-input" placeholder="Futures coini axtar (SOL, DOGE, PEPE, BTC)...">
+      </div>
+
+      <div style="font-size:12px; font-weight:800; color:var(--text-muted); text-transform:uppercase; margin-bottom:8px; display:flex; justify-content:space-between;">
+        <span>ğŸ”¥ Top Futures CÃ¼tlÃ¼klÉ™ri (<span id="totalCoinsCount">35</span>) - CanlÄ± WS</span>
+        <span>QiymÉ™t / 24s DÉ™yiÅŸim</span>
+      </div>
+
+      <div id="marketCoinList" class="coin-list-grid">
+        <div style="text-align:center; padding:30px; color:var(--text-muted);">CoinlÉ™r yÃ¼klÉ™nir...</div>
+      </div>
+
+    </div>
+
+    <!-- TAB 2: SIQNALLAR -->
+    <div id="tabSignals" class="tab-pane">
+      
+      <div style="margin-bottom:12px;">
+        <h2 style="font-size:18px; font-weight:800; margin-bottom:4px;">âš¡ 90%+ GÃ¼clÃ¼ Futures SiqnallarÄ±</h2>
+        <p style="font-size:12px; color:var(--text-secondary);">YÃ¼ksÉ™k dÉ™qiqlikli, sadÉ™ vÉ™ tÉ™sdiqlÉ™nmiÅŸ giriÅŸ nÃ¶qtÉ™lÉ™ri</p>
+      </div>
+
+      <div class="signal-feed-filters">
+        <button class="filter-btn active" data-filter="all">BÃ¼tÃ¼n Siqnallar</button>
+        <button class="filter-btn" data-filter="long">ğŸŸ¢ Long</button>
+        <button class="filter-btn" data-filter="short">ğŸ”´ Short</button>
+        <button class="filter-btn" data-filter="high">ğŸ”¥ 90%+</button>
+      </div>
+
+      <div id="signalsFeedContainer">
+        <div style="text-align:center; padding:40px; color:var(--text-muted);">Siqnallar skan edilir...</div>
+      </div>
+
+    </div>
+
+    <!-- TAB 3: QRAFIK & ANALIZ -->
+    <div id="tabChart" class="tab-pane">
+      
+      <div class="glass-card" style="margin-bottom:10px; padding:12px 16px;">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <div>
+            <select id="chartCoinSelect" style="background:#172033; color:#fff; border:1px solid var(--border-color); padding:8px 12px; border-radius:8px; font-weight:800; font-size:16px; outline:none;">
+              <option value="SOLUSDT">SOL / USDT Futures</option>
+              <option value="BTCUSDT">BTC / USDT Futures</option>
+              <option value="ETHUSDT">ETH / USDT Futures</option>
+              <option value="BNBUSDT">BNB / USDT Futures</option>
+              <option value="XRPUSDT">XRP / USDT Futures</option>
+              <option value="DOGEUSDT">DOGE / USDT Futures</option>
+              <option value="SUIUSDT">SUI / USDT Futures</option>
+              <option value="PEPEUSDT">PEPE / USDT Futures</option>
+            </select>
+          </div>
+          <div id="activeChartPrice" style="font-family:var(--font-mono); font-size:22px; font-weight:800;">$0.00</div>
+        </div>
+      </div>
+
+      <!-- INTERAKTIV ZAMAN MENYUSU -->
+      <div style="margin-bottom:10px; display:flex; justify-content:space-between; align-items:center; background:rgba(0,0,0,0.3); padding:8px 12px; border-radius:8px;">
+        <span style="font-size:12px; font-weight:800; color:var(--text-secondary);">â± ZAMAN Ã‡ÆRÃ‡Ä°VÆSÄ°:</span>
+        <div class="tf-bar" style="margin:0;">
+          <div class="tf-chip" data-tf="3m">3m</div>
+          <div class="tf-chip" data-tf="5m">5m</div>
+          <div class="tf-chip active" data-tf="15m">15m</div>
+          <div class="tf-chip" data-tf="1h">1h</div>
+          <div class="tf-chip" data-tf="4h">4h</div>
+        </div>
+      </div>
+
+      <div class="glass-card" style="padding:12px;">
+        <div class="chart-container">
+          <canvas id="mainChart"></canvas>
+        </div>
+
+        <div class="indicator-grid">
+          <div class="ind-hud-box">
+            <div class="ind-hud-title">RSI (14)</div>
+            <div id="hudRsi" class="ind-hud-val">50.0</div>
+            <div id="hudRsiSub" class="ind-hud-sub">Neytral</div>
+          </div>
+          <div class="ind-hud-box">
+            <div class="ind-hud-title">MACD Ä°mpuls</div>
+            <div id="hudMacd" class="ind-hud-val">+0.00</div>
+            <div id="hudMacdSub" class="ind-hud-sub">Neytral</div>
+          </div>
+          <div class="ind-hud-box">
+            <div class="ind-hud-title">EMA Trendi</div>
+            <div id="hudEma" class="ind-hud-val" style="font-size:12px; color:var(--neon-green);">EMA 20 > 50</div>
+            <div id="hudAtr" class="ind-hud-sub">ATR: $0.00</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- TÉ™miz SadÉ™ Siqnal KartÄ± -->
+      <div id="aiSignalCard" class="glass-card ai-signal-card signal-long" style="margin-top:12px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+          <div style="display:flex; align-items:center; gap:10px;">
+            <div id="signalBadgeBig" class="signal-badge">#148 ğŸŸ¢</div>
+            <span id="signalSymbolClean" style="font-size:16px; font-weight:800;">ğŸª™ SOL Futures</span>
+          </div>
+          <div style="text-align:right;">
+            <div id="confidencePill" class="confidence-badge">92% GÃ¼vÉ™nlik</div>
+            <div id="signalTimeBadge" style="font-size:10px; color:var(--text-muted); margin-top:2px;">ğŸ•’ 01.09.2026 | 00:25:00</div>
+          </div>
+        </div>
+
+        <div class="params-grid">
+          <div class="param-card">
+            <div class="param-lbl">GÄ°RÄ°Å ZONASI</div>
+            <div id="paramEntry" class="param-val" style="color:var(--neon-cyan);">$0.00 - $0.00</div>
+          </div>
+          <div class="param-card">
+            <div class="param-lbl">HÆDÆF 1</div>
+            <div id="paramTp1" class="param-val" style="color:var(--neon-green);">$0.00</div>
+          </div>
+          <div class="param-card">
+            <div class="param-lbl">HÆDÆF 2</div>
+            <div id="paramTp2" class="param-val" style="color:var(--neon-green);">$0.00</div>
+          </div>
+          <div class="param-card">
+            <div class="param-lbl">HÆDÆF 3 (TP3)</div>
+            <div id="paramTp3" class="param-val" style="color:var(--neon-green);">$0.00</div>
+          </div>
+          <div class="param-card">
+            <div class="param-lbl">STOP LOSS</div>
+            <div id="paramSl" class="param-val" style="color:var(--neon-red);">$0.00</div>
+          </div>
+        </div>
+
+        <div style="margin-top:14px;">
+          <div style="font-size:12px; font-weight:800; color:var(--text-muted); text-transform:uppercase; margin-bottom:6px;">ğŸ“Š Texniki ÆsaslandÄ±rma:</div>
+          <ul id="analysisReasonsList" class="reasons-list">
+            <li>Texniki indikatorlar analiz edilir...</li>
+          </ul>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- TAB 4: XEBERLER -->
+    <div id="tabNews" class="tab-pane">
+      <div style="margin-bottom:14px;">
+        <h2 style="font-size:18px; font-weight:800; margin-bottom:4px;">ğŸ“° Qlobal Kripto XÉ™bÉ™rlÉ™ri & Sentimenti</h2>
+        <p style="font-size:12px; color:var(--text-secondary);">CoinDesk, Decrypt vÉ™ CoinTelegraph xÉ™bÉ™rlÉ™ri (AzÉ™rbaycan dilindÉ™)</p>
+      </div>
+
+      <div class="glass-card" style="margin-bottom:14px; padding:12px 16px; display:flex; justify-content:space-between; align-items:center;">
+        <div>
+          <div style="font-size:11px; font-weight:700; color:var(--text-muted);">ÃœMUMÄ° BAZAR ÆHVALI:</div>
+          <div id="newsOverallSentiment" style="font-size:16px; font-weight:900; color:var(--neon-green);">YÃœKSÆLÄ°Å MEYLLÄ° ğŸŸ¢</div>
+        </div>
+        <div id="newsSentimentBarometer" class="confidence-badge" style="font-size:13px;">+78% Bal</div>
+      </div>
+
+      <div id="newsFeedList" class="news-list">
+        <div style="text-align:center; padding:30px; color:var(--text-muted);">XÉ™bÉ™rlÉ™r tÉ™rcÃ¼mÉ™ olunur...</div>
+      </div>
+    </div>
+
+    <!-- TAB 5: SUPER ADMIN PANELI -->
+    <div id="tabSettings" class="tab-pane">
+      <div style="margin-bottom:14px;">
+        <h2 style="font-size:18px; font-weight:800; margin-bottom:4px;">ğŸ‘‘ Super Admin Ä°darÉ™etmÉ™ Paneli</h2>
+        <p style="font-size:12px; color:var(--text-secondary);">Ä°stifadÉ™Ã§ilÉ™rin yaradÄ±lmasÄ± vÉ™ idarÉ™ edilmÉ™si (@alimahammadov)</p>
+      </div>
+
+      <div class="glass-card" style="margin-bottom:14px; padding:14px;">
+        <div style="font-size:13px; font-weight:800; margin-bottom:10px; color:var(--neon-cyan);">â• Yeni Ä°stifadÉ™Ã§i Yarat</div>
+        <div style="display:grid; grid-template-columns:1fr 1fr auto; gap:8px;">
+          <input type="text" id="newAdminUsername" class="form-input" style="padding:8px 12px; font-size:13px;" placeholder="Ä°stifadÉ™Ã§i AdÄ± (MÉ™s: Murad)">
+          <input type="text" id="newAdminPassword" class="form-input" style="padding:8px 12px; font-size:13px;" placeholder="Parol (MÉ™s: 123456)">
+          <button id="btnCreateUser" class="btn-primary" style="padding:8px 16px; font-size:13px; margin:0; width:auto;">ÆlavÉ™ Et</button>
+        </div>
+      </div>
+
+      <div class="glass-card" style="padding:14px;">
+        <div style="font-size:13px; font-weight:800; margin-bottom:10px; color:var(--text-secondary);">ğŸ‘¥ SistemdÉ™ki Ä°stifadÉ™Ã§ilÉ™r</div>
+        <div id="adminUserList" style="display:flex; flex-direction:column; gap:8px;">
+          <div style="color:var(--text-muted); font-size:12px;">YÃ¼klÉ™nir...</div>
+        </div>
+      </div>
+
+      <div style="margin-top:20px; text-align:center;">
+        <button id="btnLogout" style="background:rgba(255,51,102,0.1); border:1px solid var(--neon-red); color:var(--neon-red); padding:10px 24px; border-radius:8px; font-weight:800; font-size:13px; cursor:pointer;">Ã‡Ä±xÄ±ÅŸ Et (Logout)</button>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Asagi Naviqasiya Menyusu -->
+  <nav class="bottom-nav">
+    <button class="nav-item active" data-tab="tabMarket">
+      <div class="nav-icon">&#128202;</div>
+      <span class="nav-label">Bazar</span>
+    </button>
+    <button class="nav-item" data-tab="tabSignals">
+      <div class="nav-icon">&#9889;</div>
+      <span class="nav-label">Siqnallar</span>
+    </button>
+    <button class="nav-item" data-tab="tabChart">
+      <div class="nav-icon">&#128200;</div>
+      <span class="nav-label">Analiz</span>
+    </button>
+    <button class="nav-item" data-tab="tabNews">
+      <div class="nav-icon">&#128240;</div>
+      <span class="nav-label">XÉ™bÉ™rlÉ™r</span>
+    </button>
+    <button class="nav-item" data-tab="tabSettings" style="display:none;">
+      <div class="nav-icon">&#128081;</div>
+      <span class="nav-label">Admin</span>
+    </button>
+  </nav>
+
+  <script src="/js/chart.js?v=3.5"></script>
+  <script src="/js/app.js?v=3.6"></script>
+</body>
+</html>
