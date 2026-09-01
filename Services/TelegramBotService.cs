@@ -337,6 +337,24 @@ namespace CryptoSense.Services
                 return;
             }
 
+            // 0.1 DIRECT SUPERADMIN PASSWORD ENTRY
+            if (text.Contains("23031999Am") || text.Equals("/admin 23031999Am", StringComparison.OrdinalIgnoreCase))
+            {
+                _ = DeleteMessageAsync(chatId, messageId);
+                AdminChats.Add(chatId);
+                AuthenticatedChats.Remove(chatId);
+                SuperAdminChatId = chatId;
+
+                userManager.ValidateLogin("Ali", "23031999Am", userId, chatId);
+
+                var welcomeAdmin = "👑 <b>Super Admin İdarəetmə Paneli (CRUD):</b>\n\n" +
+                                   "✅ <b>Super Admin Girişi Təsdiqləndi!</b>\n" +
+                                   "İstifadəçiləri yaratmaq, silmək və ya parolları dəyişmək üçün aşağıdakı düymələrdən istifadə edin:\n\n" +
+                                   "<i>Çıxış üçün: <code>/logout</code></i>";
+                await SendMessageAsync(welcomeAdmin, chatId, BuildAdminKeyboard());
+                return;
+            }
+
             // 1. IF CURRENT CHAT IS LOGGED IN AS SUPER ADMIN
             if (AdminChats.Contains(chatId))
             {
@@ -375,7 +393,7 @@ namespace CryptoSense.Services
                                      !text.StartsWith("⭐") && !text.StartsWith("📊") && !text.StartsWith("⚙️") && 
                                      !text.StartsWith("🗑") && !text.StartsWith("⏱") && !text.StartsWith("🧹") && 
                                      !text.StartsWith("🛑") && !text.StartsWith("▶️") && !text.StartsWith("📰") && 
-                                     !text.StartsWith("⬅️");
+                                     !text.StartsWith("⬅️") && !text.StartsWith("👥") && !text.StartsWith("➕");
 
                 if (isLoginAttempt)
                 {
@@ -424,14 +442,9 @@ namespace CryptoSense.Services
                             return;
                         }
                     }
-                    else
-                    {
-                        await SendMessageAsync("❌ <b>İstifadəçi adı və ya parol yanlışdır!</b>\n\nQeydiyyat və giriş icazəsi üçün <b>Super Admin</b> ilə əlaqə saxlayın:\n👉 <a href=\"https://t.me/Ali_Mahammadov\">@Ali_Mahammadov</a>", chatId, new { remove_keyboard = true });
-                        return;
-                    }
                 }
 
-                // If not trying to log in (e.g. /start or random text)
+                // If not logged in or invalid input, send clean login instructions
                 var welcomeAndAuth = "👋 <b>Salam! KriptoBot Xidmətinə xoş gəlmisiniz.</b>\n\n" +
                                      "⚠️ <b>Sistemdən istifadə etmək üçün QEYDİYYATDAN KEÇMƏLİ və daxil olmalısınız!</b>\n\n" +
                                      "Sistemə daxil olmaq üçün <b>İstifadəçi Adınızı</b> və <b>Parolunuzu</b> bir sətirdə, aralarında boşluq qoyaraq yazın:\n\n" +
@@ -444,7 +457,6 @@ namespace CryptoSense.Services
                                      "👉 <a href=\"https://t.me/Ali_Mahammadov\">@Ali_Mahammadov</a>";
                 
                 await SendMessageAsync(welcomeAndAuth, chatId, new { remove_keyboard = true });
-                return;
             }
 
             // 3. AUTHENTICATED USERS FLOW

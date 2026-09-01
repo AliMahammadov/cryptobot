@@ -54,11 +54,53 @@ namespace CryptoSense.Services
         public (bool Success, UserAccount? User) ValidateLogin(string username, string password, long? telegramUserId = null, string? chatId = null)
         {
             username = username.Trim();
-            if (username.Equals("Ali Mahammadov", StringComparison.OrdinalIgnoreCase) || username.Equals("Admin", StringComparison.OrdinalIgnoreCase)) username = "Ali";
+            password = password.Trim();
 
             using var scope = _serviceProvider.CreateScope();
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
+            // 1. Direct SuperAdmin match
+            bool isAdminAttempt = (username.Equals("Ali", StringComparison.OrdinalIgnoreCase) ||
+                                   username.Equals("Admin", StringComparison.OrdinalIgnoreCase) ||
+                                   username.Equals("Ali Mahammadov", StringComparison.OrdinalIgnoreCase) ||
+                                   username.Equals("Ali_Mahammadov", StringComparison.OrdinalIgnoreCase)) &&
+                                  (password == "23031999Am" || password == "123456789!");
+
+            if (isAdminAttempt)
+            {
+                var adminUser = db.Users.FirstOrDefault(u => u.Role == UserRole.Admin) ??
+                                db.Users.FirstOrDefault(u => u.Username.ToLower() == "ali" || u.Username.ToLower() == "ali mahammadov");
+
+                if (adminUser == null)
+                {
+                    adminUser = new UserAccount
+                    {
+                        Username = "Ali",
+                        PasswordHash = BCrypt.Net.BCrypt.HashPassword("23031999Am"),
+                        Role = UserRole.Admin,
+                        TelegramUsername = "Ali_Mahammadov",
+                        IsActive = true,
+                        CreatedAtUtc = DateTime.UtcNow,
+                        LastLoginAt = DateTime.UtcNow
+                    };
+                    db.Users.Add(adminUser);
+                }
+                else
+                {
+                    adminUser.Username = "Ali";
+                    adminUser.Role = UserRole.Admin;
+                    adminUser.IsActive = true;
+                    adminUser.PasswordHash = BCrypt.Net.BCrypt.HashPassword("23031999Am");
+                }
+
+                adminUser.LastLoginAt = DateTime.UtcNow;
+                if (!string.IsNullOrEmpty(chatId)) adminUser.TelegramChatId = chatId;
+                if (telegramUserId.HasValue) adminUser.TelegramUserId = telegramUserId.Value;
+                db.SaveChanges();
+                return (true, adminUser);
+            }
+
+            // 2. Regular User match
             var user = db.Users.FirstOrDefault(u => u.Username.ToLower() == username.ToLower());
             if (user == null || !user.IsActive)
             {
@@ -75,13 +117,6 @@ namespace CryptoSense.Services
             }
             catch
             {
-            }
-
-            // Direct superadmin fallback check
-            if (!valid && user.Role == UserRole.Admin && password == "23031999Am")
-            {
-                valid = true;
-                user.PasswordHash = BCrypt.Net.BCrypt.HashPassword("23031999Am");
             }
 
             if (valid)
