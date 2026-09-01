@@ -332,9 +332,12 @@ namespace CryptoSense.Services
             if (isSuperAdminUser)
             {
                 SuperAdminChatId = chatId;
+                AuthenticatedChats.Remove(chatId); // Keep SuperAdmin dedicated to Admin CRUD only
+                await HandleSuperAdminFlowAsync(chatId, text, userManager);
+                return;
             }
 
-            // 1. AUTO-AUTHENTICATION FROM DATABASE
+            // 1. AUTO-AUTHENTICATION FROM DATABASE FOR REGULAR USERS
             if (!AuthenticatedChats.Contains(chatId))
             {
                 var existingUser = userManager.GetUserByChatIdOrTelegramId(chatId, userId);
@@ -380,11 +383,8 @@ namespace CryptoSense.Services
                                             $"Aktiv Zaman Çərçivəsi: <b>{settings.Timeframe}</b>\n\n" +
                                             $"Yalnız seçdiyiniz <b>{settings.Timeframe}</b> zamanı üzrə 24/7 siqnallar və nəticələr göndəriləcək.";
                         
-                        await SendMessageAsync(onboardingMsg, chatId, BuildUserKeyboard(settings, isSuperAdminUser || user.Role == UserRole.Admin));
-                        if (chatId != SuperAdminChatId)
-                        {
-                            await NotifySuperAdminUserLoginAsync(user.Username, $"Telegram (@{username})");
-                        }
+                        await SendMessageAsync(onboardingMsg, chatId, BuildUserKeyboard(settings));
+                        await NotifySuperAdminUserLoginAsync(user.Username, $"Telegram (@{username})");
                         return;
                     }
                     else
@@ -412,11 +412,10 @@ namespace CryptoSense.Services
 
             // 3. AUTHENTICATED USERS FLOW
             var userSettings = GetSettings(chatId);
-            bool hasAdminAccess = isSuperAdminUser;
 
             // Check if user was deleted
             var isStillRegistered = userManager.GetAllUsers().Any(u => u.Username.Equals(userSettings.Username, StringComparison.OrdinalIgnoreCase));
-            if (!isStillRegistered && !isSuperAdminUser)
+            if (!isStillRegistered)
             {
                 AuthenticatedChats.Remove(chatId);
                 UserPreferences.TryRemove(chatId, out _);
@@ -439,20 +438,361 @@ namespace CryptoSense.Services
                 !text.StartsWith("⬅️") && !text.StartsWith("👑") && !text.StartsWith("➕") && !text.StartsWith("👥"))
             {
                 _ = DeleteMessageAsync(chatId, messageId);
-                await SendMessageAsync($"✅ <b>Siz artıq sistemə daxil olmusunuz!</b>\nİstifadəçi: <b>{userSettings.Username}</b>", chatId, BuildUserKeyboard(userSettings, hasAdminAccess));
+                await SendMessageAsync($"✅ <b>Siz artıq sistemə daxil olmusunuz!</b>\nİstifadəçi: <b>{userSettings.Username}</b>", chatId, BuildUserKeyboard(userSettings));
                 return;
             }
 
-            // SUPER ADMIN PANEL INTERACTIONS
-            if (text == "👑 Admin Paneli" || text == "/admin")
+            // STATE: DELETING A SPECIFIC COIN
+            if (_userStates.TryGetValue(chatId, out var coinDelState) && coinDelState == "USER_WAITING_DELETE_COIN")
             {
-                if (hasAdminAccess)
+                _userStates.TryRemove(chatId, out _);
+                var coinToDel = text.Trim().ToUpper();
+                if (!coinToDel.EndsWith("USDT")) coinToDel += "USDT";
+
+                if (userSettings.Coins.Contains(coinToDel))
                 {
-                    await SendMessageAsync("👑 <b>Super Admin İdarəetmə Paneli:</b>\n\nAşağıdakı menyudan istifadəçiləri idarə edə bilərsiniz:", chatId, BuildAdminKeyboard());
+                    userSettings.Coins.Remove(coinToDel);
+                    userSettings.LastResumeTime = DateTime.UtcNow;
+                    var cleanDel = coinToDel.Replace("USDT", "");
+                    var cleanList = string.Join(", ", userSettings.Coins.Select(c => c.Replace("USDT", "")));
+                    var succMsg = $"✅ <b>'{cleanDel}' coini siyahınızdan silindi!</b>\n\n" +
+                                  $"Cari siyahınız ({userSettings.Coins.Count}/10 ədəd):\n" +
+                                  $"<code>{(string.IsNullOrEmpty(cleanList) ? "Siyahı boşdur" : cleanList)}</code>";
+                    await SendMessageAsync(succMsg, chatId, BuildUserKeyboard(userSettings));
+                }
+                else
+                {
+                    var cleanDel = coinToDel.Replace("USDT", "");
+                    await SendMessageAsync($"⚠️ <b>'{cleanDel}' coini siyahınızda tapılmadı!</b>", chatId, BuildUserKeyboard(userSettings));
+                }
+                return;
+            }
+
+            // STATE: ADDING COINS (MAX 10)
+            if (_userStates.TryGetValue(chatId, out var coinAddState) && coinAddState == "WAITING_COIN_INPUT")
+            {
+                _userStates.TryRemove(chatId, out _);
+                var parts = text.Split(new[] { ',', ' ', ';', '\n' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                if (parts.Length > 0 && !text.StartsWith("/"))
+                {
+                    foreach (var p in parts)
+                    {
+                        var clean = p.ToUpper();
+                        if (!clean.EndsWith("USDT")) clean += "USDT";
+                        if (!userSettings.Coins.Contains(clean))
+                        {
+                            if (userSettings.Coins.Count < 10)
+                            {
+                                userSettings.Coins.Add(clean);
+                            }
+                        }
+                    }
+
+                    userSettings.LastResumeTime = DateTime.UtcNow;
+                    var cleanList = string.Join(", ", userSettings.Coins.Select(c => c.Replace("USDT", "")));
+                    var conf = $"✅ <b>Seçilmiş coinləriniz yeniləndi ({userSettings.Coins.Count}/10 ədəd):</b>\n\n" +
+                               $"<code>{cleanList}</code>";
+                    await SendMessageAsync(conf, chatId, BuildUserKeyboard(userSettings));
                     return;
                 }
             }
 
+            // SUBMENU ACTION: SCAN SPECIFIC TIMEFRAME
+            if (text == "⏱ 3 Dəqiqə (3m) Siqnalları" ||
+                text == "⏱ 5 Dəqiqə (5m) Siqnalları" ||
+                text == "⏱ 15 Dəqiqə (15m) Siqnalları" ||
+                text == "⏱ 1 Saat (1h) Siqnalları" ||
+                text == "⏱ 4 Saat (4h) Siqnalları" ||
+                text == "🌟 Bütün Zamanlar (Hamısı) Siqnalları")
+            {
+                var sampleCoins = new[] { "SOLUSDT", "BTCUSDT", "ETHUSDT", "DOGEUSDT", "XRPUSDT", "BNBUSDT", "SUIUSDT", "PEPEUSDT", "AVAXUSDT" };
+
+                if (text.Contains("Bütün Zamanlar") || text.Contains("Hamısı"))
+                {
+                    userSettings.Timeframe = "Hamısı";
+                    userSettings.LastResumeTime = DateTime.UtcNow;
+                    await SendMessageAsync("⏳ <b>Bütün zaman çərçivələri (3m, 5m, 15m, 1h, 4h) üzrə bazar skan edilir...</b>", chatId, BuildUserKeyboard(userSettings));
+                    var tfs = new[] { "3m", "5m", "15m", "1h", "4h" };
+                    int totalFound = 0;
+                    foreach (var tf in tfs)
+                    {
+                        foreach (var sym in sampleCoins.Take(3))
+                        {
+                            var sig = await signalEngine.AnalyzeCoinAsync(sym, tf);
+                            if (sig.Confidence >= 78 && (sig.SignalType.Contains("LONG") || sig.SignalType.Contains("SHORT")))
+                            {
+                                await SendSignalAlertAsync(sig, chatId);
+                                totalFound++;
+                                await Task.Delay(250);
+                            }
+                        }
+                    }
+                    return;
+                }
+                else
+                {
+                    string targetTf = "3m";
+                    if (text.Contains("3m")) targetTf = "3m";
+                    else if (text.Contains("5m")) targetTf = "5m";
+                    else if (text.Contains("15m")) targetTf = "15m";
+                    else if (text.Contains("1h")) targetTf = "1h";
+                    else if (text.Contains("4h")) targetTf = "4h";
+
+                    userSettings.Timeframe = targetTf;
+                    userSettings.LastResumeTime = DateTime.UtcNow;
+
+                    await SendMessageAsync($"⏳ <b>Yalnız ({targetTf}) üzrə 78%+ Confluence siqnalları axtarılır... (Profiliniz '{targetTf}' olaraq təyin edildi)</b>", chatId, BuildUserKeyboard(userSettings));
+
+                    int found = 0;
+                    foreach (var sym in sampleCoins)
+                    {
+                        var sig = await signalEngine.AnalyzeCoinAsync(sym, targetTf);
+                        if (sig.Confidence >= 78 && (sig.SignalType.Contains("LONG") || sig.SignalType.Contains("SHORT")))
+                        {
+                            await SendSignalAlertAsync(sig, chatId);
+                            found++;
+                            await Task.Delay(250);
+                        }
+                    }
+                    if (found == 0)
+                    {
+                        await SendMessageAsync($"ℹ️ Hal-hazırda {targetTf} zamanında tələblərə cavab verən aktiv siqnal yoxdur.", chatId, BuildUserKeyboard(userSettings));
+                    }
+                    return;
+                }
+            }
+
+            // DIRECT TIMEFRAME PREFERENCE SELECTION
+            if (text == "⏱ 3 Dəqiqə (3m)" || text == "3m")
+            {
+                userSettings.Timeframe = "3m";
+                userSettings.LastResumeTime = DateTime.UtcNow;
+                await SendMessageAsync($"✅ <b>Zaman Çərçivəsi Təyin Edildi:</b> <code>3m</code>\n<i>Artıq yalnız 3m siqnalları alacaqsınız.</i>", chatId, BuildUserKeyboard(userSettings));
+                return;
+            }
+            else if (text == "⏱ 5 Dəqiqə (5m)" || text == "5m")
+            {
+                userSettings.Timeframe = "5m";
+                userSettings.LastResumeTime = DateTime.UtcNow;
+                await SendMessageAsync($"✅ <b>Zaman Çərçivəsi Təyin Edildi:</b> <code>5m</code>\n<i>Artıq yalnız 5m siqnalları alacaqsınız.</i>", chatId, BuildUserKeyboard(userSettings));
+                return;
+            }
+            else if (text == "⏱ 15 Dəqiqə (15m)" || text == "15m")
+            {
+                userSettings.Timeframe = "15m";
+                userSettings.LastResumeTime = DateTime.UtcNow;
+                await SendMessageAsync($"✅ <b>Zaman Çərçivəsi Təyin Edildi:</b> <code>15m</code>\n<i>Artıq yalnız 15m siqnalları alacaqsınız.</i>", chatId, BuildUserKeyboard(userSettings));
+                return;
+            }
+            else if (text == "⏱ 1 Saat (1h)" || text == "1h")
+            {
+                userSettings.Timeframe = "1h";
+                userSettings.LastResumeTime = DateTime.UtcNow;
+                await SendMessageAsync($"✅ <b>Zaman Çərçivəsi Təyin Edildi:</b> <code>1h</code>\n<i>Artıq yalnız 1h siqnalları alacaqsınız.</i>", chatId, BuildUserKeyboard(userSettings));
+                return;
+            }
+            else if (text == "⏱ 4 Saat (4h)" || text == "4h")
+            {
+                userSettings.Timeframe = "4h";
+                userSettings.LastResumeTime = DateTime.UtcNow;
+                await SendMessageAsync($"✅ <b>Zaman Çərçivəsi Təyin Edildi:</b> <code>4h</code>\n<i>Artıq yalnız 4h siqnalları alacaqsınız.</i>", chatId, BuildUserKeyboard(userSettings));
+                return;
+            }
+            else if (text == "🌟 Bütün Zamanlar (Hamısı)" || text == "Hamisi" || text == "Hamısı")
+            {
+                userSettings.Timeframe = "Hamısı";
+                userSettings.LastResumeTime = DateTime.UtcNow;
+                await SendMessageAsync($"✅ <b>Zaman Çərçivəsi Təyin Edildi:</b> <code>Hamısı</code>", chatId, BuildUserKeyboard(userSettings));
+                return;
+            }
+            else if (text.Contains("Geri") || text.Contains("Əsas Menyu") || text == "/menu")
+            {
+                await SendMessageAsync("📊 <b>Əsas Menyu:</b>", chatId, BuildUserKeyboard(userSettings));
+                return;
+            }
+
+            if (text == "/start" || text == "/help" || text.Contains("Menyu"))
+            {
+                var welcome = "📊 <b>KriptoBot v2 Xidməti - Canlı Bazar Paneli</b>\n\n" +
+                              "👤 İstifadəçi: <b>" + userSettings.Username + "</b>\n" +
+                              "Bildiriş Statusu: " + (userSettings.IsActive ? "<b>AKTİV 🟢</b>" : "<b>DAYANDIRILIB 🔴</b>") + "\n" +
+                              "Aktiv Zaman Çərçivəsi: <b>" + userSettings.Timeframe + "</b>\n" +
+                              "Seçilmiş Coinlər: <b>" + userSettings.Coins.Count + "/10 ədəd</b>\n\n" +
+                              "Əməliyyatlar üçün aşağıdakı menyudan istifadə edin:";
+                await SendMessageAsync(welcome, chatId, BuildUserKeyboard(userSettings));
+            }
+            // STOP NOTIFICATIONS
+            else if (text.Contains("Dayandır") || text.Contains("Dayandir") || text == "/stop")
+            {
+                userSettings.IsActive = false;
+                await SendMessageAsync("🛑 <b>Bildirişlər və nəticə hesabatları dayandırıldı.</b>\n\nArxa fondan sizə heç bir siqnal və nəticə göndərilməyəcək.\nYenidən başlamaq üçün 'Bildirişləri Başlat' düyməsinə vurun.", chatId, BuildUserKeyboard(userSettings));
+            }
+            // RESUME NOTIFICATIONS
+            else if (text.Contains("Başlat") || text.Contains("Baslat") || text == "/resume")
+            {
+                userSettings.IsActive = true;
+                userSettings.LastResumeTime = DateTime.UtcNow;
+                await SendMessageAsync("▶️ <b>Bildirişlər aktivləşdirildi!</b>\n\nSeçdiyiniz zaman çərçivəsi (" + userSettings.Timeframe + ") üzrə 24/7 siqnallar və nəticələr göndəriləcək.", chatId, BuildUserKeyboard(userSettings));
+            }
+            // RESET / CLEAR PAST SIGNALS
+            else if (text.Contains("Sıfırla") || text.Contains("Sifirla") || text == "/clear" || text == "/reset")
+            {
+                userSettings.LastResumeTime = DateTime.UtcNow;
+                await SendMessageAsync("🧹 <b>Keçmiş siqnal izləmələri profiliniz üçün sıfırlandı!</b>\n\nBundan əvvəlki heç bir köhnə siqnalın nəticəsi sizə gəlməyəcək. Yalnız bu andan etibarən yaranan təzə siqnallar izlənəcək.", chatId, BuildUserKeyboard(userSettings));
+            }
+            // PERFORMANCE STATS
+            else if (text.Contains("Statistika") || text == "/stats")
+            {
+                var stats = await signalEngine.GetPerformanceStatsAsync();
+                var sb = new StringBuilder();
+                sb.AppendLine("📊 <b>Sistemin Real Statistik Performansı (Şəffaf İzləmə):</b>");
+                sb.AppendLine("-----------------------------------");
+                sb.AppendLine($"📌 <b>Ümumi Siqnallar:</b> {stats.TotalSignals} ədəd");
+                sb.AppendLine($"🟡 <b>Açıq İzlənən:</b> {stats.OpenSignals} ədəd");
+                sb.AppendLine($"✅ <b>Uğurlu (TP/Müsbət):</b> {stats.SuccessSignals} ədəd");
+                sb.AppendLine($"❌ <b>Uğursuz (SL/Mənfi):</b> {stats.FailedSignals} ədəd");
+                sb.AppendLine($"⚪ <b>Neytral:</b> {stats.NeutralSignals} ədəd");
+                sb.AppendLine("-----------------------------------");
+                sb.AppendLine($"🎯 <b>Real Qələbə Faiz (Win Rate):</b> <b>{stats.WinRatePercent}%</b>");
+                sb.AppendLine($"📈 <b>Ümumi Xalis PnL:</b> <b>{(stats.TotalNetProfitPercent >= 0 ? "+" : "")}{stats.TotalNetProfitPercent}%</b>");
+                sb.AppendLine($"📊 <b>Orta Əməliyyat Gəliri:</b> {(stats.AvgProfitPerTradePercent >= 0 ? "+" : "")}{stats.AvgProfitPerTradePercent}%");
+                sb.AppendLine("-----------------------------------");
+                sb.AppendLine("<i>Qeyd: Bütün uğursuz (Stop Loss) və uğurlu əməliyyatlar heç bir gizlədilmə olmadan qeyd olunur.</i>");
+
+                await SendMessageAsync(sb.ToString(), chatId, BuildUserKeyboard(userSettings));
+            }
+            // MAIN BUTTON: USER CLICKS 'BÜTÜN SİQNALLAR'
+            else if (text == "⚡ Bütün Siqnallar" || text == "Bütün Siqnallar" || text == "/scan")
+            {
+                var tfAskMsg = "⚡ <b>Bütün Bazar Üzrə Siqnal Axtarışı</b>\n\n" +
+                               "Hansı zaman aralığı üzrə 78%+ Confluence siqnalları axtarmaq istəyirsiniz?\n\n" +
+                               "Aşağıdakı seçimlərdən birinə vurun:";
+                await SendMessageAsync(tfAskMsg, chatId, BuildAllSignalsTimeframeKeyboard());
+            }
+            // MY COINS
+            else if (text.Contains("Coinlərim") || text.Contains("Coinlerim") || text == "/my")
+            {
+                if (userSettings.Coins.Count == 0)
+                {
+                    var emptyMsg = "⭐ <b>Sizin Seçilmiş Coinləriniz</b>\n\n" +
+                                   "Hal-hazırda siyahınız boşdur.\n" +
+                                   "Coin əlavə etmək üçün <b>⚙️ Coin Seçimi</b> düyməsinə vurun (Maks: 10 ədəd).";
+                    await SendMessageAsync(emptyMsg, chatId, BuildUserKeyboard(userSettings));
+                    return;
+                }
+
+                var tf = (userSettings.Timeframe == "Hamısı" || userSettings.Timeframe == "Hamisi") ? "3m" : userSettings.Timeframe;
+                await SendMessageAsync($"⏳ Seçdiyiniz {userSettings.Coins.Count} coin üzrə ({tf}) analizi aparılır...", chatId);
+
+                var sb = new StringBuilder();
+                sb.AppendLine("⭐ <b>Mənim Coinlərim - Canlı Kvantitativ Analiz</b>");
+                sb.AppendLine($"Cəmi: <b>{userSettings.Coins.Count}/10 ədəd</b> | Aktiv Zaman: <b>{userSettings.Timeframe}</b>");
+                sb.AppendLine("-----------------------------------");
+
+                foreach (var sym in userSettings.Coins)
+                {
+                    var sig = await signalEngine.AnalyzeCoinAsync(sym, tf);
+                    var cleanSym = sym.Replace("USDT", "");
+                    var trendIcon = sig.SignalType.Contains("LONG") ? "🟢 YÜKSƏLİŞ" : (sig.SignalType.Contains("SHORT") ? "🔴 ENİŞ" : "⚪ NEYTRAL");
+                    sb.AppendLine($"• <b>{cleanSym}</b> (${sig.CurrentPrice}) — {trendIcon} (Confluence: {sig.ConfluenceScore}%)");
+
+                    if (sig.Confidence >= 78 && (sig.SignalType.Contains("LONG") || sig.SignalType.Contains("SHORT")))
+                    {
+                        await SendSignalAlertAsync(sig, chatId);
+                        await Task.Delay(200);
+                    }
+                }
+                sb.AppendLine("-----------------------------------");
+                sb.AppendLine("Yeni coin əlavə etmək üçün: <b>⚙️ Coin Seçimi</b>");
+                sb.AppendLine("Coini siyahıdan silmək üçün: <b>🗑 Coin Sil</b>");
+
+                await SendMessageAsync(sb.ToString(), chatId, BuildUserKeyboard(userSettings));
+            }
+            // TIME PANEL
+            else if (text.Contains("Zaman Çərçivəsi") || text.Contains("Zaman") || text == "/tf")
+            {
+                var tfPanelMsg = "⏱ <b>Zaman Çərçivəsi Paneli</b>\n\n" +
+                                 "Hal-hazırda təyin edilmiş: <b>" + userSettings.Timeframe + "</b>\n\n" +
+                                 "Seçmək istədiyiniz yeni zamanı aşağıdakı paneldən seçin:";
+                await SendMessageAsync(tfPanelMsg, chatId, BuildTimeframeKeyboard());
+            }
+            // DELETE COIN
+            else if (text.Contains("Coin Sil") || text == "/delcoin")
+            {
+                _userStates[chatId] = "USER_WAITING_DELETE_COIN";
+                var cleanList = string.Join(", ", userSettings.Coins.Select(c => c.Replace("USDT", "")));
+                var prompt = "🗑 <b>Coin Silmək</b>\n\n" +
+                             $"Cari siyahınız ({userSettings.Coins.Count}/10 ədəd):\n" +
+                             $"<code>{(string.IsNullOrEmpty(cleanList) ? "Siyahı boşdur" : cleanList)}</code>\n\n" +
+                             "Siyahıdan silmək istədiyiniz coinin <b>Adını</b> yazın:\n" +
+                             "📌 <b>Məsələn:</b> <code>SOL</code> və ya <code>DOGE</code>";
+                await SendMessageAsync(prompt, chatId, BuildUserKeyboard(userSettings));
+            }
+            // ADD COINS
+            else if (text.Contains("Coin Seçimi") || text.Contains("Coin Secimi") || text == "/setcoins")
+            {
+                _userStates[chatId] = "WAITING_COIN_INPUT";
+                var cleanList = string.Join(", ", userSettings.Coins.Select(c => c.Replace("USDT", "")));
+                var prompt = "⚙️ <b>Coin Seçimi (Maksimum 10 ədəd haqqınız var):</b>\n\n" +
+                             $"Hal-hazırda seçilmiş: <b>{userSettings.Coins.Count}/10 ədəd</b>\n" +
+                             $"Cari siyahı: <code>{(string.IsNullOrEmpty(cleanList) ? "Boşdur" : cleanList)}</code>\n\n" +
+                             "Əlavə etmək istədiyiniz coinlərin adını aşağıya <b>vergüllə</b> yazıb göndərin.\n\n" +
+                             "📌 <b>Məsələn:</b>\n" +
+                             "<code>BTC, ETH, SOL, SUI, DOGE, PEPE, AVAX</code>";
+                await SendMessageAsync(prompt, chatId, BuildUserKeyboard(userSettings));
+            }
+            // BITCOIN
+            else if (text.Contains("Bitcoin") || text == "/btc")
+            {
+                var compass = await signalEngine.GetBtcCompassAsync();
+                var btcMsg = $"🧭 <b>Bitcoin Bazar Kompası</b>\n\n" +
+                             $"🕒 Tarix: <b>{compass.TimestampFormatted}</b>\n" +
+                             $"💵 Cari Qiymət: <b>${compass.Price}</b>\n" +
+                             $"📈 Trend İstiqaməti: <b>{compass.Trend}</b>\n" +
+                             $"🎯 Təhlil Gücü: <b>{compass.BullishScore}%</b>\n\n" +
+                             $"<i>{compass.Summary}</i>";
+                await SendMessageAsync(btcMsg, chatId, BuildUserKeyboard(userSettings));
+            }
+            // NEWS
+            else if (text.Contains("Xəbərləri") || text.Contains("Xeberleri") || text == "/news")
+            {
+                var newsSummary = await newsService.GetNewsAndSentimentAsync();
+                var sb = new StringBuilder();
+                sb.AppendLine("📰 <b>Qlobal Kripto Xəbərləri & Sentimenti (Azərbaycan Dilində)</b>");
+                sb.AppendLine($"📊 Ümumi Bazar Əhvalı: <b>{newsSummary.Status} ({newsSummary.OverallScore}%)</b>");
+                sb.AppendLine();
+                sb.AppendLine("Son xəbərlər (keçid üçün xəbərə klikləyin):");
+                sb.AppendLine("-----------------------------------");
+                foreach (var n in newsSummary.LatestNews.Take(5))
+                {
+                    var safeTitle = System.Net.WebUtility.HtmlEncode(n.Title);
+                    sb.AppendLine($"• <b>[{n.Source}]</b> <a href=\"{n.Url}\">{safeTitle}</a> - <i>{n.Sentiment}</i>");
+                }
+                sb.AppendLine("-----------------------------------");
+                await SendMessageAsync(sb.ToString(), chatId, BuildUserKeyboard(userSettings));
+            }
+            else
+            {
+                var potentialSym = text.ToUpper();
+                if (!potentialSym.EndsWith("USDT")) potentialSym += "USDT";
+                var tf = (userSettings.Timeframe == "Hamısı" || userSettings.Timeframe == "Hamisi") ? "3m" : userSettings.Timeframe;
+                var sig = await signalEngine.AnalyzeCoinAsync(potentialSym, tf);
+                if (sig.SignalType != "MƏLUMAT AZDIR")
+                {
+                    await SendSignalAlertAsync(sig, chatId);
+                }
+                else
+                {
+                    var helpMsg = "ℹ️ <b>Nə etmək lazımdır?</b>\n\n" +
+                                  "Aşağıdakı menyudan seçim edin və ya analiz etmək istədiyiniz coinin adını yazın.\n" +
+                                  "📌 Məsələn: <code>SOL</code>, <code>BTC</code>, <code>ETH</code>, <code>DOGE</code>";
+                    await SendMessageAsync(helpMsg, chatId, BuildUserKeyboard(userSettings));
+                }
+            }
+        }
+
+        private async Task HandleSuperAdminFlowAsync(string chatId, string text, UserManagerService userManager)
+        {
             if (_userStates.TryGetValue(chatId, out var state) && state == "ADMIN_WAITING_CREATE_USER")
             {
                 _userStates.TryRemove(chatId, out _);
@@ -465,9 +805,9 @@ namespace CryptoSense.Services
                     if (created)
                     {
                         var msg = $"✅ <b>İstifadəçi uğurla yaradıldı!</b>\n\n" +
-                                  $"👤 <b>Ad:</b> <code>{newUsername}</code>\n" +
+                                  $"👤 <b>İstifadəçi Adı:</b> <code>{newUsername}</code>\n" +
                                   $"🔑 <b>Parol:</b> <code>{newPassword}</code>\n\n" +
-                                  $"<i>İstifadəçiyə göndərin ki, bota daxil olub <code>{newUsername} {newPassword}</code> yazsın.</i>";
+                                  $"<i>İstifadəçiyə bildirin ki, bota daxil olaraq <code>{newUsername} {newPassword}</code> yazsın.</i>";
                         await SendMessageAsync(msg, chatId, BuildAdminKeyboard());
                     }
                     else
@@ -491,13 +831,39 @@ namespace CryptoSense.Services
                 if (deleted)
                 {
                     await RevokeUserAsync(userToDelete, this);
-                    await SendMessageAsync($"✅ <b>İstifadəçi '{userToDelete}' sistemdən silindi, bütün prosesləri dayandırıldı və xəbərdarlıq göndərildi!</b>", chatId, BuildAdminKeyboard());
+                    await SendMessageAsync($"✅ <b>İstifadəçi '{userToDelete}' sistemdən silindi və bütün prosesləri dayandırıldı!</b>", chatId, BuildAdminKeyboard());
                 }
                 else
                 {
                     await SendMessageAsync($"⚠️ <b>'{userToDelete}' tapılmadı və ya silinə bilməz.</b>", chatId, BuildAdminKeyboard());
                 }
                 return;
+            }
+
+            if (_userStates.TryGetValue(chatId, out var pwdState) && pwdState == "ADMIN_WAITING_RESET_PWD")
+            {
+                _userStates.TryRemove(chatId, out _);
+                var parts = text.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                if (parts.Length >= 2)
+                {
+                    var uName = parts[0];
+                    var newPwd = parts[1];
+                    var res = userManager.ResetPassword(uName, newPwd);
+                    if (res)
+                    {
+                        await SendMessageAsync($"✅ <b>'{uName}' üçün yeni parol təyin edildi:</b> <code>{newPwd}</code>", chatId, BuildAdminKeyboard());
+                    }
+                    else
+                    {
+                        await SendMessageAsync($"⚠️ <b>'{uName}' adlı istifadəçi tapılmadı!</b>", chatId, BuildAdminKeyboard());
+                    }
+                    return;
+                }
+                else
+                {
+                    await SendMessageAsync("⚠️ <b>Formatı düzgün daxil edin!</b>\nMəsələn: <code>Murad yeni123</code>", chatId, BuildAdminKeyboard());
+                    return;
+                }
             }
 
             if (text == "➕ İstifadəçi Yarat" || text == "/adduser")
@@ -539,376 +905,43 @@ namespace CryptoSense.Services
                 await SendMessageAsync(prompt, chatId, BuildAdminKeyboard());
                 return;
             }
-
-            // STATE: DELETING A SPECIFIC COIN
-            if (_userStates.TryGetValue(chatId, out var coinDelState) && coinDelState == "USER_WAITING_DELETE_COIN")
+            else if (text == "🔑 Parolu Dəyiş" || text == "/resetpwd")
             {
-                _userStates.TryRemove(chatId, out _);
-                var coinToDel = text.Trim().ToUpper();
-                if (!coinToDel.EndsWith("USDT")) coinToDel += "USDT";
-
-                if (userSettings.Coins.Contains(coinToDel))
-                {
-                    userSettings.Coins.Remove(coinToDel);
-                    userSettings.LastResumeTime = DateTime.UtcNow;
-                    var cleanDel = coinToDel.Replace("USDT", "");
-                    var cleanList = string.Join(", ", userSettings.Coins.Select(c => c.Replace("USDT", "")));
-                    var succMsg = $"✅ <b>'{cleanDel}' coini siyahınızdan silindi!</b>\n\n" +
-                                  $"Cari siyahınız ({userSettings.Coins.Count}/10 ədəd):\n" +
-                                  $"<code>{(string.IsNullOrEmpty(cleanList) ? "Siyahı boşdur" : cleanList)}</code>";
-                    await SendMessageAsync(succMsg, chatId, BuildUserKeyboard(userSettings, hasAdminAccess));
-                }
-                else
-                {
-                    var cleanDel = coinToDel.Replace("USDT", "");
-                    await SendMessageAsync($"⚠️ <b>'{cleanDel}' coini siyahınızda tapılmadı!</b>", chatId, BuildUserKeyboard(userSettings, hasAdminAccess));
-                }
-                return;
-            }
-
-            // STATE: ADDING COINS (MAX 10)
-            if (_userStates.TryGetValue(chatId, out var coinAddState) && coinAddState == "WAITING_COIN_INPUT")
-            {
-                _userStates.TryRemove(chatId, out _);
-                var parts = text.Split(new[] { ',', ' ', ';', '\n' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-                if (parts.Length > 0 && !text.StartsWith("/"))
-                {
-                    foreach (var p in parts)
-                    {
-                        var clean = p.ToUpper();
-                        if (!clean.EndsWith("USDT")) clean += "USDT";
-                        if (!userSettings.Coins.Contains(clean))
-                        {
-                            if (userSettings.Coins.Count < 10)
-                            {
-                                userSettings.Coins.Add(clean);
-                            }
-                        }
-                    }
-
-                    userSettings.LastResumeTime = DateTime.UtcNow;
-                    var cleanList = string.Join(", ", userSettings.Coins.Select(c => c.Replace("USDT", "")));
-                    var conf = $"✅ <b>Seçilmiş coinləriniz yeniləndi ({userSettings.Coins.Count}/10 ədəd):</b>\n\n" +
-                               $"<code>{cleanList}</code>";
-                    await SendMessageAsync(conf, chatId, BuildUserKeyboard(userSettings, hasAdminAccess));
-                    return;
-                }
-            }
-
-            // SUBMENU ACTION: SCAN SPECIFIC TIMEFRAME
-            if (text == "⏱ 3 Dəqiqə (3m) Siqnalları" ||
-                text == "⏱ 5 Dəqiqə (5m) Siqnalları" ||
-                text == "⏱ 15 Dəqiqə (15m) Siqnalları" ||
-                text == "⏱ 1 Saat (1h) Siqnalları" ||
-                text == "⏱ 4 Saat (4h) Siqnalları" ||
-                text == "🌟 Bütün Zamanlar (Hamısı) Siqnalları")
-            {
-                var sampleCoins = new[] { "SOLUSDT", "BTCUSDT", "ETHUSDT", "DOGEUSDT", "XRPUSDT", "BNBUSDT", "SUIUSDT", "PEPEUSDT", "AVAXUSDT" };
-
-                if (text.Contains("Bütün Zamanlar") || text.Contains("Hamısı"))
-                {
-                    userSettings.Timeframe = "Hamısı";
-                    userSettings.LastResumeTime = DateTime.UtcNow;
-                    await SendMessageAsync("⏳ <b>Bütün zaman çərçivələri (3m, 5m, 15m, 1h, 4h) üzrə bazar skan edilir...</b>", chatId, BuildUserKeyboard(userSettings, hasAdminAccess));
-                    var tfs = new[] { "3m", "5m", "15m", "1h", "4h" };
-                    int totalFound = 0;
-                    foreach (var tf in tfs)
-                    {
-                        foreach (var sym in sampleCoins.Take(3))
-                        {
-                            var sig = await signalEngine.AnalyzeCoinAsync(sym, tf);
-                            if (sig.Confidence >= 78 && (sig.SignalType.Contains("LONG") || sig.SignalType.Contains("SHORT")))
-                            {
-                                await SendSignalAlertAsync(sig, chatId);
-                                totalFound++;
-                                await Task.Delay(250);
-                            }
-                        }
-                    }
-                    return;
-                }
-                else
-                {
-                    string targetTf = "3m";
-                    if (text.Contains("3m")) targetTf = "3m";
-                    else if (text.Contains("5m")) targetTf = "5m";
-                    else if (text.Contains("15m")) targetTf = "15m";
-                    else if (text.Contains("1h")) targetTf = "1h";
-                    else if (text.Contains("4h")) targetTf = "4h";
-
-                    userSettings.Timeframe = targetTf;
-                    userSettings.LastResumeTime = DateTime.UtcNow;
-
-                    await SendMessageAsync($"⏳ <b>Yalnız ({targetTf}) üzrə 78%+ Confluence siqnalları axtarılır... (Profiliniz '{targetTf}' olaraq təyin edildi)</b>", chatId, BuildUserKeyboard(userSettings, hasAdminAccess));
-
-                    int found = 0;
-                    foreach (var sym in sampleCoins)
-                    {
-                        var sig = await signalEngine.AnalyzeCoinAsync(sym, targetTf);
-                        if (sig.Confidence >= 78 && (sig.SignalType.Contains("LONG") || sig.SignalType.Contains("SHORT")))
-                        {
-                            await SendSignalAlertAsync(sig, chatId);
-                            found++;
-                            await Task.Delay(250);
-                        }
-                    }
-                    if (found == 0)
-                    {
-                        await SendMessageAsync($"ℹ️ Hal-hazırda {targetTf} zamanında tələblərə cavab verən aktiv siqnal yoxdur.", chatId, BuildUserKeyboard(userSettings, hasAdminAccess));
-                    }
-                    return;
-                }
-            }
-
-            // DIRECT TIMEFRAME PREFERENCE SELECTION
-            if (text == "⏱ 3 Dəqiqə (3m)" || text == "3m")
-            {
-                userSettings.Timeframe = "3m";
-                userSettings.LastResumeTime = DateTime.UtcNow;
-                await SendMessageAsync($"✅ <b>Zaman Çərçivəsi Təyin Edildi:</b> <code>3m</code>\n<i>Artıq yalnız 3m siqnalları alacaqsınız.</i>", chatId, BuildUserKeyboard(userSettings, hasAdminAccess));
-                return;
-            }
-            else if (text == "⏱ 5 Dəqiqə (5m)" || text == "5m")
-            {
-                userSettings.Timeframe = "5m";
-                userSettings.LastResumeTime = DateTime.UtcNow;
-                await SendMessageAsync($"✅ <b>Zaman Çərçivəsi Təyin Edildi:</b> <code>5m</code>\n<i>Artıq yalnız 5m siqnalları alacaqsınız.</i>", chatId, BuildUserKeyboard(userSettings, hasAdminAccess));
-                return;
-            }
-            else if (text == "⏱ 15 Dəqiqə (15m)" || text == "15m")
-            {
-                userSettings.Timeframe = "15m";
-                userSettings.LastResumeTime = DateTime.UtcNow;
-                await SendMessageAsync($"✅ <b>Zaman Çərçivəsi Təyin Edildi:</b> <code>15m</code>\n<i>Artıq yalnız 15m siqnalları alacaqsınız.</i>", chatId, BuildUserKeyboard(userSettings, hasAdminAccess));
-                return;
-            }
-            else if (text == "⏱ 1 Saat (1h)" || text == "1h")
-            {
-                userSettings.Timeframe = "1h";
-                userSettings.LastResumeTime = DateTime.UtcNow;
-                await SendMessageAsync($"✅ <b>Zaman Çərçivəsi Təyin Edildi:</b> <code>1h</code>\n<i>Artıq yalnız 1h siqnalları alacaqsınız.</i>", chatId, BuildUserKeyboard(userSettings, hasAdminAccess));
-                return;
-            }
-            else if (text == "⏱ 4 Saat (4h)" || text == "4h")
-            {
-                userSettings.Timeframe = "4h";
-                userSettings.LastResumeTime = DateTime.UtcNow;
-                await SendMessageAsync($"✅ <b>Zaman Çərçivəsi Təyin Edildi:</b> <code>4h</code>\n<i>Artıq yalnız 4h siqnalları alacaqsınız.</i>", chatId, BuildUserKeyboard(userSettings, hasAdminAccess));
-                return;
-            }
-            else if (text == "🌟 Bütün Zamanlar (Hamısı)" || text == "Hamisi" || text == "Hamısı")
-            {
-                userSettings.Timeframe = "Hamısı";
-                userSettings.LastResumeTime = DateTime.UtcNow;
-                await SendMessageAsync($"✅ <b>Zaman Çərçivəsi Təyin Edildi:</b> <code>Hamısı</code>", chatId, BuildUserKeyboard(userSettings, hasAdminAccess));
-                return;
-            }
-            else if (text.Contains("Geri") || text.Contains("Əsas Menyu") || text == "/menu")
-            {
-                await SendMessageAsync("📊 <b>Əsas Menyu:</b>", chatId, BuildUserKeyboard(userSettings, hasAdminAccess));
-                return;
-            }
-
-            if (text == "/start" || text == "/help" || text.Contains("Menyu"))
-            {
-                var welcome = "📊 <b>KriptoBot v2 Xidməti - Canlı Bazar Paneli</b>\n\n" +
-                              "👤 İstifadəçi: <b>" + userSettings.Username + "</b>\n" +
-                              "Bildiriş Statusu: " + (userSettings.IsActive ? "<b>AKTİV 🟢</b>" : "<b>DAYANDIRILIB 🔴</b>") + "\n" +
-                              "Aktiv Zaman Çərçivəsi: <b>" + userSettings.Timeframe + "</b>\n" +
-                              "Seçilmiş Coinlər: <b>" + userSettings.Coins.Count + "/10 ədəd</b>\n\n" +
-                              "Əməliyyatlar üçün aşağıdakı menyudan istifadə edin:";
-                await SendMessageAsync(welcome, chatId, BuildUserKeyboard(userSettings, hasAdminAccess));
-            }
-            // STOP NOTIFICATIONS
-            else if (text.Contains("Dayandır") || text.Contains("Dayandir") || text == "/stop")
-            {
-                userSettings.IsActive = false;
-                await SendMessageAsync("🛑 <b>Bildirişlər və nəticə hesabatları dayandırıldı.</b>\n\nArxa fondan sizə heç bir siqnal və nəticə göndərilməyəcək.\nYenidən başlamaq üçün 'Bildirişləri Başlat' düyməsinə vurun.", chatId, BuildUserKeyboard(userSettings, hasAdminAccess));
-            }
-            // RESUME NOTIFICATIONS
-            else if (text.Contains("Başlat") || text.Contains("Baslat") || text == "/resume")
-            {
-                userSettings.IsActive = true;
-                userSettings.LastResumeTime = DateTime.UtcNow;
-                await SendMessageAsync("▶️ <b>Bildirişlər aktivləşdirildi!</b>\n\nSeçdiyiniz zaman çərçivəsi (" + userSettings.Timeframe + ") üzrə 24/7 siqnallar və nəticələr göndəriləcək.", chatId, BuildUserKeyboard(userSettings, hasAdminAccess));
-            }
-            // RESET / CLEAR PAST SIGNALS
-            else if (text.Contains("Sıfırla") || text.Contains("Sifirla") || text == "/clear" || text == "/reset")
-            {
-                userSettings.LastResumeTime = DateTime.UtcNow;
-                await SendMessageAsync("🧹 <b>Keçmiş siqnal izləmələri profiliniz üçün sıfırlandı!</b>\n\nBundan əvvəlki heç bir köhnə siqnalın nəticəsi sizə gəlməyəcək. Yalnız bu andan etibarən yaranan təzə siqnallar izlənəcək.", chatId, BuildUserKeyboard(userSettings, hasAdminAccess));
-            }
-            // PERFORMANCE STATS
-            else if (text.Contains("Statistika") || text == "/stats")
-            {
-                var stats = await signalEngine.GetPerformanceStatsAsync();
-                var sb = new StringBuilder();
-                sb.AppendLine("📊 <b>Sistemin Real Statistik Performansı (Şəffaf İzləmə):</b>");
-                sb.AppendLine("-----------------------------------");
-                sb.AppendLine($"📌 <b>Ümumi Siqnallar:</b> {stats.TotalSignals} ədəd");
-                sb.AppendLine($"🟡 <b>Açıq İzlənən:</b> {stats.OpenSignals} ədəd");
-                sb.AppendLine($"✅ <b>Uğurlu (TP/Müsbət):</b> {stats.SuccessSignals} ədəd");
-                sb.AppendLine($"❌ <b>Uğursuz (SL/Mənfi):</b> {stats.FailedSignals} ədəd");
-                sb.AppendLine($"⚪ <b>Neytral:</b> {stats.NeutralSignals} ədəd");
-                sb.AppendLine("-----------------------------------");
-                sb.AppendLine($"🎯 <b>Real Qələbə Faiz (Win Rate):</b> <b>{stats.WinRatePercent}%</b>");
-                sb.AppendLine($"📈 <b>Ümumi Xalis PnL:</b> <b>{(stats.TotalNetProfitPercent >= 0 ? "+" : "")}{stats.TotalNetProfitPercent}%</b>");
-                sb.AppendLine($"📊 <b>Orta Əməliyyat Gəliri:</b> {(stats.AvgProfitPerTradePercent >= 0 ? "+" : "")}{stats.AvgProfitPerTradePercent}%");
-                sb.AppendLine("-----------------------------------");
-                sb.AppendLine("<i>Qeyd: Bütün uğursuz (Stop Loss) və uğurlu əməliyyatlar heç bir gizlədilmə olmadan qeyd olunur.</i>");
-
-                await SendMessageAsync(sb.ToString(), chatId, BuildUserKeyboard(userSettings, hasAdminAccess));
-            }
-            // MAIN BUTTON: USER CLICKS 'BÜTÜN SİQNALLAR'
-            else if (text == "⚡ Bütün Siqnallar" || text == "Bütün Siqnallar" || text == "/scan")
-            {
-                var tfAskMsg = "⚡ <b>Bütün Bazar Üzrə Siqnal Axtarışı</b>\n\n" +
-                               "Hansı zaman aralığı üzrə 78%+ Confluence siqnalları axtarmaq istəyirsiniz?\n\n" +
-                               "Aşağıdakı seçimlərdən birinə vurun:";
-                await SendMessageAsync(tfAskMsg, chatId, BuildAllSignalsTimeframeKeyboard());
-            }
-            // MY COINS
-            else if (text.Contains("Coinlərim") || text.Contains("Coinlerim") || text == "/my")
-            {
-                if (userSettings.Coins.Count == 0)
-                {
-                    var emptyMsg = "⭐ <b>Sizin Seçilmiş Coinləriniz</b>\n\n" +
-                                   "Hal-hazırda siyahınız boşdur.\n" +
-                                   "Coin əlavə etmək üçün <b>⚙️ Coin Seçimi</b> düyməsinə vurun (Maks: 10 ədəd).";
-                    await SendMessageAsync(emptyMsg, chatId, BuildUserKeyboard(userSettings, hasAdminAccess));
-                    return;
-                }
-
-                var tf = (userSettings.Timeframe == "Hamısı" || userSettings.Timeframe == "Hamisi") ? "3m" : userSettings.Timeframe;
-                await SendMessageAsync($"⏳ Seçdiyiniz {userSettings.Coins.Count} coin üzrə ({tf}) analizi aparılır...", chatId);
-
-                var sb = new StringBuilder();
-                sb.AppendLine("⭐ <b>Mənim Coinlərim - Canlı Kvantitativ Analiz</b>");
-                sb.AppendLine($"Cəmi: <b>{userSettings.Coins.Count}/10 ədəd</b> | Aktiv Zaman: <b>{userSettings.Timeframe}</b>");
-                sb.AppendLine("-----------------------------------");
-
-                foreach (var sym in userSettings.Coins)
-                {
-                    var sig = await signalEngine.AnalyzeCoinAsync(sym, tf);
-                    var cleanSym = sym.Replace("USDT", "");
-                    var trendIcon = sig.SignalType.Contains("LONG") ? "🟢 YÜKSƏLİŞ" : (sig.SignalType.Contains("SHORT") ? "🔴 ENİŞ" : "⚪ NEYTRAL");
-                    sb.AppendLine($"• <b>{cleanSym}</b> (${sig.CurrentPrice}) — {trendIcon} (Confluence: {sig.ConfluenceScore}%)");
-
-                    if (sig.Confidence >= 78 && (sig.SignalType.Contains("LONG") || sig.SignalType.Contains("SHORT")))
-                    {
-                        await SendSignalAlertAsync(sig, chatId);
-                        await Task.Delay(200);
-                    }
-                }
-                sb.AppendLine("-----------------------------------");
-                sb.AppendLine("Yeni coin əlavə etmək üçün: <b>⚙️ Coin Seçimi</b>");
-                sb.AppendLine("Coini siyahıdan silmək üçün: <b>🗑 Coin Sil</b>");
-
-                await SendMessageAsync(sb.ToString(), chatId, BuildUserKeyboard(userSettings, hasAdminAccess));
-            }
-            // TIME PANEL
-            else if (text.Contains("Zaman Çərçivəsi") || text.Contains("Zaman") || text == "/tf")
-            {
-                var tfPanelMsg = "⏱ <b>Zaman Çərçivəsi Paneli</b>\n\n" +
-                                 "Hal-hazırda təyin edilmiş: <b>" + userSettings.Timeframe + "</b>\n\n" +
-                                 "Seçmək istədiyiniz yeni zamanı aşağıdakı paneldən seçin:";
-                await SendMessageAsync(tfPanelMsg, chatId, BuildTimeframeKeyboard());
-            }
-            // DELETE COIN
-            else if (text.Contains("Coin Sil") || text == "/delcoin")
-            {
-                _userStates[chatId] = "USER_WAITING_DELETE_COIN";
-                var cleanList = string.Join(", ", userSettings.Coins.Select(c => c.Replace("USDT", "")));
-                var prompt = "🗑 <b>Coin Silmək</b>\n\n" +
-                             $"Cari siyahınız ({userSettings.Coins.Count}/10 ədəd):\n" +
-                             $"<code>{(string.IsNullOrEmpty(cleanList) ? "Siyahı boşdur" : cleanList)}</code>\n\n" +
-                             "Siyahıdan silmək istədiyiniz coinin <b>Adını</b> yazın:\n" +
-                             "📌 <b>Məsələn:</b> <code>SOL</code> və ya <code>DOGE</code>";
-                await SendMessageAsync(prompt, chatId, BuildUserKeyboard(userSettings, hasAdminAccess));
-            }
-            // ADD COINS
-            else if (text.Contains("Coin Seçimi") || text.Contains("Coin Secimi") || text == "/setcoins")
-            {
-                _userStates[chatId] = "WAITING_COIN_INPUT";
-                var cleanList = string.Join(", ", userSettings.Coins.Select(c => c.Replace("USDT", "")));
-                var prompt = "⚙️ <b>Coin Seçimi (Maksimum 10 ədəd haqqınız var):</b>\n\n" +
-                             $"Hal-hazırda seçilmiş: <b>{userSettings.Coins.Count}/10 ədəd</b>\n" +
-                             $"Cari siyahı: <code>{(string.IsNullOrEmpty(cleanList) ? "Boşdur" : cleanList)}</code>\n\n" +
-                             "Əlavə etmək istədiyiniz coinlərin adını aşağıya <b>vergüllə</b> yazıb göndərin.\n\n" +
+                _userStates[chatId] = "ADMIN_WAITING_RESET_PWD";
+                var prompt = "🔑 <b>İstifadəçi Parolunu Dəyişmək</b>\n\n" +
+                             "İstifadəçi adını və yeni parolu aralarında boşluqla yazın:\n\n" +
                              "📌 <b>Məsələn:</b>\n" +
-                             "<code>BTC, ETH, SOL, SUI, DOGE, PEPE, AVAX</code>";
-                await SendMessageAsync(prompt, chatId, BuildUserKeyboard(userSettings, hasAdminAccess));
+                             "<code>Murad yeni123</code>";
+                await SendMessageAsync(prompt, chatId, BuildAdminKeyboard());
+                return;
             }
-            // BITCOIN
-            else if (text.Contains("Bitcoin") || text == "/btc")
+            else if (text == "🧹 Bazanı Təmizlə" || text == "/clean" || text == "/purge")
             {
-                var compass = await signalEngine.GetBtcCompassAsync();
-                var btcMsg = $"🧭 <b>Bitcoin Bazar Kompası</b>\n\n" +
-                             $"🕒 Tarix: <b>{compass.TimestampFormatted}</b>\n" +
-                             $"💵 Cari Qiymət: <b>${compass.Price}</b>\n" +
-                             $"📈 Trend İstiqaməti: <b>{compass.Trend}</b>\n" +
-                             $"🎯 Təhlil Gücü: <b>{compass.BullishScore}%</b>\n\n" +
-                             $"<i>{compass.Summary}</i>";
-                await SendMessageAsync(btcMsg, chatId, BuildUserKeyboard(userSettings, hasAdminAccess));
-            }
-            // NEWS
-            else if (text.Contains("Xəbərləri") || text.Contains("Xeberleri") || text == "/news")
-            {
-                var newsSummary = await newsService.GetNewsAndSentimentAsync();
-                var sb = new StringBuilder();
-                sb.AppendLine("📰 <b>Qlobal Kripto Xəbərləri & Sentimenti (Azərbaycan Dilində)</b>");
-                sb.AppendLine($"📊 Ümumi Bazar Əhvalı: <b>{newsSummary.Status} ({newsSummary.OverallScore}%)</b>");
-                sb.AppendLine();
-                sb.AppendLine("Son xəbərlər (keçid üçün xəbərə klikləyin):");
-                sb.AppendLine("-----------------------------------");
-                foreach (var n in newsSummary.LatestNews.Take(5))
-                {
-                    var safeTitle = System.Net.WebUtility.HtmlEncode(n.Title);
-                    sb.AppendLine($"• <b>[{n.Source}]</b> <a href=\"{n.Url}\">{safeTitle}</a> - <i>{n.Sentiment}</i>");
-                }
-                sb.AppendLine("-----------------------------------");
-                await SendMessageAsync(sb.ToString(), chatId, BuildUserKeyboard(userSettings, hasAdminAccess));
+                userManager.PurgeAndResetDatabase();
+                await SendMessageAsync("🧹 <b>Verilənlər bazası tam təmizləndi!</b>\n\nBütün köhnə istifadəçilər və köhnə siqnallar silindi. Yalnız Super Admin (@alimahammadov) qeydiyyatda saxlanıldı.", chatId, BuildAdminKeyboard());
+                return;
             }
             else
             {
-                var potentialSym = text.ToUpper();
-                if (!potentialSym.EndsWith("USDT")) potentialSym += "USDT";
-                var tf = (userSettings.Timeframe == "Hamısı" || userSettings.Timeframe == "Hamisi") ? "3m" : userSettings.Timeframe;
-                var sig = await signalEngine.AnalyzeCoinAsync(potentialSym, tf);
-                if (sig.SignalType != "MƏLUMAT AZDIR")
-                {
-                    await SendSignalAlertAsync(sig, chatId);
-                }
-                else
-                {
-                    var helpMsg = "ℹ️ <b>Nə etmək lazımdır?</b>\n\n" +
-                                  "Aşağıdakı menyudan seçim edin və ya analiz etmək istədiyiniz coinin adını yazın.\n" +
-                                  "📌 Məsələn: <code>SOL</code>, <code>BTC</code>, <code>ETH</code>, <code>DOGE</code>";
-                    await SendMessageAsync(helpMsg, chatId, BuildUserKeyboard(userSettings, hasAdminAccess));
-                }
+                var welcomeAdmin = "👑 <b>Super Admin İdarəetmə Paneli (CRUD):</b>\n\n" +
+                                   "İstifadəçiləri yaratmaq, silmək, parolları dəyişmək və ya bazanı təmizləmək üçün aşağıdakı düymələrdən istifadə edin:";
+                await SendMessageAsync(welcomeAdmin, chatId, BuildAdminKeyboard());
             }
         }
 
-        private static object BuildUserKeyboard(UserSettings settings, bool isSuperAdmin = false)
+        private static object BuildUserKeyboard(UserSettings settings)
         {
             var toggleBtn = settings.IsActive ? "🛑 Bildirişləri Dayandır" : "▶️ Bildirişləri Başlat";
-            var rows = new List<object[]>
-            {
-                new object[] { new { text = "🧭 Bitcoin Kompası" }, new { text = "⚡ Bütün Siqnallar" } },
-                new object[] { new { text = "⭐ Mənim Coinlərim" }, new { text = "📊 Statistika" } },
-                new object[] { new { text = "⚙️ Coin Seçimi" }, new { text = "🗑 Coin Sil" } },
-                new object[] { new { text = "⏱ Zaman Çərçivəsi" }, new { text = "🧹 Siqnalları Sıfırla" } },
-                new object[] { new { text = toggleBtn }, new { text = "📰 Bazar Xəbərləri" } }
-            };
-
-            if (isSuperAdmin)
-            {
-                rows.Add(new object[] { new { text = "👑 Admin Paneli" } });
-            }
-
             return new
             {
-                keyboard = rows.ToArray(),
+                keyboard = new[]
+                {
+                    new[] { new { text = "🧭 Bitcoin Kompası" }, new { text = "⚡ Bütün Siqnallar" } },
+                    new[] { new { text = "⭐ Mənim Coinlərim" }, new { text = "📊 Statistika" } },
+                    new[] { new { text = "⚙️ Coin Seçimi" }, new { text = "🗑 Coin Sil" } },
+                    new[] { new { text = "⏱ Zaman Çərçivəsi" }, new { text = "🧹 Siqnalları Sıfırla" } },
+                    new[] { new { text = toggleBtn }, new { text = "📰 Bazar Xəbərləri" } }
+                },
                 resize_keyboard = true,
                 one_time_keyboard = false
             };
@@ -920,9 +953,9 @@ namespace CryptoSense.Services
             {
                 keyboard = new[]
                 {
-                    new[] { new { text = "➕ İstifadəçi Yarat" } },
-                    new[] { new { text = "👥 İstifadəçilərin Siyahısı" }, new { text = "🗑 İstifadəçi Sil" } },
-                    new[] { new { text = "⬅️ Əsas Menyu" } }
+                    new[] { new { text = "➕ İstifadəçi Yarat" }, new { text = "👥 İstifadəçilərin Siyahısı" } },
+                    new[] { new { text = "🗑 İstifadəçi Sil" }, new { text = "🔑 Parolu Dəyiş" } },
+                    new[] { new { text = "🧹 Bazanı Təmizlə" } }
                 },
                 resize_keyboard = true,
                 one_time_keyboard = false

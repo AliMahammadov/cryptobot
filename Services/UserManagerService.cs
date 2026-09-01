@@ -184,5 +184,31 @@ namespace CryptoSense.Services
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
             return db.Users.Where(u => u.IsActive).OrderByDescending(u => u.Role == UserRole.Admin).ThenBy(u => u.Username).ToList();
         }
+
+        public void PurgeAndResetDatabase()
+        {
+            using var scope = _serviceProvider.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+            db.SignalIndicatorSnapshots.RemoveRange(db.SignalIndicatorSnapshots);
+            db.Signals.RemoveRange(db.Signals);
+            db.AuditLogs.RemoveRange(db.AuditLogs);
+            db.Users.RemoveRange(db.Users);
+            db.SaveChanges();
+
+            // Re-create default clean SuperAdmin
+            var hash = BCrypt.Net.BCrypt.HashPassword("123456789!");
+            db.Users.Add(new UserAccount
+            {
+                Username = "Ali Muhammadov",
+                PasswordHash = hash,
+                Role = UserRole.Admin,
+                TelegramUsername = "alimahammadov",
+                IsActive = true,
+                CreatedAtUtc = DateTime.UtcNow,
+                LastLoginAt = DateTime.UtcNow
+            });
+            db.SaveChanges();
+        }
     }
 }

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
@@ -53,11 +53,13 @@ namespace CryptoSense.Services
                     {
                         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
                         var activeSignals = await db.Signals
-                            .Where(s => s.Status == SignalStatus.Open && !s.IsClosed)
+                            .Where(s => s.Status == SignalStatus.Open && !s.IsClosed && !s.OutcomeAlertSent)
                             .ToListAsync(stoppingToken);
 
                         foreach (var sig in activeSignals)
                         {
+                            if (sig.OutcomeAlertSent || sig.IsClosed) continue;
+
                             if (tickerDict.TryGetValue(sig.Symbol, out var currentPrice))
                             {
                                 var isLong = sig.Direction == SignalDirection.Buy || sig.SignalType.Contains("LONG");
@@ -78,9 +80,10 @@ namespace CryptoSense.Services
                                 if (isLong)
                                 {
                                     // Long TP3 Hit
-                                    if (currentPrice >= sig.TakeProfit3 && !sig.Tp3Notified)
+                                    if (currentPrice >= sig.TakeProfit3 && !sig.OutcomeAlertSent)
                                     {
                                         sig.Tp3Notified = true;
+                                        sig.OutcomeAlertSent = true;
                                         sig.IsClosed = true;
                                         sig.Status = SignalStatus.Success;
                                         sig.OutcomeStatus = "Hədəf 3 (TP3) (UĞURLU) ✅";
@@ -91,9 +94,10 @@ namespace CryptoSense.Services
                                         await _telegramService.SendOutcomeAlertAsync(sig, "Hədəf 3 (TP3)", currentPrice, sig.ResultPercent.Value);
                                     }
                                     // Long TP2 Hit
-                                    else if (currentPrice >= sig.TakeProfit2 && !sig.Tp2Notified)
+                                    else if (currentPrice >= sig.TakeProfit2 && !sig.OutcomeAlertSent)
                                     {
                                         sig.Tp2Notified = true;
+                                        sig.OutcomeAlertSent = true;
                                         sig.IsClosed = true;
                                         sig.Status = SignalStatus.Success;
                                         sig.OutcomeStatus = "Hədəf 2 (TP2) (UĞURLU) ✅";
@@ -104,9 +108,10 @@ namespace CryptoSense.Services
                                         await _telegramService.SendOutcomeAlertAsync(sig, "Hədəf 2 (TP2)", currentPrice, sig.ResultPercent.Value);
                                     }
                                     // Long TP1 Hit
-                                    else if (currentPrice >= sig.TakeProfit1 && !sig.Tp1Notified)
+                                    else if (currentPrice >= sig.TakeProfit1 && !sig.OutcomeAlertSent)
                                     {
                                         sig.Tp1Notified = true;
+                                        sig.OutcomeAlertSent = true;
                                         sig.IsClosed = true;
                                         sig.Status = SignalStatus.Success;
                                         sig.OutcomeStatus = "Hədəf 1 (TP1) (UĞURLU) ✅";
@@ -117,8 +122,9 @@ namespace CryptoSense.Services
                                         await _telegramService.SendOutcomeAlertAsync(sig, "Hədəf 1 (TP1)", currentPrice, sig.ResultPercent.Value);
                                     }
                                     // Long Stop Loss Hit (UGURSUZ)
-                                    else if (currentPrice <= sig.StopLoss && !sig.IsClosed)
+                                    else if (currentPrice <= sig.StopLoss && !sig.OutcomeAlertSent)
                                     {
+                                        sig.OutcomeAlertSent = true;
                                         sig.IsClosed = true;
                                         sig.Status = SignalStatus.Failed;
                                         sig.OutcomeStatus = "Stop Loss (SL) (UĞURSUZ) ❌";
@@ -129,8 +135,9 @@ namespace CryptoSense.Services
                                         await _telegramService.SendOutcomeAlertAsync(sig, "Stop Loss (SL)", currentPrice, sig.ResultPercent.Value);
                                     }
                                     // Long Candle Expiration
-                                    else if (isExpired && !sig.IsClosed)
+                                    else if (isExpired && !sig.OutcomeAlertSent)
                                     {
+                                        sig.OutcomeAlertSent = true;
                                         sig.IsClosed = true;
                                         sig.ClosePrice = currentPrice;
                                         sig.ClosedAt = DateTime.UtcNow;
@@ -159,10 +166,11 @@ namespace CryptoSense.Services
                                 }
                                 else // SHORT
                                 {
-                                    // Short TP3 Hit (Price drops to or below TP3)
-                                    if (currentPrice <= sig.TakeProfit3 && !sig.Tp3Notified)
+                                    // Short TP3 Hit
+                                    if (currentPrice <= sig.TakeProfit3 && !sig.OutcomeAlertSent)
                                     {
                                         sig.Tp3Notified = true;
+                                        sig.OutcomeAlertSent = true;
                                         sig.IsClosed = true;
                                         sig.Status = SignalStatus.Success;
                                         sig.OutcomeStatus = "Hədəf 3 (TP3) (UĞURLU) ✅";
@@ -173,9 +181,10 @@ namespace CryptoSense.Services
                                         await _telegramService.SendOutcomeAlertAsync(sig, "Hədəf 3 (TP3)", currentPrice, sig.ResultPercent.Value);
                                     }
                                     // Short TP2 Hit
-                                    else if (currentPrice <= sig.TakeProfit2 && !sig.Tp2Notified)
+                                    else if (currentPrice <= sig.TakeProfit2 && !sig.OutcomeAlertSent)
                                     {
                                         sig.Tp2Notified = true;
+                                        sig.OutcomeAlertSent = true;
                                         sig.IsClosed = true;
                                         sig.Status = SignalStatus.Success;
                                         sig.OutcomeStatus = "Hədəf 2 (TP2) (UĞURLU) ✅";
@@ -186,9 +195,10 @@ namespace CryptoSense.Services
                                         await _telegramService.SendOutcomeAlertAsync(sig, "Hədəf 2 (TP2)", currentPrice, sig.ResultPercent.Value);
                                     }
                                     // Short TP1 Hit
-                                    else if (currentPrice <= sig.TakeProfit1 && !sig.Tp1Notified)
+                                    else if (currentPrice <= sig.TakeProfit1 && !sig.OutcomeAlertSent)
                                     {
                                         sig.Tp1Notified = true;
+                                        sig.OutcomeAlertSent = true;
                                         sig.IsClosed = true;
                                         sig.Status = SignalStatus.Success;
                                         sig.OutcomeStatus = "Hədəf 1 (TP1) (UĞURLU) ✅";
@@ -199,14 +209,14 @@ namespace CryptoSense.Services
                                         await _telegramService.SendOutcomeAlertAsync(sig, "Hədəf 1 (TP1)", currentPrice, sig.ResultPercent.Value);
                                     }
                                     // Short Stop Loss Hit (Price rises to or above SL -> STRICT LOSS & FAILED!)
-                                    else if (currentPrice >= sig.StopLoss && !sig.IsClosed)
+                                    else if (currentPrice >= sig.StopLoss && !sig.OutcomeAlertSent)
                                     {
+                                        sig.OutcomeAlertSent = true;
                                         sig.IsClosed = true;
                                         sig.Status = SignalStatus.Failed;
                                         sig.OutcomeStatus = "Stop Loss (SL) (UĞURSUZ) ❌";
                                         sig.ClosePrice = currentPrice;
                                         sig.ClosedAt = DateTime.UtcNow;
-                                        // PnL for short when price rose is strictly negative
                                         var pct = Math.Round(((sig.EntryPrice - currentPrice) / sig.EntryPrice) * 100, 2);
                                         if (pct > 0) pct = -Math.Abs(pct);
                                         sig.ResultPercent = pct;
@@ -214,8 +224,9 @@ namespace CryptoSense.Services
                                         await _telegramService.SendOutcomeAlertAsync(sig, "Stop Loss (SL)", currentPrice, pct);
                                     }
                                     // Short Candle Expiration
-                                    else if (isExpired && !sig.IsClosed)
+                                    else if (isExpired && !sig.OutcomeAlertSent)
                                     {
+                                        sig.OutcomeAlertSent = true;
                                         sig.IsClosed = true;
                                         sig.ClosePrice = currentPrice;
                                         sig.ClosedAt = DateTime.UtcNow;
@@ -299,9 +310,22 @@ namespace CryptoSense.Services
                                 if (signal.Confidence >= _config.MinConfidenceThreshold && (signal.SignalType.Contains("LONG") || signal.SignalType.Contains("SHORT")))
                                 {
                                     var alertKey = $"{signal.Symbol}_{signal.Timeframe}_{signal.SourceCandleOpenTimeUtc:yyyyMMddHHmmss}";
-                                    if (!_lastAlertSent.ContainsKey(alertKey))
+                                    if (!_lastAlertSent.ContainsKey(alertKey) && !signal.SignalAlertSent)
                                     {
                                         _lastAlertSent[alertKey] = DateTime.UtcNow;
+                                        signal.SignalAlertSent = true;
+
+                                        using (var uScope = _serviceProvider.CreateScope())
+                                        {
+                                            var uDb = uScope.ServiceProvider.GetRequiredService<AppDbContext>();
+                                            var dbSig = await uDb.Signals.FindAsync(signal.Id);
+                                            if (dbSig != null)
+                                            {
+                                                dbSig.SignalAlertSent = true;
+                                                await uDb.SaveChangesAsync(stoppingToken);
+                                            }
+                                        }
+
                                         await _telegramService.SendSignalAlertAsync(signal);
                                     }
                                 }

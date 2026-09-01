@@ -52,6 +52,13 @@ using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
     db.Database.EnsureCreated();
+
+    var userManager = scope.ServiceProvider.GetRequiredService<UserManagerService>();
+    if (args.Contains("--clean-db") || args.Contains("--reset-db"))
+    {
+        userManager.PurgeAndResetDatabase();
+        Console.WriteLine("DATABASE PURGED AND CLEANED SUCCESSFULLY.");
+    }
 }
 
 app.UseCors("AllowAll");

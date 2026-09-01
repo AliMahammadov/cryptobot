@@ -156,6 +156,8 @@ namespace CryptoSense.Models
         public bool Tp1Notified { get; set; } = false;
         public bool Tp2Notified { get; set; } = false;
         public bool Tp3Notified { get; set; } = false;
+        public bool SignalAlertSent { get; set; } = false;
+        public bool OutcomeAlertSent { get; set; } = false;
         
         public string TimestampFormatted { get; set; } = DateTime.Now.ToString("dd.MM.yyyy | HH:mm:ss");
         
