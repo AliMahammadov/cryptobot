@@ -24,12 +24,17 @@ builder.Services.Configure<AppConfig>(builder.Configuration.GetSection("AppConfi
 builder.Services.AddDbContext<AppDbContext>(options =>
     options.UseSqlite("Data Source=cryptosense.db"));
 
+builder.Services.AddHttpClient();
 builder.Services.AddHttpClient<BinanceFuturesService>();
 builder.Services.AddHttpClient<NewsService>();
 
 builder.Services.AddSingleton<UserManagerService>();
-builder.Services.AddSingleton<TelegramBotService>();
-builder.Services.AddHttpClient<TelegramBotService>();
+builder.Services.AddSingleton<TelegramBotService>(sp =>
+{
+    var client = sp.GetRequiredService<IHttpClientFactory>().CreateClient("TelegramBotClient");
+    var config = sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<AppConfig>>();
+    return new TelegramBotService(client, config, sp);
+});
 builder.Services.AddHostedService(sp => sp.GetRequiredService<TelegramBotService>());
 
 builder.Services.AddSingleton<IndicatorService>();

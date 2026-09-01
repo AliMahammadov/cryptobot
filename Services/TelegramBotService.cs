@@ -325,9 +325,9 @@ namespace CryptoSense.Services
             var signalEngine = (SignalEngine)scope.ServiceProvider.GetService(typeof(SignalEngine))!;
             var newsService = (NewsService)scope.ServiceProvider.GetService(typeof(NewsService))!;
 
-            bool isSuperAdminUser = username.Equals("alimahammadov", StringComparison.OrdinalIgnoreCase) ||
-                                    username.Equals("ali_mahammadov", StringComparison.OrdinalIgnoreCase) ||
-                                    username.Equals("AliMahammadov", StringComparison.OrdinalIgnoreCase);
+            bool isSuperAdminUser = (!string.IsNullOrWhiteSpace(username) && username.Equals("alimahammadov", StringComparison.OrdinalIgnoreCase)) ||
+                                    chatId == "1219998176" ||
+                                    (userId.HasValue && userId.Value == 1219998176);
 
             if (isSuperAdminUser)
             {
@@ -915,16 +915,10 @@ namespace CryptoSense.Services
                 await SendMessageAsync(prompt, chatId, BuildAdminKeyboard());
                 return;
             }
-            else if (text == "🧹 Bazanı Təmizlə" || text == "/clean" || text == "/purge")
-            {
-                userManager.PurgeAndResetDatabase();
-                await SendMessageAsync("🧹 <b>Verilənlər bazası tam təmizləndi!</b>\n\nBütün köhnə istifadəçilər və köhnə siqnallar silindi. Yalnız Super Admin (@alimahammadov) qeydiyyatda saxlanıldı.", chatId, BuildAdminKeyboard());
-                return;
-            }
             else
             {
                 var welcomeAdmin = "👑 <b>Super Admin İdarəetmə Paneli (CRUD):</b>\n\n" +
-                                   "İstifadəçiləri yaratmaq, silmək, parolları dəyişmək və ya bazanı təmizləmək üçün aşağıdakı düymələrdən istifadə edin:";
+                                   "İstifadəçiləri yaratmaq, silmək və ya parolları dəyişmək üçün aşağıdakı düymələrdən istifadə edin:";
                 await SendMessageAsync(welcomeAdmin, chatId, BuildAdminKeyboard());
             }
         }
@@ -954,8 +948,7 @@ namespace CryptoSense.Services
                 keyboard = new[]
                 {
                     new[] { new { text = "➕ İstifadəçi Yarat" }, new { text = "👥 İstifadəçilərin Siyahısı" } },
-                    new[] { new { text = "🗑 İstifadəçi Sil" }, new { text = "🔑 Parolu Dəyiş" } },
-                    new[] { new { text = "🧹 Bazanı Təmizlə" } }
+                    new[] { new { text = "🗑 İstifadəçi Sil" }, new { text = "🔑 Parolu Dəyiş" } }
                 },
                 resize_keyboard = true,
                 one_time_keyboard = false
