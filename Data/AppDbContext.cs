@@ -1,4 +1,4 @@
-﻿using CryptoSense.Models;
+using CryptoSense.Models;
 using Microsoft.EntityFrameworkCore;
 
 namespace CryptoSense.Data
@@ -21,7 +21,8 @@ namespace CryptoSense.Data
             modelBuilder.Entity<UserAccount>(entity =>
             {
                 entity.HasIndex(u => u.Username).IsUnique();
-                entity.HasIndex(u => u.TelegramUserId).IsUnique();
+                entity.HasIndex(u => u.TelegramUserId);
+                entity.HasIndex(u => u.TelegramChatId);
             });
 
             modelBuilder.Entity<FuturesSignal>(entity =>
