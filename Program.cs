@@ -1,11 +1,21 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Net.Http;
 using System.Text.Json;
 using System.Threading.Tasks;
-using CryptoSense.Data;
-using CryptoSense.Models;
-using CryptoSense.Services;
+using CryptoSense.Application.DTOs;
+using CryptoSense.Application.Interfaces;
+using CryptoSense.Application.Services;
+using CryptoSense.Domain.Entities;
+using CryptoSense.Domain.Enums;
+using CryptoSense.Domain.Interfaces;
+using CryptoSense.Infrastructure.MarketData;
+using CryptoSense.Infrastructure.Persistence;
+using CryptoSense.Infrastructure.Persistence.Repositories;
+using CryptoSense.Infrastructure.Telegram;
+using CryptoSense.Infrastructure.Testing;
+using CryptoSense.Worker;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.StaticFiles;
@@ -13,35 +23,51 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Options;
 
 var builder = WebApplication.CreateBuilder(args);
 
 builder.WebHost.UseUrls("http://0.0.0.0:5083");
 
+// 1. Configuration
 builder.Services.Configure<AppConfig>(builder.Configuration.GetSection("AppConfig"));
 
-// Register SQLite Database
+// 2. Persistence Layer (SQLite with EF Core)
+var connectionString = builder.Configuration.GetConnectionString("DefaultConnection") ?? "Data Source=cryptosense.db";
 builder.Services.AddDbContext<AppDbContext>(options =>
-    options.UseSqlite("Data Source=cryptosense.db"));
+    options.UseSqlite(connectionString));
 
+builder.Services.AddScoped<IUserRepository, UserRepository>();
+builder.Services.AddScoped<ISignalRepository, SignalRepository>();
+builder.Services.AddScoped<IAuditLogRepository, AuditLogRepository>();
+builder.Services.AddScoped<IUnitOfWork, UnitOfWork>();
+
+// 3. Application & Infrastructure Services
 builder.Services.AddHttpClient();
-builder.Services.AddHttpClient<BinanceFuturesService>();
-builder.Services.AddHttpClient<NewsService>();
+builder.Services.AddHttpClient<IMarketDataProvider, BinanceMarketDataProvider>();
+builder.Services.AddHttpClient<INewsService, NewsService>();
 
-builder.Services.AddSingleton<UserManagerService>();
-builder.Services.AddSingleton<TelegramBotService>(sp =>
+builder.Services.AddSingleton<IIndicatorEngine, IndicatorEngine>();
+builder.Services.AddScoped<IUserManagerService, UserManagerService>();
+builder.Services.AddScoped<ISignalEngine, SignalEngine>();
+builder.Services.AddScoped<SystemTestSuite>();
+
+// 4. Telegram Bot Service & Background Workers
+builder.Services.AddSingleton<ITelegramBotService>(sp =>
 {
     var client = sp.GetRequiredService<IHttpClientFactory>().CreateClient("TelegramBotClient");
-    var config = sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<AppConfig>>();
+    var config = sp.GetRequiredService<IOptions<AppConfig>>();
     return new TelegramBotService(client, config, sp);
 });
-builder.Services.AddHostedService(sp => sp.GetRequiredService<TelegramBotService>());
 
-builder.Services.AddSingleton<IndicatorService>();
-builder.Services.AddSingleton<NewsService>();
-builder.Services.AddSingleton<SignalEngine>();
-builder.Services.AddHostedService<BackgroundMarketScanner>();
+// If running in test mode, we don't start background daemons
+if (!args.Contains("--test"))
+{
+    builder.Services.AddHostedService(sp => (TelegramBotService)sp.GetRequiredService<ITelegramBotService>());
+    builder.Services.AddHostedService<BackgroundMarketScanner>();
+}
 
+// 5. CORS
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowAll", policy =>
@@ -52,22 +78,31 @@ builder.Services.AddCors(options =>
 
 var app = builder.Build();
 
-// Ensure SQLite database and tables are created
+// 6. Database Initialization & Super Admin Seeding
 using (var scope = app.Services.CreateScope())
 {
-    var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-    db.Database.EnsureCreated();
+    var unitOfWork = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
+    unitOfWork.EnsureDatabaseCreated();
 
-    var userManager = scope.ServiceProvider.GetRequiredService<UserManagerService>();
     if (args.Contains("--clean-db") || args.Contains("--reset-db"))
     {
-        userManager.PurgeAndResetDatabase();
-        Console.WriteLine("DATABASE PURGED AND CLEANED SUCCESSFULLY.");
+        unitOfWork.PurgeAndResetDatabase();
+        Console.WriteLine("[Database] Database purged and clean SuperAdmin re-created.");
+    }
+
+    var userManager = scope.ServiceProvider.GetRequiredService<IUserManagerService>();
+
+    if (args.Contains("--test"))
+    {
+        var testSuite = scope.ServiceProvider.GetRequiredService<SystemTestSuite>();
+        await testSuite.RunAllTestsAsync();
+        return;
     }
 }
 
 app.UseCors("AllowAll");
 
+// 7. Static Files (if web assets exist in wwwroot)
 var staticFileOptions = new StaticFileOptions
 {
     OnPrepareResponse = ctx =>
@@ -86,120 +121,95 @@ var staticFileOptions = new StaticFileOptions
 app.UseDefaultFiles();
 app.UseStaticFiles(staticFileOptions);
 
-List<FuturesSignal>? cachedSignals = null;
-DateTime lastSignalScan = DateTime.MinValue;
+// 8. REST Endpoints
+app.MapGet("/", () => Results.Ok(new 
+{ 
+    Status = "Online", 
+    Service = "CryptoSense Clean Architecture v2", 
+    Bot = "@Ali_Mahammadov Trading Bot Service",
+    Version = "2.0.0",
+    TimeUtc = DateTime.UtcNow
+}));
 
-// 1. Multi-User Login & Super Admin Alert
-app.MapPost("/api/auth/login", async (LoginRequest req, UserManagerService userManager, TelegramBotService tgService) =>
+app.MapPost("/api/auth/login", async (LoginRequest req, IUserManagerService userManager, ITelegramBotService tgService) =>
 {
-    var (isValid, user) = userManager.ValidateLogin(req.Username, req.Password);
+    var (isValid, user) = await userManager.ValidateLoginAsync(req.Username, req.Password);
     if (isValid && user != null)
     {
-        // Notify Super Admin @alimahammadov of new login
-        _ = tgService.NotifySuperAdminUserLoginAsync(user.Username, "Veb Interfeys (http://localhost:5083)");
-
-        return Results.Ok(new { 
-            success = true, 
-            token = "auth_" + Guid.NewGuid().ToString("N"),
-            username = user.Username,
-            role = user.Role
+        _ = tgService.NotifySuperAdminUserLoginAsync(user.Username, "Veb / REST Interfeys");
+        return Results.Ok(new
+        {
+            success = true,
+            user = new
+            {
+                user.Id,
+                user.Username,
+                user.Role,
+                user.TelegramUsername
+            }
         });
     }
-    return Results.Unauthorized();
+    return Results.BadRequest(new { success = false, message = "İstifadəçi adı və ya parol yalnışdır." });
 });
 
-// 2. Admin User Management Endpoints
-app.MapGet("/api/admin/users", (UserManagerService userManager) =>
+app.MapGet("/api/stats", async (ISignalEngine signalEngine) =>
 {
-    return Results.Ok(userManager.GetAllUsers());
+    var stats = await signalEngine.GetPerformanceStatsAsync();
+    return Results.Ok(stats);
 });
 
-app.MapPost("/api/admin/users", (CreateUserRequest req, UserManagerService userManager) =>
+app.MapGet("/api/signals/history", async (ISignalEngine signalEngine, int? count) =>
 {
-    var created = userManager.CreateUser(req.Username, req.Password);
-    return created ? Results.Ok(new { success = true, message = "Istifadeci yaradildi" }) : Results.BadRequest(new { success = false, message = "Bu ad artiq movcuddur" });
+    var signals = await signalEngine.GetSignalHistoryAsync(count ?? 30);
+    return Results.Ok(signals);
 });
 
-app.MapDelete("/api/admin/users/{username}", async (string username, UserManagerService userManager, TelegramBotService tgService) =>
+app.MapGet("/api/signals/active", async (ISignalEngine signalEngine) =>
 {
-    var deleted = userManager.DeleteUser(username);
-    if (deleted)
-    {
-        await TelegramBotService.RevokeUserAsync(username, tgService);
-        return Results.Ok(new { success = true });
-    }
-    return Results.BadRequest(new { success = false });
+    var active = await signalEngine.GetTrackedActiveSignalsAsync();
+    return Results.Ok(active);
 });
 
-// 3. BTC Market Compass
-app.MapGet("/api/btc-compass", async (SignalEngine signalEngine) =>
+app.MapGet("/api/compass", async (ISignalEngine signalEngine) =>
 {
     var compass = await signalEngine.GetBtcCompassAsync();
     return Results.Ok(compass);
 });
 
-// 4. Top 35 Futures Tickers
-app.MapGet("/api/tickers", async (BinanceFuturesService binanceService) =>
+app.MapGet("/api/news", async (INewsService newsService) =>
 {
-    var tickers = await binanceService.GetTopFuturesTickersAsync(35);
-    return Results.Ok(tickers);
+    var news = await newsService.GetNewsAndSentimentAsync();
+    return Results.Ok(news);
 });
 
-// 5. Single Coin Analysis
-app.MapGet("/api/analyze/{symbol}", async (string symbol, string? tf, SignalEngine signalEngine) =>
+app.MapGet("/api/admin/users", async (IUserManagerService userManager) =>
 {
-    var timeframe = string.IsNullOrEmpty(tf) ? "15m" : tf;
-    var signal = await signalEngine.AnalyzeCoinAsync(symbol, timeframe);
-    return Results.Ok(signal);
-});
-
-// 6. Multi-Coin Live Signals Radar
-app.MapGet("/api/signals/all", async (BinanceFuturesService binanceService, SignalEngine signalEngine) =>
-{
-    if (cachedSignals != null && DateTime.UtcNow - lastSignalScan < TimeSpan.FromSeconds(10))
+    var users = await userManager.GetAllUsersAsync();
+    return Results.Ok(users.Select(u => new
     {
-        return Results.Ok(cachedSignals);
-    }
-
-    var topCoins = new[] { "BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT", "DOGEUSDT", "SUIUSDT", "PEPEUSDT", "AVAXUSDT" };
-    var tf = TelegramBotService.UserTimeframe == "Hamisi" ? "15m" : TelegramBotService.UserTimeframe;
-    var tasks = topCoins.Select(sym => signalEngine.AnalyzeCoinAsync(sym, tf));
-    var results = await Task.WhenAll(tasks);
-    
-    cachedSignals = results.ToList();
-    lastSignalScan = DateTime.UtcNow;
-
-    return Results.Ok(cachedSignals);
+        u.Id,
+        u.Username,
+        u.Role,
+        u.TelegramUsername,
+        u.TelegramChatId,
+        u.IsActive,
+        u.CreatedAtUtc,
+        u.LastLoginAt
+    }));
 });
 
-// 7. News & Sentiment Endpoint
-app.MapGet("/api/news", async (NewsService newsService) =>
+app.MapPost("/api/admin/create-user", async (CreateUserRequest req, IUserManagerService userManager) =>
 {
-    var summary = await newsService.GetNewsAndSentimentAsync();
-    return Results.Ok(summary);
+    var success = await userManager.CreateUserAsync(req.Username, req.Password);
+    return success 
+        ? Results.Ok(new { success = true, message = $"'{req.Username}' istifadəçisi uğurla yaradıldı." }) 
+        : Results.BadRequest(new { success = false, message = "İstifadəçi artıq mövcuddur və ya məlumatlar yalnışdır." });
 });
 
-// 8. Chart Klines
-app.MapGet("/api/klines/{symbol}", async (string symbol, string? tf, BinanceFuturesService binanceService) =>
-{
-    var timeframe = string.IsNullOrEmpty(tf) ? "15m" : tf;
-    var klines = await binanceService.GetKlinesAsync(symbol, timeframe, 60);
-    return Results.Ok(klines);
-});
-
-// 9. Telegram Test
-app.MapPost("/api/telegram/test", async (TelegramBotService tgService, SignalEngine signalEngine) =>
-{
-    var testSignal = await signalEngine.AnalyzeCoinAsync("SOLUSDT", "15m");
-    await tgService.SendSignalAlertAsync(testSignal);
-    return Results.Ok(new { success = true, message = "Telegram test siqnali ugurla gonderildi!" });
-});
-
-// 10. Performance Statistics (Transparent Tracking)
-app.MapGet("/api/stats", async (SignalEngine signalEngine) =>
-{
-    var stats = await signalEngine.GetPerformanceStatsAsync();
-    return Results.Ok(stats);
-});
+Console.WriteLine("==========================================================");
+Console.WriteLine("🚀 CryptoSense Clean Architecture v2 Uğurla Başladılır...");
+Console.WriteLine("👑 Super Admin: Ali / 23031999Am (@Ali_Mahammadov)");
+Console.WriteLine("📡 Port: http://0.0.0.0:5083");
+Console.WriteLine("==========================================================");
 
 app.Run();
