@@ -4,9 +4,28 @@ namespace CryptoSense.Infrastructure.Telegram
 {
     public static class TelegramKeyboards
     {
-        public static object BuildUserKeyboard(UserSettings settings)
+        public static object BuildUserKeyboard(UserSettings settings, bool isAdmin = false)
         {
             var toggleBtn = settings.IsActive ? "🛑 Bildirişləri Dayandır" : "▶️ Bildirişləri Başlat";
+
+            if (isAdmin)
+            {
+                return new
+                {
+                    keyboard = new[]
+                    {
+                        new[] { new { text = "👑 Admin Paneli" }, new { text = "🧭 Bitcoin Kompası" } },
+                        new[] { new { text = "⚡ Bütün Siqnallar" }, new { text = "⭐ Mənim Coinlərim" } },
+                        new[] { new { text = "📊 Statistika" }, new { text = "📰 Bazar Xəbərləri" } },
+                        new[] { new { text = "⚙️ Coin Seçimi" }, new { text = "🗑 Coin Sil" } },
+                        new[] { new { text = "⏱ Zaman Çərçivəsi" }, new { text = "🧹 Siqnalları Sıfırla" } },
+                        new[] { new { text = toggleBtn } }
+                    },
+                    resize_keyboard = true,
+                    one_time_keyboard = false
+                };
+            }
+
             return new
             {
                 keyboard = new[]
@@ -29,7 +48,8 @@ namespace CryptoSense.Infrastructure.Telegram
                 keyboard = new[]
                 {
                     new[] { new { text = "➕ İstifadəçi Yarat" }, new { text = "👥 İstifadəçilərin Siyahısı" } },
-                    new[] { new { text = "🗑 İstifadəçi Sil" }, new { text = "🔑 Parolu Dəyiş" } }
+                    new[] { new { text = "🗑 İstifadəçi Sil" }, new { text = "🔑 Parolu Dəyiş" } },
+                    new[] { new { text = "📊 Əsas Menyu (Siqnallar)" } }
                 },
                 resize_keyboard = true,
                 one_time_keyboard = false
