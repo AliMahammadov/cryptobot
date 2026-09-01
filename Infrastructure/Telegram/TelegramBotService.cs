@@ -25,8 +25,6 @@ namespace CryptoSense.Infrastructure.Telegram
         private long _lastUpdateId = 0;
 
         public static string? SuperAdminChatId = null;
-        public static HashSet<string> AuthenticatedChats { get; } = new();
-        public static HashSet<string> AdminChats { get; } = new();
         public static ConcurrentDictionary<string, UserSettings> UserPreferences { get; } = new();
         private static readonly ConcurrentDictionary<string, string> _userStates = new();
 
@@ -99,19 +97,13 @@ namespace CryptoSense.Infrastructure.Telegram
 
         public async Task RevokeUserSessionAsync(string username)
         {
-            var targetChats = new List<string>();
-            foreach (var kvp in UserPreferences)
+            using var scope = _serviceProvider.CreateScope();
+            var userManager = scope.ServiceProvider.GetRequiredService<IUserManagerService>();
+            var allUsers = await userManager.GetAllUsersAsync();
+            var target = allUsers.FirstOrDefault(u => u.Username.Equals(username, StringComparison.OrdinalIgnoreCase));
+            if (target != null && !string.IsNullOrEmpty(target.TelegramChatId))
             {
-                if (kvp.Value.Username.Equals(username, StringComparison.OrdinalIgnoreCase))
-                {
-                    targetChats.Add(kvp.Key);
-                }
-            }
-
-            foreach (var chatId in targetChats)
-            {
-                AuthenticatedChats.Remove(chatId);
-                AdminChats.Remove(chatId);
+                var chatId = target.TelegramChatId;
                 UserPreferences.TryRemove(chatId, out _);
                 _userStates.TryRemove(chatId, out _);
 
@@ -135,8 +127,15 @@ namespace CryptoSense.Infrastructure.Telegram
                 return;
             }
 
-            foreach (var chatId in AuthenticatedChats)
+            using var scope = _serviceProvider.CreateScope();
+            var userManager = scope.ServiceProvider.GetRequiredService<IUserManagerService>();
+            var activeUsers = await userManager.GetAllUsersAsync();
+
+            foreach (var user in activeUsers)
             {
+                if (string.IsNullOrEmpty(user.TelegramChatId) || !user.IsActive) continue;
+                var chatId = user.TelegramChatId;
+
                 var settings = GetSettings(chatId);
                 if (!settings.IsActive) continue;
 
@@ -157,8 +156,15 @@ namespace CryptoSense.Infrastructure.Telegram
 
         public async Task SendOutcomeAlertAsync(FuturesSignal signal, string outcomeType, decimal hitPrice, decimal profitPct)
         {
-            foreach (var chatId in AuthenticatedChats)
+            using var scope = _serviceProvider.CreateScope();
+            var userManager = scope.ServiceProvider.GetRequiredService<IUserManagerService>();
+            var activeUsers = await userManager.GetAllUsersAsync();
+
+            foreach (var user in activeUsers)
             {
+                if (string.IsNullOrEmpty(user.TelegramChatId) || !user.IsActive) continue;
+                var chatId = user.TelegramChatId;
+
                 var settings = GetSettings(chatId);
                 if (!settings.IsActive) continue;
 
@@ -239,11 +245,11 @@ namespace CryptoSense.Infrastructure.Telegram
                 {
                 }
 
-                await Task.Delay(1500, stoppingToken);
+                await Task.Delay(1000, stoppingToken);
             }
         }
 
-        private async Task HandleIncomingMessageAsync(string chatId, string username, long? userId, long messageId, string text)
+        private async Task HandleIncomingMessageAsync(string chatId, string telegramUsername, long? userId, long messageId, string text)
         {
             using var scope = _serviceProvider.CreateScope();
             var userManager = scope.ServiceProvider.GetRequiredService<IUserManagerService>();
@@ -251,12 +257,10 @@ namespace CryptoSense.Infrastructure.Telegram
             var newsService = scope.ServiceProvider.GetRequiredService<INewsService>();
 
             // =========================================================================
-            // 0. LOGOUT COMMAND (ALWAYS AVAILABLE)
+            // 0. LOGOUT COMMAND (ALWAYS CLEARS DATABASE & SESSION)
             // =========================================================================
             if (text == "/logout" || text == "/cixis" || text == "/exit")
             {
-                AdminChats.Remove(chatId);
-                AuthenticatedChats.Remove(chatId);
                 UserPreferences.TryRemove(chatId, out _);
                 _userStates.TryRemove(chatId, out _);
                 if (SuperAdminChatId == chatId) SuperAdminChatId = null;
@@ -272,24 +276,17 @@ namespace CryptoSense.Infrastructure.Telegram
                 return;
             }
 
-            bool isAlreadyLoggedIn = AdminChats.Contains(chatId) || AuthenticatedChats.Contains(chatId);
-            bool isAdmin = AdminChats.Contains(chatId);
-
             // =========================================================================
-            // 1. EXPLICIT LOGIN ATTEMPTS (ONLY IF NOT LOGGED IN OR EXPLICIT /login)
+            // 1. CHECK PERSISTENT USER IN DATABASE
             // =========================================================================
-            string cleanLoginText = text;
-            if (cleanLoginText.StartsWith("/login", StringComparison.OrdinalIgnoreCase))
-            {
-                cleanLoginText = cleanLoginText.Substring(6).Trim();
-            }
-            if (cleanLoginText.StartsWith("/admin", StringComparison.OrdinalIgnoreCase))
-            {
-                cleanLoginText = "Ali " + cleanLoginText.Substring(6).Trim();
-            }
+            var currentUser = await userManager.GetUserByChatIdOrTelegramIdAsync(chatId, userId);
 
-            var loginParts = cleanLoginText.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-            
+            // If user typed explicit login credentials (even if previously logged in):
+            var loginParts = text.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            bool isExplicitLoginCommand = text.StartsWith("/login", StringComparison.OrdinalIgnoreCase) ||
+                                          text.StartsWith("/admin", StringComparison.OrdinalIgnoreCase) ||
+                                          text.Contains("23031999Am");
+
             bool isMenuButtonClick = text.StartsWith("🧭") || text.StartsWith("⚡") || text.StartsWith("⭐") || 
                                      text.StartsWith("📊") || text.StartsWith("⚙️") || text.StartsWith("🗑") || 
                                      text.StartsWith("⏱") || text.StartsWith("🧹") || text.StartsWith("🛑") || 
@@ -297,16 +294,20 @@ namespace CryptoSense.Infrastructure.Telegram
                                      text.StartsWith("👥") || text.StartsWith("➕") || text.StartsWith("🔑") ||
                                      text.StartsWith("👑") || text.StartsWith("/");
 
-            bool isExplicitLoginCommand = text.StartsWith("/login", StringComparison.OrdinalIgnoreCase) || 
-                                         text.StartsWith("/admin", StringComparison.OrdinalIgnoreCase) || 
-                                         text.Contains("23031999Am");
-
             bool hasActiveState = _userStates.ContainsKey(chatId);
 
-            if ((!isAlreadyLoggedIn || isExplicitLoginCommand) && !hasActiveState && !isMenuButtonClick && (loginParts.Length >= 2 || text.Contains("23031999Am")))
+            // =========================================================================
+            // 2. PROCESS LOGIN IF NOT LOGGED IN OR EXPLICIT LOGIN ATTEMPT
+            // =========================================================================
+            if ((currentUser == null || isExplicitLoginCommand) && !hasActiveState && !isMenuButtonClick && (loginParts.Length >= 2 || text.Contains("23031999Am")))
             {
-                string inputUser = loginParts.Length >= 2 ? loginParts[0] : "Ali";
-                string inputPass = loginParts.Length >= 2 ? string.Join(" ", loginParts.Skip(1)) : "23031999Am";
+                string cleanText = text;
+                if (cleanText.StartsWith("/login", StringComparison.OrdinalIgnoreCase)) cleanText = cleanText.Substring(6).Trim();
+                if (cleanText.StartsWith("/admin", StringComparison.OrdinalIgnoreCase)) cleanText = "Ali " + cleanText.Substring(6).Trim();
+
+                var parts = cleanText.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                string inputUser = parts.Length >= 2 ? parts[0] : "Ali";
+                string inputPass = parts.Length >= 2 ? string.Join(" ", parts.Skip(1)) : "23031999Am";
 
                 _ = DeleteMessageAsync(chatId, messageId);
 
@@ -321,10 +322,8 @@ namespace CryptoSense.Infrastructure.Telegram
                     settings.Timeframe = "3m";
                     settings.LastResumeTime = DateTime.UtcNow;
 
-                    if (user.Role == UserRole.Admin)
+                    if (user.Role == UserRole.Admin || user.Username.Equals("Ali", StringComparison.OrdinalIgnoreCase))
                     {
-                        AdminChats.Add(chatId);
-                        AuthenticatedChats.Add(chatId); // Super Admin can also receive alerts and test all functions!
                         SuperAdminChatId = chatId;
                         settings.Username = "Ali (Super Admin)";
 
@@ -339,8 +338,6 @@ namespace CryptoSense.Infrastructure.Telegram
                     }
                     else
                     {
-                        AuthenticatedChats.Add(chatId);
-                        AdminChats.Remove(chatId);
                         settings.Username = user.Username;
 
                         var onboardingMsg = $"✅ <b>Giriş Təsdiqləndi! Xoş Gəldiniz, {user.Username}!</b>\n\n" +
@@ -350,7 +347,7 @@ namespace CryptoSense.Infrastructure.Telegram
                                             $"<i>Çıxış etmək üçün: <code>/logout</code></i>";
                         
                         await SendMessageAsync(onboardingMsg, chatId, TelegramKeyboards.BuildUserKeyboard(settings, isAdmin: false));
-                        await NotifySuperAdminUserLoginAsync(user.Username, $"Telegram (@{username})");
+                        await NotifySuperAdminUserLoginAsync(user.Username, $"Telegram (@{telegramUsername})");
                         return;
                     }
                 }
@@ -369,9 +366,9 @@ namespace CryptoSense.Infrastructure.Telegram
             }
 
             // =========================================================================
-            // 2. UNAUTHENTICATED USERS PROMPT
+            // 3. UNAUTHENTICATED USERS PROMPT (IF NOT IN DATABASE)
             // =========================================================================
-            if (!isAlreadyLoggedIn)
+            if (currentUser == null)
             {
                 var welcomeAndAuth = "👋 <b>Salam! KriptoBot Xidmətinə xoş gəlmisiniz.</b>\n\n" +
                                      "⚠️ <b>Sistemdən istifadə etmək üçün daxil olmalısınız!</b>\n\n" +
@@ -388,10 +385,24 @@ namespace CryptoSense.Infrastructure.Telegram
                 return;
             }
 
+            // =========================================================================
+            // 4. USER IS FULLY AUTHENTICATED VIA DATABASE
+            // =========================================================================
+            bool isAdmin = (currentUser.Role == UserRole.Admin) || 
+                           currentUser.Username.Equals("Ali", StringComparison.OrdinalIgnoreCase) || 
+                           (userId.HasValue && userId.Value == 1219998176);
+
+            if (isAdmin && string.IsNullOrEmpty(SuperAdminChatId))
+            {
+                SuperAdminChatId = chatId;
+            }
+
             var userSettings = GetSettings(chatId);
+            userSettings.Username = currentUser.Username;
+            userSettings.TelegramUserId = userId;
 
             // =========================================================================
-            // 3. ADMIN SWITCH & CRUD FLOW
+            // 5. ADMIN SWITCH & CRUD FLOW
             // =========================================================================
             if (isAdmin && (text == "👑 Admin Paneli" || text == "/admin"))
             {
@@ -515,7 +526,7 @@ namespace CryptoSense.Infrastructure.Telegram
             }
 
             // =========================================================================
-            // 4. AUTHENTICATED REGULAR & ADMIN USER ACTIONS
+            // 6. AUTHENTICATED REGULAR & ADMIN USER ACTIONS
             // =========================================================================
 
             // STATE: DELETING A SPECIFIC COIN
