@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using CryptoSense.Data;
@@ -88,6 +88,15 @@ namespace CryptoSense.Services
             }
 
             return (false, null);
+        }
+
+        public UserAccount? GetUserByChatIdOrTelegramId(string chatId, long? telegramUserId)
+        {
+            using var scope = _serviceProvider.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            return db.Users.FirstOrDefault(u => u.IsActive && 
+                ((!string.IsNullOrEmpty(u.TelegramChatId) && u.TelegramChatId == chatId) ||
+                 (telegramUserId.HasValue && u.TelegramUserId == telegramUserId.Value)));
         }
 
         public bool CreateUser(string username, string password, UserRole role = UserRole.User, int? adminUserId = null)

@@ -34,6 +34,7 @@ namespace CryptoSense.Services
             public List<string> Coins { get; set; } = new() { "BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT", "DOGEUSDT", "SUIUSDT", "PEPEUSDT", "AVAXUSDT" };
             public DateTime LastResumeTime { get; set; } = DateTime.UtcNow;
             public string Username { get; set; } = "";
+            public long? TelegramUserId { get; set; }
             public int AlertCounter { get; set; } = 0;
         }
 
@@ -289,15 +290,24 @@ namespace CryptoSense.Services
                             if (item.TryGetProperty("message", out var msg))
                             {
                                 var chatId = msg.GetProperty("chat").GetProperty("id").GetInt64().ToString();
+                                var messageId = msg.GetProperty("message_id").GetInt64();
                                 var text = (msg.TryGetProperty("text", out var txtEl) ? txtEl.GetString() : "")?.Trim() ?? "";
 
                                 var fromUser = "";
-                                if (msg.TryGetProperty("from", out var fromEl) && fromEl.TryGetProperty("username", out var uNameEl))
+                                long? fromUserId = null;
+                                if (msg.TryGetProperty("from", out var fromEl))
                                 {
-                                    fromUser = (uNameEl.GetString() ?? "").TrimStart('@');
+                                    if (fromEl.TryGetProperty("username", out var uNameEl))
+                                    {
+                                        fromUser = (uNameEl.GetString() ?? "").TrimStart('@');
+                                    }
+                                    if (fromEl.TryGetProperty("id", out var idEl))
+                                    {
+                                        fromUserId = idEl.GetInt64();
+                                    }
                                 }
 
-                                await HandleIncomingMessageAsync(chatId, fromUser, text);
+                                await HandleIncomingMessageAsync(chatId, fromUser, fromUserId, messageId, text);
                             }
                         }
                     }
@@ -310,14 +320,16 @@ namespace CryptoSense.Services
             }
         }
 
-        private async Task HandleIncomingMessageAsync(string chatId, string username, string text)
+        private async Task HandleIncomingMessageAsync(string chatId, string username, long? userId, long messageId, string text)
         {
             using var scope = _serviceProvider.CreateScope();
             var userManager = (UserManagerService)scope.ServiceProvider.GetService(typeof(UserManagerService))!;
             var signalEngine = (SignalEngine)scope.ServiceProvider.GetService(typeof(SignalEngine))!;
             var newsService = (NewsService)scope.ServiceProvider.GetService(typeof(NewsService))!;
 
-            bool isSuperAdmin = username.Equals(SuperAdminUsername, StringComparison.OrdinalIgnoreCase);
+            bool isSuperAdmin = username.Equals(SuperAdminUsername, StringComparison.OrdinalIgnoreCase) ||
+                                chatId == "1219998176" ||
+                                (userId.HasValue && userId.Value == 1219998176);
 
             if (isSuperAdmin)
             {
@@ -327,7 +339,7 @@ namespace CryptoSense.Services
                 return;
             }
 
-            await HandleRegularUserFlowAsync(chatId, username, text, userManager, signalEngine, newsService);
+            await HandleRegularUserFlowAsync(chatId, username, userId, messageId, text, userManager, signalEngine, newsService);
         }
 
         private async Task HandleSuperAdminFlowAsync(string chatId, string text, UserManagerService userManager)
@@ -336,8 +348,8 @@ namespace CryptoSense.Services
             {
                 keyboard = new[]
                 {
-                    new[] { new { text = "\u2795 \u0130stifad\u0259\u00E7i Yarat" } },
-                    new[] { new { text = "\U0001F465 \u0130stifad\u0259\u00E7il\u0259rin Siyah\u0131s\u0131" }, new { text = "\U0001F5D1 \u0130stifad\u0259\u00E7i Sil" } }
+                    new[] { new { text = "➕ İstifadəçi Yarat" } },
+                    new[] { new { text = "👥 İstifadəçilərin Siyahısı" }, new { text = "🗑 İstifadəçi Sil" } }
                 },
                 resize_keyboard = true,
                 one_time_keyboard = false
@@ -354,21 +366,21 @@ namespace CryptoSense.Services
                     var created = userManager.CreateUser(newUsername, newPassword);
                     if (created)
                     {
-                        var msg = $"\u2705 <b>\u0130stifad\u0259\u00E7i u\u011Furla yarad\u0131ld\u0131!</b>\n\n" +
-                                  $"\U0001F464 <b>Ad:</b> <code>{newUsername}</code>\n" +
-                                  $"\U0001F511 <b>Parol:</b> <code>{newPassword}</code>\n\n" +
-                                  $"<i>\u0130stifad\u0259\u00E7iy\u0259 g\u00F6nd\u0259rin ki, bota daxil olub <code>{newUsername} {newPassword}</code> yazs\u0131n.</i>";
+                        var msg = $"✅ <b>İstifadəçi uğurla yaradıldı!</b>\n\n" +
+                                  $"👤 <b>Ad:</b> <code>{newUsername}</code>\n" +
+                                  $"🔑 <b>Parol:</b> <code>{newPassword}</code>\n\n" +
+                                  $"<i>İstifadəçiyə göndərin ki, bota daxil olub <code>{newUsername} {newPassword}</code> yazsın.</i>";
                         await SendMessageAsync(msg, chatId, adminKeyboard);
                     }
                     else
                     {
-                        await SendMessageAsync($"\u26A0\uFE0F <b>X\u0259ta:</b> <code>{newUsername}</code> adl\u0131 istifad\u0259\u00E7i art\u0131q m\u00F6vcuddur!", chatId, adminKeyboard);
+                        await SendMessageAsync($"⚠️ <b>Xəta:</b> <code>{newUsername}</code> adlı istifadəçi artıq mövcuddur!", chatId, adminKeyboard);
                     }
                     return;
                 }
                 else
                 {
-                    await SendMessageAsync("\u26A0\uFE0F <b>Format\u0131 d\u00FCzg\u00FCn daxil edin!</b>\nM\u0259s\u0259l\u0259n: <code>Murad 123456</code>", chatId, adminKeyboard);
+                    await SendMessageAsync("⚠️ <b>Formatı düzgün daxil edin!</b>\nMəsələn: <code>Murad 123456</code>", chatId, adminKeyboard);
                     return;
                 }
             }
@@ -381,11 +393,11 @@ namespace CryptoSense.Services
                 if (deleted)
                 {
                     await RevokeUserAsync(userToDelete, this);
-                    await SendMessageAsync($"\u2705 <b>\u0130stifad\u0259\u00E7i '{userToDelete}' sistemd\u0259n silindi, b\u00FCt\u00FCn prosesl\u0259ri dayand\u0131r\u0131ld\u0131 v\u0259 x\u0259b\u0259rdarl\u0131q g\u00F6nd\u0259rildi!</b>", chatId, adminKeyboard);
+                    await SendMessageAsync($"✅ <b>İstifadəçi '{userToDelete}' sistemdən silindi, bütün prosesləri dayandırıldı və xəbərdarlıq göndərildi!</b>", chatId, adminKeyboard);
                 }
                 else
                 {
-                    await SendMessageAsync($"\u26A0\uFE0F <b>'{userToDelete}' tap\u0131lmad\u0131 v\u0259 ya silin\u0259 bilm\u0259z.</b>", chatId, adminKeyboard);
+                    await SendMessageAsync($"⚠️ <b>'{userToDelete}' tapılmadı və ya silinə bilməz.</b>", chatId, adminKeyboard);
                 }
                 return;
             }
@@ -393,18 +405,18 @@ namespace CryptoSense.Services
             if (text.Contains("Yarat") || text == "/adduser")
             {
                 _userStates[chatId] = "ADMIN_WAITING_CREATE_USER";
-                var prompt = "\u2795 <b>Yeni \u0130stifad\u0259\u00E7i Yaratmaq</b>\n\n" +
-                             "Yaratmaq ist\u0259diyiniz <b>\u0130stifad\u0259\u00E7i Ad\u0131n\u0131</b> v\u0259 <b>Parolu</b> aralar\u0131nda bo\u015Fluq qoyaraq yaz\u0131n:\n\n" +
-                             "\U0001F4CC <b>M\u0259s\u0259l\u0259n:</b>\n" +
+                var prompt = "➕ <b>Yeni İstifadəçi Yaratmaq</b>\n\n" +
+                             "Yaratmaq istədiyiniz <b>İstifadəçi Adını</b> və <b>Parolu</b> aralarında boşluq qoyaraq yazın:\n\n" +
+                             "📌 <b>Məsələn:</b>\n" +
                              "<code>Murad 123456</code>";
                 await SendMessageAsync(prompt, chatId, adminKeyboard);
             }
-            else if (text.Contains("Siyah\u0131s\u0131") || text.Contains("Siyahisi") || text.Contains("istifad\u0259\u00E7il\u0259r") || text == "/users")
+            else if (text.Contains("Siyahısı") || text.Contains("Siyahisi") || text.Contains("istifadəçilər") || text == "/users")
             {
                 var users = userManager.GetAllUsers();
                 var sb = new StringBuilder();
-                sb.AppendLine("\U0001F465 <b>Sistemd\u0259ki Qeydiyyatl\u0131 \u0130stifad\u0259\u00E7il\u0259r:</b>");
-                sb.AppendLine($"\u00DCmumi say: <b>{users.Count} n\u0259f\u0259r</b>");
+                sb.AppendLine("👥 <b>Sistemdəki Qeydiyyatlı İstifadəçilər:</b>");
+                sb.AppendLine($"Ümumi say: <b>{users.Count} nəfər</b>");
                 sb.AppendLine("-----------------------------------");
                 int index = 1;
                 foreach (var u in users)
@@ -418,9 +430,9 @@ namespace CryptoSense.Services
             else if (text.Contains("Sil") || text == "/deleteuser")
             {
                 _userStates[chatId] = "ADMIN_WAITING_DELETE_USER";
-                var prompt = "\U0001F5D1 <b>\u0130stifad\u0259\u00E7i Silm\u0259k</b>\n\n" +
-                             "Sistemd\u0259n silm\u0259k ist\u0259diyiniz istifad\u0259\u00E7inin <b>Ad\u0131n\u0131</b> yaz\u0131n:\n\n" +
-                             "\U0001F4CC <b>M\u0259s\u0259l\u0259n:</b>\n" +
+                var prompt = "🗑 <b>İstifadəçi Silmək</b>\n\n" +
+                             "Sistemdən silmək istədiyiniz istifadəçinin <b>Adını</b> yazın:\n\n" +
+                             "📌 <b>Məsələn:</b>\n" +
                              "<code>Murad</code>";
                 await SendMessageAsync(prompt, chatId, adminKeyboard);
             }
@@ -433,40 +445,74 @@ namespace CryptoSense.Services
             }
         }
 
-        private async Task HandleRegularUserFlowAsync(string chatId, string username, string text, UserManagerService userManager, SignalEngine signalEngine, NewsService newsService)
+        private async Task HandleRegularUserFlowAsync(string chatId, string username, long? userId, long messageId, string text, UserManagerService userManager, SignalEngine signalEngine, NewsService newsService)
         {
-            // 1. STRICT CHECK: IS THIS USER AUTHENTICATED?
+            // 1. AUTO-AUTHENTICATION FROM DATABASE IF NOT IN MEMORY SET
+            if (!AuthenticatedChats.Contains(chatId))
+            {
+                var existingUser = userManager.GetUserByChatIdOrTelegramId(chatId, userId);
+                if (existingUser != null)
+                {
+                    AuthenticatedChats.Add(chatId);
+                    var set = GetSettings(chatId);
+                    set.Username = existingUser.Username;
+                    set.TelegramUserId = userId;
+                }
+            }
+
+            // 2. STRICT CHECK: IS THIS USER AUTHENTICATED?
             if (!AuthenticatedChats.Contains(chatId))
             {
                 var parts = text.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-                if (parts.Length >= 2)
+                bool isExplicitLogin = text.StartsWith("/login", StringComparison.OrdinalIgnoreCase) ||
+                                       (!text.StartsWith("/") && !text.StartsWith("🧭") && !text.StartsWith("⚡") && 
+                                        !text.StartsWith("⭐") && !text.StartsWith("📊") && !text.StartsWith("⚙️") && 
+                                        !text.StartsWith("🗑") && !text.StartsWith("⏱") && !text.StartsWith("🧹") && 
+                                        !text.StartsWith("🛑") && !text.StartsWith("▶️") && !text.StartsWith("📰") && 
+                                        !text.StartsWith("⬅️") && parts.Length >= 2);
+
+                if (isExplicitLogin)
                 {
-                    var inputUser = parts[0];
-                    var inputPass = string.Join(" ", parts.Skip(1));
+                    var cleanParts = text.StartsWith("/login", StringComparison.OrdinalIgnoreCase)
+                        ? parts.Skip(1).ToArray()
+                        : parts;
 
-                    var (isValid, user) = userManager.ValidateLogin(inputUser, inputPass);
-                    if (isValid && user != null)
+                    if (cleanParts.Length >= 2)
                     {
-                        AuthenticatedChats.Add(chatId);
-                        var settings = GetSettings(chatId);
-                        settings.Username = user.Username;
-                        settings.IsActive = true;
-                        settings.Timeframe = "3m"; // STRICT 3M DEFAULT
-                        settings.LastResumeTime = DateTime.UtcNow;
+                        var inputUser = cleanParts[0];
+                        var inputPass = string.Join(" ", cleanParts.Skip(1));
 
-                        var onboardingMsg = $"✅ <b>Giriş Təsdiqləndi! Xoş Gəldiniz, {user.Username}!</b>\n\n" +
-                                            $"🚀 <b>KriptoBot v2 Kvantitativ Ticarət Sistemi AKTİVDİR 🟢</b>\n\n" +
-                                            $"Aktiv Zaman Çərçivəsi: <b>{settings.Timeframe}</b>\n\n" +
-                                            $"Yalnız seçdiyiniz <b>{settings.Timeframe}</b> zamanı üzrə 24/7 siqnallar və nəticələr göndəriləcək.";
-                        
-                        await SendMessageAsync(onboardingMsg, chatId, BuildUserKeyboard(settings));
-                        await NotifySuperAdminUserLoginAsync(user.Username, $"Telegram Bot (Chat ID: {chatId}, @{username})");
-                        return;
+                        var (isValid, user) = userManager.ValidateLogin(inputUser, inputPass, userId, chatId);
+                        if (isValid && user != null)
+                        {
+                            _ = DeleteMessageAsync(chatId, messageId);
+
+                            AuthenticatedChats.Add(chatId);
+                            var settings = GetSettings(chatId);
+                            settings.Username = user.Username;
+                            settings.TelegramUserId = userId;
+                            settings.IsActive = true;
+                            settings.Timeframe = "3m"; // STRICT 3M DEFAULT
+                            settings.LastResumeTime = DateTime.UtcNow;
+
+                            var onboardingMsg = $"✅ <b>Giriş Təsdiqləndi! Xoş Gəldiniz, {user.Username}!</b>\n\n" +
+                                                $"🚀 <b>KriptoBot v2 Kvantitativ Ticarət Sistemi AKTİVDİR 🟢</b>\n\n" +
+                                                $"Aktiv Zaman Çərçivəsi: <b>{settings.Timeframe}</b>\n\n" +
+                                                $"Yalnız seçdiyiniz <b>{settings.Timeframe}</b> zamanı üzrə 24/7 siqnallar və nəticələr göndəriləcək.";
+                            
+                            await SendMessageAsync(onboardingMsg, chatId, BuildUserKeyboard(settings));
+                            await NotifySuperAdminUserLoginAsync(user.Username, $"Telegram Bot (Chat ID: {chatId}, @{username})");
+                            return;
+                        }
+                        else
+                        {
+                            await SendMessageAsync("❌ <b>İstifadəçi adı və ya parol yanlışdır!</b>\n\nQeydiyyat və giriş icazəsi üçün <b>Super Admin</b> ilə əlaqə saxlayın:\n👉 <a href=\"https://t.me/alimahammadov\">@alimahammadov</a> (Ali Muhammadov)", chatId, new { remove_keyboard = true });
+                            return;
+                        }
                     }
                 }
 
-                var isWrong = parts.Length >= 2;
-                var welcomeAndAuth = (isWrong ? "❌ <b>İstifadəçi adı və ya parol yanlışdır!</b>\n\n" : "👋 <b>Salam! KriptoBot Xidmətinə xoş gəlmisiniz.</b>\n\n") +
+                var welcomeAndAuth = "👋 <b>Salam! KriptoBot Xidmətinə xoş gəlmisiniz.</b>\n\n" +
                                      "⚠️ <b>Sistemdən istifadə etmək üçün QEYDİYYATDAN KEÇMƏLİ və daxil olmalısınız!</b>\n\n" +
                                      "Sistemə daxil olmaq üçün <b>İstifadəçi Adınızı</b> və <b>Parolunuzu</b> bir sətirdə, aralarında boşluq qoyaraq yazın:\n\n" +
                                      "📌 <b>Düzgün Format:</b>\n" +
