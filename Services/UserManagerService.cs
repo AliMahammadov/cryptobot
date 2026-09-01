@@ -25,22 +25,28 @@ namespace CryptoSense.Services
             db.Database.EnsureCreated();
 
             // Ensure SuperAdmin exists
-            var superAdmin = db.Users.FirstOrDefault(u => u.Username == "Ali Mahammadov" || u.Username == "alimahammadov");
+            var superAdmin = db.Users.FirstOrDefault(u => u.Username == "Ali" || u.Username == "Ali Mahammadov");
             if (superAdmin == null)
             {
-                var hash = BCrypt.Net.BCrypt.HashPassword("123456789!");
+                var hash = BCrypt.Net.BCrypt.HashPassword("23031999Am");
                 db.Users.Add(new UserAccount
                 {
-                    Username = "Ali Mahammadov",
+                    Username = "Ali",
                     PasswordHash = hash,
                     Role = UserRole.Admin,
                     TelegramUsername = "Ali_Mahammadov",
-                    TelegramChatId = "1219998176",
-                    TelegramUserId = 1219998176,
                     IsActive = true,
                     CreatedAtUtc = DateTime.UtcNow,
                     LastLoginAt = DateTime.UtcNow
                 });
+                db.SaveChanges();
+            }
+            else
+            {
+                // Ensure password matches 23031999Am
+                superAdmin.PasswordHash = BCrypt.Net.BCrypt.HashPassword("23031999Am");
+                superAdmin.Role = UserRole.Admin;
+                superAdmin.IsActive = true;
                 db.SaveChanges();
             }
         }
@@ -48,7 +54,7 @@ namespace CryptoSense.Services
         public (bool Success, UserAccount? User) ValidateLogin(string username, string password, long? telegramUserId = null, string? chatId = null)
         {
             username = username.Trim();
-            if (username.Equals("Eli Mehemmedov", StringComparison.OrdinalIgnoreCase)) username = "Ali Mahammadov";
+            if (username.Equals("Ali Mahammadov", StringComparison.OrdinalIgnoreCase)) username = "Ali";
 
             using var scope = _serviceProvider.CreateScope();
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
@@ -69,13 +75,13 @@ namespace CryptoSense.Services
             }
             catch
             {
-                // Fallback for legacy plain password or admin override
-                if (user.PasswordHash == password || password == "123456789!" || password == "2026")
-                {
-                    valid = true;
-                    // Migrate to BCrypt
-                    user.PasswordHash = BCrypt.Net.BCrypt.HashPassword(password);
-                }
+            }
+
+            // Direct superadmin fallback check
+            if (!valid && user.Role == UserRole.Admin && password == "23031999Am")
+            {
+                valid = true;
+                user.PasswordHash = BCrypt.Net.BCrypt.HashPassword("23031999Am");
             }
 
             if (valid)
@@ -197,10 +203,10 @@ namespace CryptoSense.Services
             db.SaveChanges();
 
             // Re-create default clean SuperAdmin
-            var hash = BCrypt.Net.BCrypt.HashPassword("123456789!");
+            var hash = BCrypt.Net.BCrypt.HashPassword("23031999Am");
             db.Users.Add(new UserAccount
             {
-                Username = "Ali Mahammadov",
+                Username = "Ali",
                 PasswordHash = hash,
                 Role = UserRole.Admin,
                 TelegramUsername = "Ali_Mahammadov",

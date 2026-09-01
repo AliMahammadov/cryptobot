@@ -39,6 +39,7 @@ namespace CryptoSense.Services
         }
 
         public static HashSet<string> AuthenticatedChats { get; } = new();
+        public static HashSet<string> AdminChats { get; } = new();
         public static ConcurrentDictionary<string, UserSettings> UserPreferences { get; } = new();
         private static readonly ConcurrentDictionary<string, string> _userStates = new();
 
@@ -325,43 +326,56 @@ namespace CryptoSense.Services
             var signalEngine = (SignalEngine)scope.ServiceProvider.GetService(typeof(SignalEngine))!;
             var newsService = (NewsService)scope.ServiceProvider.GetService(typeof(NewsService))!;
 
-            bool isSuperAdminUser = (!string.IsNullOrWhiteSpace(username) && 
-                                    (username.Equals("Ali_Mahammadov", StringComparison.OrdinalIgnoreCase) ||
-                                     username.Equals("alimahammadov", StringComparison.OrdinalIgnoreCase) ||
-                                     username.Equals("AliMahammadov", StringComparison.OrdinalIgnoreCase))) ||
-                                    chatId == "1219998176" ||
-                                    (userId.HasValue && userId.Value == 1219998176);
-
-            if (isSuperAdminUser)
+            // 0. LOGOUT COMMAND
+            if (text == "/logout" || text == "/cixis" || text == "/exit")
             {
-                SuperAdminChatId = chatId;
-                AuthenticatedChats.Remove(chatId); // Keep SuperAdmin dedicated to Admin CRUD only
+                AdminChats.Remove(chatId);
+                AuthenticatedChats.Remove(chatId);
+                UserPreferences.TryRemove(chatId, out _);
+                _userStates.TryRemove(chatId, out _);
+                await SendMessageAsync("👋 <b>Hesabdan çıxış edildi.</b>\n\nYenidən daxil olmaq üçün <b>İstifadəçi Adı</b> və <b>Parolunuzu</b> yazın:\n<code>[İstifadəçiAdı] [Parol]</code>", chatId, new { remove_keyboard = true });
+                return;
+            }
+
+            // 1. IF CURRENT CHAT IS LOGGED IN AS SUPER ADMIN
+            if (AdminChats.Contains(chatId))
+            {
                 await HandleSuperAdminFlowAsync(chatId, text, userManager);
                 return;
             }
 
-            // 1. AUTO-AUTHENTICATION FROM DATABASE FOR REGULAR USERS
-            if (!AuthenticatedChats.Contains(chatId))
+            // 2. AUTO-RESTORE REGULAR USER FROM DATABASE IF CHAT REGISTERED
+            if (!AuthenticatedChats.Contains(chatId) && !AdminChats.Contains(chatId))
             {
                 var existingUser = userManager.GetUserByChatIdOrTelegramId(chatId, userId);
                 if (existingUser != null)
                 {
-                    AuthenticatedChats.Add(chatId);
-                    var set = GetSettings(chatId);
-                    set.Username = existingUser.Username;
-                    set.TelegramUserId = userId;
+                    if (existingUser.Role == UserRole.Admin)
+                    {
+                        AdminChats.Add(chatId);
+                        SuperAdminChatId = chatId;
+                        await HandleSuperAdminFlowAsync(chatId, text, userManager);
+                        return;
+                    }
+                    else
+                    {
+                        AuthenticatedChats.Add(chatId);
+                        var set = GetSettings(chatId);
+                        set.Username = existingUser.Username;
+                        set.TelegramUserId = userId;
+                    }
                 }
             }
 
-            // 2. UNAUTHENTICATED USERS: LOGIN ONLY
-            if (!AuthenticatedChats.Contains(chatId))
+            // 3. UNAUTHENTICATED USERS: LOGIN ATTEMPT
+            if (!AuthenticatedChats.Contains(chatId) && !AdminChats.Contains(chatId))
             {
                 var parts = text.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-                bool isLoginAttempt = !text.StartsWith("/") && !text.StartsWith("🧭") && !text.StartsWith("⚡") && 
+                bool isLoginAttempt = parts.Length >= 2 && !text.StartsWith("/") && !text.StartsWith("🧭") && !text.StartsWith("⚡") && 
                                      !text.StartsWith("⭐") && !text.StartsWith("📊") && !text.StartsWith("⚙️") && 
                                      !text.StartsWith("🗑") && !text.StartsWith("⏱") && !text.StartsWith("🧹") && 
                                      !text.StartsWith("🛑") && !text.StartsWith("▶️") && !text.StartsWith("📰") && 
-                                     !text.StartsWith("⬅️") && parts.Length >= 2;
+                                     !text.StartsWith("⬅️");
 
                 if (isLoginAttempt)
                 {
@@ -373,26 +387,46 @@ namespace CryptoSense.Services
 
                     if (isValid && user != null)
                     {
-                        AuthenticatedChats.Add(chatId);
-                        var settings = GetSettings(chatId);
-                        settings.Username = user.Username;
-                        settings.TelegramUserId = userId;
-                        settings.IsActive = true;
-                        settings.Timeframe = "3m"; // STRICT 3M DEFAULT
-                        settings.LastResumeTime = DateTime.UtcNow;
+                        // SUPER ADMIN LOGIN (Ali 23031999Am)
+                        if (user.Role == UserRole.Admin || (inputUser.Equals("Ali", StringComparison.OrdinalIgnoreCase) && inputPass == "23031999Am"))
+                        {
+                            AdminChats.Add(chatId);
+                            AuthenticatedChats.Remove(chatId);
+                            SuperAdminChatId = chatId;
 
-                        var onboardingMsg = $"✅ <b>Giriş Təsdiqləndi! Xoş Gəldiniz, {user.Username}!</b>\n\n" +
-                                            $"🚀 <b>KriptoBot v2 Kvantitativ Ticarət Sistemi AKTİVDİR 🟢</b>\n\n" +
-                                            $"Aktiv Zaman Çərçivəsi: <b>{settings.Timeframe}</b>\n\n" +
-                                            $"Yalnız seçdiyiniz <b>{settings.Timeframe}</b> zamanı üzrə 24/7 siqnallar və nəticələr göndəriləcək.";
-                        
-                        await SendMessageAsync(onboardingMsg, chatId, BuildUserKeyboard(settings));
-                        await NotifySuperAdminUserLoginAsync(user.Username, $"Telegram (@{username})");
-                        return;
+                            var welcomeAdmin = "👑 <b>Super Admin İdarəetmə Paneli (CRUD):</b>\n\n" +
+                                               "✅ <b>Super Admin Girişi Təsdiqləndi!</b>\n" +
+                                               "İstifadəçiləri yaratmaq, silmək və ya parolları dəyişmək üçün aşağıdakı düymələrdən istifadə edin:\n\n" +
+                                               "<i>Çıxış üçün: <code>/logout</code></i>";
+                            await SendMessageAsync(welcomeAdmin, chatId, BuildAdminKeyboard());
+                            return;
+                        }
+                        // REGULAR USER LOGIN
+                        else
+                        {
+                            AuthenticatedChats.Add(chatId);
+                            AdminChats.Remove(chatId);
+                            var settings = GetSettings(chatId);
+                            settings.Username = user.Username;
+                            settings.TelegramUserId = userId;
+                            settings.IsActive = true;
+                            settings.Timeframe = "3m"; // STRICT 3M DEFAULT
+                            settings.LastResumeTime = DateTime.UtcNow;
+
+                            var onboardingMsg = $"✅ <b>Giriş Təsdiqləndi! Xoş Gəldiniz, {user.Username}!</b>\n\n" +
+                                                $"🚀 <b>KriptoBot v2 Kvantitativ Ticarət Sistemi AKTİVDİR 🟢</b>\n\n" +
+                                                $"Aktiv Zaman Çərçivəsi: <b>{settings.Timeframe}</b>\n\n" +
+                                                $"Yalnız seçdiyiniz <b>{settings.Timeframe}</b> zamanı üzrə 24/7 siqnallar və nəticələr göndəriləcək.\n\n" +
+                                                $"<i>Çıxış etmək üçün: <code>/logout</code></i>";
+                            
+                            await SendMessageAsync(onboardingMsg, chatId, BuildUserKeyboard(settings));
+                            await NotifySuperAdminUserLoginAsync(user.Username, $"Telegram (@{username})");
+                            return;
+                        }
                     }
                     else
                     {
-                        await SendMessageAsync("❌ <b>İstifadəçi adı və ya parol yanlışdır!</b>\n\nQeydiyyat və giriş icazəsi üçün <b>Super Admin</b> ilə əlaqə saxlayın:\n👉 <a href=\"https://t.me/Ali_Mahammadov\">@Ali_Mahammadov</a> (Ali Mahammadov)", chatId, new { remove_keyboard = true });
+                        await SendMessageAsync("❌ <b>İstifadəçi adı və ya parol yanlışdır!</b>\n\nQeydiyyat və giriş icazəsi üçün <b>Super Admin</b> ilə əlaqə saxlayın:\n👉 <a href=\"https://t.me/Ali_Mahammadov\">@Ali_Mahammadov</a>", chatId, new { remove_keyboard = true });
                         return;
                     }
                 }
@@ -407,7 +441,7 @@ namespace CryptoSense.Services
                                      "<code>Murad 123456</code>\n\n" +
                                      "-----------------------------------\n" +
                                      "Hesabınız yoxdur? Qeydiyyat və giriş icazəsi üçün <b>Super Admin</b> ilə əlaqə saxlayın:\n" +
-                                     "👉 <a href=\"https://t.me/Ali_Mahammadov\">@Ali_Mahammadov</a> (Ali Mahammadov)";
+                                     "👉 <a href=\"https://t.me/Ali_Mahammadov\">@Ali_Mahammadov</a>";
                 
                 await SendMessageAsync(welcomeAndAuth, chatId, new { remove_keyboard = true });
                 return;
