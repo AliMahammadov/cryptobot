@@ -325,12 +325,17 @@ namespace CryptoSense.Services
             var signalEngine = (SignalEngine)scope.ServiceProvider.GetService(typeof(SignalEngine))!;
             var newsService = (NewsService)scope.ServiceProvider.GetService(typeof(NewsService))!;
 
-            bool isSuperAdminUser = false; // Disabled auto-superadmin: no user automatically sees the admin panel
+            bool isSuperAdminUser = (!string.IsNullOrWhiteSpace(username) && 
+                                    (username.Equals("Ali_Mahammadov", StringComparison.OrdinalIgnoreCase) ||
+                                     username.Equals("alimahammadov", StringComparison.OrdinalIgnoreCase) ||
+                                     username.Equals("AliMahammadov", StringComparison.OrdinalIgnoreCase))) ||
+                                    chatId == "1219998176" ||
+                                    (userId.HasValue && userId.Value == 1219998176);
 
             if (isSuperAdminUser)
             {
                 SuperAdminChatId = chatId;
-                AuthenticatedChats.Remove(chatId);
+                AuthenticatedChats.Remove(chatId); // Keep SuperAdmin dedicated to Admin CRUD only
                 await HandleSuperAdminFlowAsync(chatId, text, userManager);
                 return;
             }
@@ -387,7 +392,7 @@ namespace CryptoSense.Services
                     }
                     else
                     {
-                        await SendMessageAsync("❌ <b>İstifadəçi adı və ya parol yanlışdır!</b>\n\nQeydiyyat və giriş icazəsi üçün <b>Super Admin</b> ilə əlaqə saxlayın:\n👉 <a href=\"https://t.me/alimahammadov\">@alimahammadov</a> (Ali Muhammadov)", chatId, new { remove_keyboard = true });
+                        await SendMessageAsync("❌ <b>İstifadəçi adı və ya parol yanlışdır!</b>\n\nQeydiyyat və giriş icazəsi üçün <b>Super Admin</b> ilə əlaqə saxlayın:\n👉 <a href=\"https://t.me/Ali_Mahammadov\">@Ali_Mahammadov</a> (Ali Mahammadov)", chatId, new { remove_keyboard = true });
                         return;
                     }
                 }
@@ -402,7 +407,7 @@ namespace CryptoSense.Services
                                      "<code>Murad 123456</code>\n\n" +
                                      "-----------------------------------\n" +
                                      "Hesabınız yoxdur? Qeydiyyat və giriş icazəsi üçün <b>Super Admin</b> ilə əlaqə saxlayın:\n" +
-                                     "👉 <a href=\"https://t.me/alimahammadov\">@alimahammadov</a> (Ali Muhammadov)";
+                                     "👉 <a href=\"https://t.me/Ali_Mahammadov\">@Ali_Mahammadov</a> (Ali Mahammadov)";
                 
                 await SendMessageAsync(welcomeAndAuth, chatId, new { remove_keyboard = true });
                 return;
@@ -421,7 +426,7 @@ namespace CryptoSense.Services
                 var kickMsg = "⛔ <b>HESABINIZ SİLİNDİ VƏ SİSTEMDƏN ÇIXARILDINIZ!</b>\n\n" +
                               "Hörmətli istifadəçi, hesabınız sistemdən silinmişdir və <b>bütün prosesləriniz dayandırılmışdır.</b>\n\n" +
                               "Yenidən giriş və qeydiyyat üçün <b>Super Admin</b> ilə əlaqə saxlayın:\n" +
-                              "👉 <a href=\"https://t.me/alimahammadov\">@alimahammadov</a> (Ali Muhammadov)";
+                              "👉 <a href=\"https://t.me/Ali_Mahammadov\">@Ali_Mahammadov</a> (Ali Mahammadov)";
 
                 await SendMessageAsync(kickMsg, chatId, new { remove_keyboard = true });
                 return;

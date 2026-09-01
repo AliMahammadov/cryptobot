@@ -25,16 +25,16 @@ namespace CryptoSense.Services
             db.Database.EnsureCreated();
 
             // Ensure SuperAdmin exists
-            var superAdmin = db.Users.FirstOrDefault(u => u.Username == "Ali Muhammadov" || u.Username == "alimahammadov");
+            var superAdmin = db.Users.FirstOrDefault(u => u.Username == "Ali Mahammadov" || u.Username == "alimahammadov");
             if (superAdmin == null)
             {
                 var hash = BCrypt.Net.BCrypt.HashPassword("123456789!");
                 db.Users.Add(new UserAccount
                 {
-                    Username = "Ali Muhammadov",
+                    Username = "Ali Mahammadov",
                     PasswordHash = hash,
                     Role = UserRole.Admin,
-                    TelegramUsername = "alimahammadov",
+                    TelegramUsername = "Ali_Mahammadov",
                     TelegramChatId = "1219998176",
                     TelegramUserId = 1219998176,
                     IsActive = true,
@@ -48,7 +48,7 @@ namespace CryptoSense.Services
         public (bool Success, UserAccount? User) ValidateLogin(string username, string password, long? telegramUserId = null, string? chatId = null)
         {
             username = username.Trim();
-            if (username.Equals("Eli Mehemmedov", StringComparison.OrdinalIgnoreCase)) username = "Ali Muhammadov";
+            if (username.Equals("Eli Mehemmedov", StringComparison.OrdinalIgnoreCase)) username = "Ali Mahammadov";
 
             using var scope = _serviceProvider.CreateScope();
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
@@ -135,7 +135,7 @@ namespace CryptoSense.Services
         public bool DeleteUser(string username, int? adminUserId = null)
         {
             username = username.Trim();
-            if (username.Equals("Ali Muhammadov", StringComparison.OrdinalIgnoreCase)) return false;
+            if (username.Equals("Ali Mahammadov", StringComparison.OrdinalIgnoreCase)) return false;
 
             using var scope = _serviceProvider.CreateScope();
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
@@ -200,10 +200,10 @@ namespace CryptoSense.Services
             var hash = BCrypt.Net.BCrypt.HashPassword("123456789!");
             db.Users.Add(new UserAccount
             {
-                Username = "Ali Muhammadov",
+                Username = "Ali Mahammadov",
                 PasswordHash = hash,
                 Role = UserRole.Admin,
-                TelegramUsername = "alimahammadov",
+                TelegramUsername = "Ali_Mahammadov",
                 IsActive = true,
                 CreatedAtUtc = DateTime.UtcNow,
                 LastLoginAt = DateTime.UtcNow
