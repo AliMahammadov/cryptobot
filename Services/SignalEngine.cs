@@ -1,12 +1,13 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
-using System.IO;
 using System.Linq;
-using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using CryptoSense.Data;
 using CryptoSense.Models;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace CryptoSense.Services
 {
@@ -15,71 +16,44 @@ namespace CryptoSense.Services
         private readonly BinanceFuturesService _binanceService;
         private readonly IndicatorService _indicatorService;
         private readonly NewsService _newsService;
+        private readonly IServiceProvider _serviceProvider;
 
-        private static int _nextSignalNumber = 150;
-        private static readonly ConcurrentDictionary<string, FuturesSignal> _activeSignals = new();
-        private static readonly List<FuturesSignal> _signalHistory = new();
+        private static int _nextSignalNumber = 160;
         private static readonly object _lock = new();
-        private static readonly string _storagePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "active_signals.json");
 
-        public SignalEngine(BinanceFuturesService binanceService, IndicatorService indicatorService, NewsService newsService)
+        public SignalEngine(
+            BinanceFuturesService binanceService,
+            IndicatorService indicatorService,
+            NewsService newsService,
+            IServiceProvider serviceProvider)
         {
             _binanceService = binanceService;
             _indicatorService = indicatorService;
             _newsService = newsService;
-            LoadPersistedSignals();
+            _serviceProvider = serviceProvider;
+
+            InitializeHighestSignalNumber();
         }
 
-        private static void LoadPersistedSignals()
+        private void InitializeHighestSignalNumber()
         {
             try
             {
-                if (File.Exists(_storagePath))
-                {
-                    var json = File.ReadAllText(_storagePath);
-                    var list = JsonSerializer.Deserialize<List<FuturesSignal>>(json);
-                    if (list != null)
-                    {
-                        foreach (var s in list)
-                        {
-                            if (!s.IsClosed)
-                            {
-                                var key = $"{s.Symbol}_{s.Timeframe}";
-                                _activeSignals[key] = s;
-                            }
-                            _signalHistory.Add(s);
-                        }
-                    }
-                }
+                using var scope = _serviceProvider.CreateScope();
+                var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+                db.Database.EnsureCreated();
+                var maxNum = db.Signals.Max(s => (int?)s.SignalNumber) ?? 160;
+                if (maxNum >= _nextSignalNumber) _nextSignalNumber = maxNum + 1;
             }
             catch { }
         }
 
-        public static void PersistSignals()
+        public static decimal RoundToCoinPrecision(decimal basePrice, decimal value)
         {
-            try
-            {
-                lock (_lock)
-                {
-                    var all = _signalHistory.Take(100).ToList();
-                    var json = JsonSerializer.Serialize(all, new JsonSerializerOptions { WriteIndented = true });
-                    File.WriteAllText(_storagePath, json);
-                }
-            }
-            catch { }
-        }
-
-        public static List<FuturesSignal> GetTrackedActiveSignals()
-        {
-            return _activeSignals.Values.Where(s => !s.IsClosed).ToList();
-        }
-
-        public static List<FuturesSignal> GetSignalHistory(int count = 15)
-        {
-            lock (_lock)
-            {
-                return _signalHistory.OrderByDescending(s => s.GeneratedAt).Take(count).ToList();
-            }
+            if (basePrice >= 100m) return Math.Round(value, 2);
+            if (basePrice >= 1m) return Math.Round(value, 4);
+            if (basePrice >= 0.01m) return Math.Round(value, 5);
+            return Math.Round(value, 8);
         }
 
         public async Task<BtcMarketCompass> GetBtcCompassAsync()
@@ -100,8 +74,8 @@ namespace CryptoSense.Services
             compass.EmaStructure = indicators.EmaTrend;
 
             int score = 50;
-            if (indicators.EmaTrend.Contains("Bullish")) score += 20;
-            if (indicators.EmaTrend.Contains("Bearish")) score -= 20;
+            if (indicators.EmaTrend.Contains("Bullish") || indicators.EmaTrend.Contains("Müsbət")) score += 20;
+            if (indicators.EmaTrend.Contains("Bearish") || indicators.EmaTrend.Contains("Mənfi")) score -= 20;
             if (indicators.MacdHist > 0) score += 15;
             else score -= 15;
             if (indicators.Rsi >= 50 && indicators.Rsi <= 68) score += 15;
@@ -110,39 +84,41 @@ namespace CryptoSense.Services
             compass.BullishScore = Math.Clamp(score, 5, 95);
             if (compass.BullishScore >= 60)
             {
-                compass.Trend = "Y\u00DCKS\u018FL\u0130\u015E (BULLISH) \U0001F7E2";
-                compass.Summary = "Bitcoin 15m/1h strukturu g\u00FCcl\u00FCd\u00FCr v\u0259 dinamik d\u0259st\u0259k s\u0259viyy\u0259si \u00FCz\u0259rind\u0259dir. Long \u0259m\u0259liyyatlar\u0131na \u00FCst\u00FCnl\u00FCk verilir.";
+                compass.Trend = "YÜKSƏLİŞ (BULLISH) 🟢";
+                compass.Summary = "Bitcoin 15m/1h strukturu güclüdür və dinamik dəstək səviyyəsi üzərindədir. Long əməliyyatlarına üstünlük verilir.";
             }
             else if (compass.BullishScore <= 40)
             {
-                compass.Trend = "EN\u0130\u015E (BEARISH) \U0001F534";
-                compass.Summary = "Bitcoin sat\u0131\u015F t\u0259zyiqi alt\u0131ndad\u0131r v\u0259 EMA x\u0259tl\u0259rinin alt\u0131ndad\u0131r. Short \u0259m\u0259liyyatlar\u0131na \u00FCst\u00FCnl\u00FCk verilir.";
+                compass.Trend = "ENİŞ (BEARISH) 🔴";
+                compass.Summary = "Bitcoin satış təzyiqi altındadır və EMA xətlərinin altındadır. Short əməliyyatlarına üstünlük verilir.";
             }
             else
             {
-                compass.Trend = "NEYTRAL (YAN H\u018FR\u018FK\u018FT) \u26AA";
-                compass.Summary = "Bitcoin yan h\u0259r\u0259k\u0259td\u0259dir (konsolidasiya). Q\u0131sa scalping v\u0259 d\u0259qiq Stop-Loss t\u00F6vsiy\u0259 olunur.";
+                compass.Trend = "NEYTRAL (YAN HƏRƏKƏT) ⚪";
+                compass.Summary = "Bitcoin yan hərəkətdədir (konsolidasiya). Qısa scalping və dəqiq Stop-Loss tövsiyə olunur.";
             }
 
             return compass;
         }
 
-        public async Task<FuturesSignal> AnalyzeCoinAsync(string symbol, string timeframe = "15m")
+        public async Task<FuturesSignal> AnalyzeCoinAsync(string symbol, string timeframe = "15m", bool isLiveScan = false)
         {
             symbol = symbol.ToUpper();
             if (!symbol.EndsWith("USDT")) symbol += "USDT";
 
-            var cacheKey = $"{symbol}_{timeframe}";
-
             var klines = await _binanceService.GetKlinesAsync(symbol, timeframe, 100);
             if (klines.Count < 35)
             {
-                return new FuturesSignal { Symbol = symbol, Timeframe = timeframe, SignalType = "MELUMAT AZDIR" };
+                return new FuturesSignal { Symbol = symbol, Timeframe = timeframe, SignalType = "MƏLUMAT AZDIR" };
             }
 
+            // Closed candle evaluation to prevent flickering
+            var closedCandle = klines.Count >= 2 ? klines[klines.Count - 2] : klines.Last();
+            var sourceCandleTime = closedCandle.Time;
             var currentPrice = klines.Last().Close;
-            var indicators = _indicatorService.CalculateIndicators(klines);
+
             var btcCompass = await GetBtcCompassAsync();
+            var indicators = _indicatorService.CalculateIndicators(klines, btcCompass);
             var newsSummary = await _newsService.GetNewsAndSentimentAsync();
 
             var reasons = new List<string>();
@@ -150,12 +126,12 @@ namespace CryptoSense.Services
             // 1. BTC Macro alignment
             if (btcCompass.BullishScore >= 55)
             {
-                reasons.Add($"Bitcoin Kompas\u0131: {btcCompass.Trend} ({btcCompass.BullishScore}%)");
+                reasons.Add($"Bitcoin Kompası: {btcCompass.Trend} ({btcCompass.BullishScore}%)");
                 indicators.BtcAlignment = "Bullish";
             }
             else if (btcCompass.BullishScore <= 45)
             {
-                reasons.Add($"Bitcoin Kompas\u0131: {btcCompass.Trend} ({btcCompass.BullishScore}%)");
+                reasons.Add($"Bitcoin Kompası: {btcCompass.Trend} ({btcCompass.BullishScore}%)");
                 indicators.BtcAlignment = "Bearish";
             }
             else
@@ -163,58 +139,52 @@ namespace CryptoSense.Services
                 indicators.BtcAlignment = "Neytral";
             }
 
-            // 2. Add Top Indicator Technical Findings
-            reasons.Add($"RSI (14): {indicators.Rsi:F1} - {indicators.RsiStatus}");
-            reasons.Add($"Stochastic RSI: K={indicators.StochRsiK:F1}, D={indicators.StochRsiD:F1} ({indicators.StochStatus})");
-            reasons.Add($"MACD (12,26,9): Hist={indicators.MacdHist:F4} ({indicators.MacdStatus})");
-            reasons.Add($"EMA Struktur (20/50): {indicators.EmaTrend} (EMA20: ${indicators.Ema20:F4})");
-            reasons.Add($"SuperTrend (10,3): {indicators.SuperTrendDirection} (X\u0259tt: ${indicators.SuperTrend:F4})");
-            reasons.Add($"Bollinger Bands (20,2): {indicators.BollingerStatus} (Bant Eni: {indicators.BollingerBandwidth}%)");
-            reasons.Add($"ADX Trend G\u00FCc\u00FC (14): {indicators.Adx:F1} ({indicators.AdxTrendStrength})");
-            reasons.Add($"H\u0259cm Analizi: {indicators.ObvTrend}, S\u0131\u00E7ray\u0131\u015F: {indicators.VolumeSurgeRatio:F1}x");
-            reasons.Add($"Struktur: D\u0259st\u0259k ${indicators.SupportLevel:F4} | M\u00FCqavim\u0259t ${indicators.ResistanceLevel:F4}");
+            // 3. Section 5 Scoring Decision
+            SignalDirection direction = SignalDirection.Buy;
+            string determinedType = "NEYTRAL (GÖZLƏMƏ) ⚪";
+            int confidence = 65;
 
-            // Quantitative Confluence Logic (No fake signals!)
-            string determinedType = "NEYTRAL (G\u00D6ZL\u018FM\u018F) \u26AA";
-            int confidence = 60;
-
-            if (indicators.BullishIndicatorsCount >= 11 && indicators.BullishIndicatorsCount > indicators.BearishIndicatorsCount)
+            // Long condition (Confluence Score >= 75 and TrendScore >= 0)
+            if (indicators.ConfluenceScore >= 75m && indicators.TrendScore >= 0)
             {
-                determinedType = "G\u00DCCL\u00DC LONG (ALI\u015E) \U0001F7E2";
-                confidence = Math.Clamp(85 + (indicators.BullishIndicatorsCount - 10) * 2, 90, 96);
+                direction = SignalDirection.Buy;
+                determinedType = "GÜCLÜ LONG (ALIŞ) 🟢";
+                confidence = Math.Clamp((int)indicators.ConfluenceScore, 78, 96);
             }
-            else if (indicators.BearishIndicatorsCount >= 11 && indicators.BearishIndicatorsCount > indicators.BullishIndicatorsCount)
+            // Short condition (Confluence Score <= 25 or bearish confluence >= 75% and TrendScore <= 0)
+            else if (indicators.ConfluenceScore <= 25m && indicators.TrendScore <= 0)
             {
-                determinedType = "G\u00DCCL\u00DC SHORT (SATI\u015E) \U0001F534";
-                confidence = Math.Clamp(85 + (indicators.BearishIndicatorsCount - 10) * 2, 90, 96);
+                direction = SignalDirection.Sell;
+                determinedType = "GÜCLÜ SHORT (SATIŞ) 🔴";
+                confidence = Math.Clamp((int)(100m - indicators.ConfluenceScore), 78, 96);
             }
             else if (indicators.BullishIndicatorsCount >= 9 && indicators.BullishIndicatorsCount > indicators.BearishIndicatorsCount)
             {
-                determinedType = "G\u00DCCL\u00DC LONG (ALI\u015E) \U0001F7E2";
-                confidence = 90;
+                direction = SignalDirection.Buy;
+                determinedType = "GÜCLÜ LONG (ALIŞ) 🟢";
+                confidence = 80;
             }
             else if (indicators.BearishIndicatorsCount >= 9 && indicators.BearishIndicatorsCount > indicators.BullishIndicatorsCount)
             {
-                determinedType = "G\u00DCCL\u00DC SHORT (SATI\u015E) \U0001F534";
-                confidence = 90;
-            }
-            else
-            {
-                determinedType = "NEYTRAL (G\u00D6ZL\u018FM\u018F) \u26AA";
-                confidence = 65;
+                direction = SignalDirection.Sell;
+                determinedType = "GÜCLÜ SHORT (SATIŞ) 🔴";
+                confidence = 80;
             }
 
-            // Check if active unclosed signal already exists in cache
-            if (_activeSignals.TryGetValue(cacheKey, out var existingSignal) && 
-                existingSignal.SignalType == determinedType && 
-                !existingSignal.IsClosed &&
-                DateTime.UtcNow - existingSignal.GeneratedAt < TimeSpan.FromMinutes(45))
-            {
-                existingSignal.CurrentPrice = currentPrice;
-                existingSignal.Indicators = indicators;
-                existingSignal.BtcCompass = btcCompass;
-                return existingSignal;
-            }
+            decimal directionalConfluence = direction == SignalDirection.Sell 
+                ? Math.Round(100m - indicators.ConfluenceScore, 1) 
+                : Math.Round(indicators.ConfluenceScore, 1);
+
+            // 2. Technical Findings
+            reasons.Add($"Confluence Balı: {directionalConfluence}% (Trend: {indicators.TrendScore:+0.00;-0.00}, Momentum: {indicators.MomentumScore:+0.00;-0.00})");
+            reasons.Add($"RSI (14): {indicators.Rsi:F1} - {indicators.RsiStatus}");
+            reasons.Add($"MACD (12,26,9): Hist={indicators.MacdHist:F4} ({indicators.MacdStatus})");
+            reasons.Add($"EMA Struktur (20/50): {indicators.EmaTrend} (EMA20: ${indicators.Ema20})");
+            reasons.Add($"SuperTrend (10,3): {indicators.SuperTrendDirection} (Xətt: ${indicators.SuperTrend})");
+            reasons.Add($"Bollinger Bands (20,2): {indicators.BollingerStatus} (Bant Eni: {indicators.BollingerBandwidth}%)");
+            reasons.Add($"ADX Trend Gücü (14): {indicators.Adx:F1} ({indicators.AdxTrendStrength})");
+            reasons.Add($"Həcm Analizi: {indicators.ObvTrend}, Sıçrayış: {indicators.VolumeSurgeRatio:F1}x");
+            reasons.Add($"Struktur: Dəstək ${indicators.SupportLevel} | Müqavimət ${indicators.ResistanceLevel}");
 
             decimal minTfMultiplier = timeframe switch
             {
@@ -231,58 +201,158 @@ namespace CryptoSense.Services
             decimal minRisk = currentPrice * minTfMultiplier;
             if (atr < minRisk) atr = minRisk;
 
+            var durationMinutes = timeframe switch
+            {
+                "1m" => 1,
+                "3m" => 3,
+                "5m" => 5,
+                "15m" => 15,
+                "1h" => 60,
+                "4h" => 240,
+                _ => 15
+            };
+
+            using var scope = _serviceProvider.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+            // Check if existing signal for this candle already created
+            var existingSignal = await db.Signals
+                .Include(s => s.IndicatorSnapshots)
+                .FirstOrDefaultAsync(s => s.Symbol == symbol && s.Timeframe == timeframe && s.SourceCandleOpenTimeUtc == sourceCandleTime);
+
+            if (existingSignal != null)
+            {
+                existingSignal.CurrentPrice = currentPrice;
+                existingSignal.Indicators = indicators;
+                existingSignal.BtcCompass = btcCompass;
+                existingSignal.AnalysisReasons = reasons;
+                existingSignal.ConfluenceScore = directionalConfluence;
+                return existingSignal;
+            }
+
             int sigNumber = Interlocked.Increment(ref _nextSignalNumber);
 
             var newSignal = new FuturesSignal
             {
                 SignalNumber = sigNumber,
-                Id = Guid.NewGuid().ToString("N"),
                 Symbol = symbol,
-                CurrentPrice = currentPrice,
-                Timeframe = timeframe,
+                Direction = direction,
                 SignalType = determinedType,
+                Timeframe = timeframe,
+                EntryPrice = currentPrice,
+                CurrentPrice = currentPrice,
+                ConfluenceScore = directionalConfluence,
                 Confidence = confidence,
+                Status = SignalStatus.Open,
+                OutcomeStatus = "AKTİV 🟡",
+                SourceCandleOpenTimeUtc = sourceCandleTime,
+                GeneratedAt = DateTime.UtcNow,
+                ExpiryTimeUtc = DateTime.UtcNow.AddMinutes(durationMinutes),
+                TimestampFormatted = DateTime.Now.ToString("dd.MM.yyyy | HH:mm:ss"),
+                NewsSentimentImpact = newsSummary.Status,
                 AnalysisReasons = reasons,
                 Indicators = indicators,
-                BtcCompass = btcCompass,
-                NewsSentimentImpact = newsSummary.Status,
-                GeneratedAt = DateTime.UtcNow,
-                TimestampFormatted = DateTime.Now.ToString("dd.MM.yyyy | HH:mm:ss"),
-                OutcomeStatus = "AKT\u0130V \U0001F7E1"
+                BtcCompass = btcCompass
             };
 
-            var isLong = determinedType.Contains("LONG");
-            if (isLong)
+            // Entry range & TP/SL setup
+            newSignal.EntryLow = RoundToCoinPrecision(currentPrice, currentPrice * 0.9985m);
+            newSignal.EntryHigh = RoundToCoinPrecision(currentPrice, currentPrice * 1.0015m);
+
+            if (direction == SignalDirection.Buy)
             {
-                newSignal.EntryLow = Math.Round(currentPrice * 0.998m, 4);
-                newSignal.EntryHigh = Math.Round(currentPrice * 1.002m, 4);
-                newSignal.TakeProfit1 = Math.Round(currentPrice + (atr * 1.0m), 4);
-                newSignal.TakeProfit2 = Math.Round(currentPrice + (atr * 1.8m), 4);
-                newSignal.TakeProfit3 = Math.Round(currentPrice + (atr * 2.8m), 4);
-                newSignal.StopLoss = Math.Round(currentPrice - (atr * 1.2m), 4);
+                newSignal.TakeProfit1 = RoundToCoinPrecision(currentPrice, currentPrice + (atr * 1.0m));
+                newSignal.TakeProfit2 = RoundToCoinPrecision(currentPrice, currentPrice + (atr * 1.8m));
+                newSignal.TakeProfit3 = RoundToCoinPrecision(currentPrice, currentPrice + (atr * 2.8m));
+                newSignal.StopLoss = RoundToCoinPrecision(currentPrice, currentPrice - (atr * 1.2m));
             }
             else
             {
-                newSignal.EntryLow = Math.Round(currentPrice * 0.998m, 4);
-                newSignal.EntryHigh = Math.Round(currentPrice * 1.002m, 4);
-                newSignal.TakeProfit1 = Math.Round(currentPrice - (atr * 1.0m), 4);
-                newSignal.TakeProfit2 = Math.Round(currentPrice - (atr * 1.8m), 4);
-                newSignal.TakeProfit3 = Math.Round(currentPrice - (atr * 2.8m), 4);
-                newSignal.StopLoss = Math.Round(currentPrice + (atr * 1.2m), 4);
+                newSignal.TakeProfit1 = RoundToCoinPrecision(currentPrice, currentPrice - (atr * 1.0m));
+                newSignal.TakeProfit2 = RoundToCoinPrecision(currentPrice, currentPrice - (atr * 1.8m));
+                newSignal.TakeProfit3 = RoundToCoinPrecision(currentPrice, currentPrice - (atr * 2.8m));
+                newSignal.StopLoss = RoundToCoinPrecision(currentPrice, currentPrice + (atr * 1.2m));
             }
 
-            if (newSignal.SignalType.Contains("LONG") || newSignal.SignalType.Contains("SHORT"))
+            // Create indicator snapshots (Section 4 & 5)
+            newSignal.IndicatorSnapshots = new List<SignalIndicatorSnapshot>
             {
-                _activeSignals[cacheKey] = newSignal;
-                lock (_lock)
+                new() { IndicatorName = "RSI14", Value = indicators.Rsi, Vote = indicators.RsiVote, Weight = 0.35m },
+                new() { IndicatorName = "MACD_Hist", Value = indicators.MacdHist, Vote = indicators.MacdVote, Weight = 0.45m },
+                new() { IndicatorName = "EMA20", Value = indicators.Ema20, Vote = indicators.EmaVote, Weight = 0.45m },
+                new() { IndicatorName = "ADX14", Value = indicators.Adx, Vote = indicators.AdxVote, Weight = 0.30m },
+                new() { IndicatorName = "BollingerBands", Value = indicators.BollingerBandwidth, Vote = indicators.BollingerVote, Weight = 0.15m },
+                new() { IndicatorName = "SuperTrend", Value = indicators.SuperTrend, Vote = indicators.SuperTrendVote, Weight = 0.25m },
+                new() { IndicatorName = "OBV", Value = indicators.Obv, Vote = indicators.ObvVote, Weight = 0.40m },
+                new() { IndicatorName = "VWAP", Value = indicators.Vwap, Vote = indicators.VwapVote, Weight = 0.30m }
+            };
+
+            if (isLiveScan && (determinedType.Contains("LONG") || determinedType.Contains("SHORT")))
+            {
+                try
                 {
-                    _signalHistory.Insert(0, newSignal);
-                    if (_signalHistory.Count > 100) _signalHistory.RemoveAt(_signalHistory.Count - 1);
+                    db.Signals.Add(newSignal);
+                    await db.SaveChangesAsync();
                 }
-                PersistSignals();
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"DB Persist warning: {ex.Message}");
+                }
             }
 
             return newSignal;
+        }
+
+        public async Task<List<FuturesSignal>> GetTrackedActiveSignalsAsync()
+        {
+            using var scope = _serviceProvider.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            return await db.Signals
+                .Where(s => s.Status == SignalStatus.Open && !s.IsClosed)
+                .OrderByDescending(s => s.GeneratedAt)
+                .ToListAsync();
+        }
+
+        public async Task<List<FuturesSignal>> GetSignalHistoryAsync(int count = 25)
+        {
+            using var scope = _serviceProvider.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            return await db.Signals
+                .OrderByDescending(s => s.GeneratedAt)
+                .Take(count)
+                .ToListAsync();
+        }
+
+        public async Task<PerformanceStats> GetPerformanceStatsAsync()
+        {
+            using var scope = _serviceProvider.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+            var all = await db.Signals.ToListAsync();
+            var closed = all.Where(s => s.Status != SignalStatus.Open || s.IsClosed).ToList();
+
+            var stats = new PerformanceStats
+            {
+                TotalSignals = all.Count,
+                OpenSignals = all.Count(s => s.Status == SignalStatus.Open && !s.IsClosed),
+                SuccessSignals = closed.Count(s => s.Status == SignalStatus.Success),
+                FailedSignals = closed.Count(s => s.Status == SignalStatus.Failed),
+                NeutralSignals = closed.Count(s => s.Status == SignalStatus.Neutral)
+            };
+
+            int decisiveTrades = stats.SuccessSignals + stats.FailedSignals;
+            stats.WinRatePercent = decisiveTrades > 0 ? Math.Round(((decimal)stats.SuccessSignals / decisiveTrades) * 100, 1) : 0;
+
+            var results = closed.Where(s => s.ResultPercent.HasValue).Select(s => s.ResultPercent!.Value).ToList();
+            if (results.Count > 0)
+            {
+                stats.TotalNetProfitPercent = Math.Round(results.Sum(), 2);
+                stats.AvgProfitPerTradePercent = Math.Round(results.Average(), 2);
+                stats.BestTradePercent = Math.Round(results.Max(), 2);
+                stats.WorstTradePercent = Math.Round(results.Min(), 2);
+            }
+
+            return stats;
         }
     }
 }

@@ -281,16 +281,37 @@ document.addEventListener('DOMContentLoaded', () => {
     loadCoinAnalysis(currentSymbol, currentTimeframe);
   });
 
-  // Signals Feed
+  // Signals Feed & Performance Stats
   async function loadAllSignals() {
     const container = document.getElementById('signalsFeedContainer');
     try {
+      // Load Stats
+      fetch('/api/stats')
+        .then(r => r.json())
+        .then(stats => {
+          if (!stats) return;
+          const wrEl = document.getElementById('statWinRate');
+          const totEl = document.getElementById('statTotal');
+          const winEl = document.getElementById('statWins');
+          const lossEl = document.getElementById('statLosses');
+          const pnlEl = document.getElementById('statNetPnl');
+
+          if (wrEl) wrEl.textContent = `Win Rate: ${stats.winRatePercent}%`;
+          if (totEl) totEl.textContent = stats.totalSignals;
+          if (winEl) winEl.textContent = stats.successSignals;
+          if (lossEl) lossEl.textContent = stats.failedSignals;
+          if (pnlEl) {
+            pnlEl.textContent = `${stats.totalNetProfitPercent >= 0 ? '+' : ''}${stats.totalNetProfitPercent}%`;
+            pnlEl.style.color = stats.totalNetProfitPercent >= 0 ? 'var(--neon-green)' : 'var(--neon-red)';
+          }
+        }).catch(() => {});
+
       const res = await fetch('/api/signals/all');
       if (!res.ok) return;
       allSignals = await res.json();
       renderSignalsFeed();
     } catch (e) {
-      container.innerHTML = '<div style="text-align:center; padding:30px; color:var(--neon-red);">Siqnallari yuklemek mumkun olmadi</div>';
+      container.innerHTML = '<div style="text-align:center; padding:30px; color:var(--neon-red);">Siqnalları yükləmək mümkün olmadı</div>';
     }
   }
 
@@ -301,36 +322,38 @@ document.addEventListener('DOMContentLoaded', () => {
     let filtered = allSignals;
     if (activeSignalFilter === 'long') filtered = allSignals.filter(s => s.signalType.includes('LONG'));
     else if (activeSignalFilter === 'short') filtered = allSignals.filter(s => s.signalType.includes('SHORT'));
-    else if (activeSignalFilter === 'high') filtered = allSignals.filter(s => s.confidence >= 90);
+    else if (activeSignalFilter === 'high') filtered = allSignals.filter(s => (s.confluenceScore || s.confidence) >= 78);
 
     if (filtered.length === 0) {
-      container.innerHTML = '<div style="text-align:center; padding:30px; color:var(--text-muted);">Bu filtre uygun aktiv siqnal yoxdur</div>';
+      container.innerHTML = '<div style="text-align:center; padding:30px; color:var(--text-muted);">Bu filtrə uyğun aktiv siqnal yoxdur</div>';
       return;
     }
 
     filtered.forEach(s => {
-      const isLong = s.signalType.includes('LONG');
-      const isShort = s.signalType.includes('SHORT');
+      const isLong = s.direction === 0 || s.signalType.includes('LONG');
+      const isShort = s.direction === 1 || s.signalType.includes('SHORT');
       const cleanName = s.symbol.replace('USDT', '');
       const timeStr = s.timestampFormatted || new Date(s.generatedAt).toLocaleTimeString('az-AZ');
+      const score = s.confluenceScore || s.confidence || 80;
 
       const card = document.createElement('div');
       card.className = 'feed-card ' + (isLong ? 'feed-card-long' : (isShort ? 'feed-card-short' : ''));
       card.innerHTML = `
         <div class="feed-card-header">
           <div style="display:flex; align-items:center; gap:8px;">
-            <span style="font-size:13px; font-weight:900; color:var(--neon-cyan); background:rgba(0,240,255,0.1); padding:2px 6px; border-radius:6px;">#${s.signalNumber} ${isLong ? 'ğŸŸ¢' : 'ğŸ”´'}</span>
+            <span style="font-size:13px; font-weight:900; color:var(--neon-cyan); background:rgba(0,240,255,0.1); padding:2px 6px; border-radius:6px;">#${s.signalNumber} ${isLong ? '🟢' : '🔴'}</span>
             <span style="font-size:18px; font-weight:900;">${cleanName}</span>
+            <span style="font-size:12px; font-weight:800; color:${isLong ? '#00e676' : '#ff3366'}">${isLong ? 'LONG' : 'SHORT'}</span>
           </div>
           <div style="text-align:right;">
-            <div style="font-size:12px; font-weight:800; color:${s.confidence>=90?'#00e676':'#00f0ff'}">${s.confidence}% Guvenlik</div>
-            <div style="font-size:10px; color:var(--text-muted); margin-top:2px;">ğŸ•’ ${timeStr}</div>
+            <div style="font-size:12px; font-weight:800; color:${score>=78?'#00e676':'#00f0ff'}">${score}% Confluence</div>
+            <div style="font-size:10px; color:var(--text-muted); margin-top:2px;">🕒 ${timeStr}</div>
           </div>
         </div>
 
         <div style="display:grid; grid-template-columns:repeat(2, 1fr); gap:8px; margin-bottom:10px;">
           <div style="background:rgba(0,0,0,0.3); padding:8px 10px; border-radius:8px;">
-            <div style="font-size:10px; color:var(--text-muted);">GIRIS ZONASI:</div>
+            <div style="font-size:10px; color:var(--text-muted);">GİRİŞ ZONASI:</div>
             <div style="font-family:var(--font-mono); font-size:13px; font-weight:800; color:var(--neon-cyan);">$${s.entryLow} - $${s.entryHigh}</div>
           </div>
           <div style="background:rgba(0,0,0,0.3); padding:8px 10px; border-radius:8px;">
@@ -338,17 +361,17 @@ document.addEventListener('DOMContentLoaded', () => {
             <div style="font-family:var(--font-mono); font-size:13px; font-weight:800; color:var(--neon-red);">$${s.stopLoss}</div>
           </div>
           <div style="background:rgba(0,0,0,0.3); padding:8px 10px; border-radius:8px;">
-            <div style="font-size:10px; color:var(--text-muted);">HEDEF 1:</div>
+            <div style="font-size:10px; color:var(--text-muted);">HƏDƏF 1:</div>
             <div style="font-family:var(--font-mono); font-size:13px; font-weight:800; color:var(--neon-green);">$${s.takeProfit1}</div>
           </div>
           <div style="background:rgba(0,0,0,0.3); padding:8px 10px; border-radius:8px;">
-            <div style="font-size:10px; color:var(--text-muted);">HEDEF 2:</div>
+            <div style="font-size:10px; color:var(--text-muted);">HƏDƏF 2:</div>
             <div style="font-family:var(--font-mono); font-size:13px; font-weight:800; color:var(--neon-green);">$${s.takeProfit2}</div>
           </div>
         </div>
 
         <div style="font-size:12px; color:var(--text-secondary); line-height:1.4;">
-          ${(s.analysisReasons || []).slice(0, 2).map(r => `<div>â–¸ ${r}</div>`).join('')}
+          ${(s.analysisReasons || []).slice(0, 2).map(r => `<div>▸ ${r}</div>`).join('')}
         </div>
       `;
 

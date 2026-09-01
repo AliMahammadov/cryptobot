@@ -1,13 +1,15 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text.Json;
 using System.Threading.Tasks;
+using CryptoSense.Data;
 using CryptoSense.Models;
 using CryptoSense.Services;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.StaticFiles;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -17,6 +19,11 @@ var builder = WebApplication.CreateBuilder(args);
 builder.WebHost.UseUrls("http://0.0.0.0:5083");
 
 builder.Services.Configure<AppConfig>(builder.Configuration.GetSection("AppConfig"));
+
+// Register SQLite Database
+builder.Services.AddDbContext<AppDbContext>(options =>
+    options.UseSqlite("Data Source=cryptosense.db"));
+
 builder.Services.AddHttpClient<BinanceFuturesService>();
 builder.Services.AddHttpClient<NewsService>();
 
@@ -39,6 +46,13 @@ builder.Services.AddCors(options =>
 });
 
 var app = builder.Build();
+
+// Ensure SQLite database and tables are created
+using (var scope = app.Services.CreateScope())
+{
+    var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+    db.Database.EnsureCreated();
+}
 
 app.UseCors("AllowAll");
 
@@ -167,6 +181,13 @@ app.MapPost("/api/telegram/test", async (TelegramBotService tgService, SignalEng
     var testSignal = await signalEngine.AnalyzeCoinAsync("SOLUSDT", "15m");
     await tgService.SendSignalAlertAsync(testSignal);
     return Results.Ok(new { success = true, message = "Telegram test siqnali ugurla gonderildi!" });
+});
+
+// 10. Performance Statistics (Transparent Tracking)
+app.MapGet("/api/stats", async (SignalEngine signalEngine) =>
+{
+    var stats = await signalEngine.GetPerformanceStatsAsync();
+    return Results.Ok(stats);
 });
 
 app.Run();

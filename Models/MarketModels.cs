@@ -1,8 +1,37 @@
 using System;
 using System.Collections.Generic;
+using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations.Schema;
 
 namespace CryptoSense.Models
 {
+    public enum UserRole
+    {
+        Admin,
+        User
+    }
+
+    public enum SignalDirection
+    {
+        Buy,   // LONG
+        Sell   // SHORT
+    }
+
+    public enum SignalStatus
+    {
+        Open,
+        Success,
+        Failed,
+        Neutral
+    }
+
+    public enum IndicatorVote
+    {
+        Bullish,
+        Bearish,
+        Neutral
+    }
+
     public class Kline
     {
         public long OpenTime { get; set; }
@@ -15,90 +44,275 @@ namespace CryptoSense.Models
         public DateTime Time => DateTimeOffset.FromUnixTimeMilliseconds(OpenTime).UtcDateTime;
     }
 
+    [Table("Users")]
+    public class UserAccount
+    {
+        [Key]
+        public int Id { get; set; }
+        
+        [Required]
+        [MaxLength(50)]
+        public string Username { get; set; } = "";
+        
+        [Required]
+        [MaxLength(255)]
+        public string PasswordHash { get; set; } = "";
+        
+        // Backward-compatibility helper for plain password validation / migration
+        [NotMapped]
+        public string Password { get; set; } = "";
+        
+        public UserRole Role { get; set; } = UserRole.User;
+        
+        [MaxLength(100)]
+        public string TelegramUsername { get; set; } = "";
+        
+        [MaxLength(50)]
+        public string TelegramChatId { get; set; } = "";
+        
+        public long? TelegramUserId { get; set; }
+        
+        public bool IsActive { get; set; } = true;
+        
+        public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;
+        public DateTime LastLoginAt { get; set; } = DateTime.UtcNow;
+    }
+
+    [Table("Signals")]
+    public class FuturesSignal
+    {
+        [Key]
+        public int Id { get; set; }
+        
+        public int SignalNumber { get; set; }
+        
+        [Required]
+        [MaxLength(20)]
+        public string Symbol { get; set; } = "";
+        
+        [NotMapped]
+        public string CleanSymbol => Symbol.Replace("USDT", "");
+        
+        public SignalDirection Direction { get; set; } = SignalDirection.Buy;
+        
+        [MaxLength(100)]
+        public string SignalType { get; set; } = "GÜCLÜ LONG 🟢"; // Display string
+        
+        [Required]
+        [MaxLength(10)]
+        public string Timeframe { get; set; } = "15m";
+        
+        [Column(TypeName = "decimal(18, 8)")]
+        public decimal EntryPrice { get; set; }
+        
+        [Column(TypeName = "decimal(18, 8)")]
+        public decimal CurrentPrice { get; set; }
+        
+        [Column(TypeName = "decimal(18, 8)")]
+        public decimal EntryLow { get; set; }
+        
+        [Column(TypeName = "decimal(18, 8)")]
+        public decimal EntryHigh { get; set; }
+        
+        [Column(TypeName = "decimal(18, 8)")]
+        public decimal TakeProfit1 { get; set; }
+        
+        [Column(TypeName = "decimal(18, 8)")]
+        public decimal TakeProfit2 { get; set; }
+        
+        [Column(TypeName = "decimal(18, 8)")]
+        public decimal TakeProfit3 { get; set; }
+        
+        [Column(TypeName = "decimal(18, 8)")]
+        public decimal StopLoss { get; set; }
+        
+        [Column(TypeName = "decimal(5, 2)")]
+        public decimal ConfluenceScore { get; set; } // 0..100
+        
+        public int Confidence { get; set; } // 0..100
+        
+        [NotMapped]
+        public System.Collections.Concurrent.ConcurrentDictionary<string, int> UserSignalNumbers { get; } = new();
+
+        public SignalStatus Status { get; set; } = SignalStatus.Open;
+        
+        [MaxLength(100)]
+        public string OutcomeStatus { get; set; } = "AKTİV 🟡";
+        
+        [Column(TypeName = "decimal(18, 8)")]
+        public decimal? ClosePrice { get; set; }
+        
+        [Column(TypeName = "decimal(8, 4)")]
+        public decimal? ResultPercent { get; set; }
+        
+        public decimal ProfitPercentAchieved { get; set; } = 0;
+        
+        public DateTime SourceCandleOpenTimeUtc { get; set; }
+        public DateTime GeneratedAt { get; set; } = DateTime.UtcNow;
+        public DateTime ExpiryTimeUtc { get; set; }
+        public DateTime? ClosedAt { get; set; }
+        public bool IsClosed { get; set; } = false;
+        
+        public bool Tp1Notified { get; set; } = false;
+        public bool Tp2Notified { get; set; } = false;
+        public bool Tp3Notified { get; set; } = false;
+        
+        public string TimestampFormatted { get; set; } = DateTime.Now.ToString("dd.MM.yyyy | HH:mm:ss");
+        
+        [NotMapped]
+        public List<string> AnalysisReasons { get; set; } = new();
+        
+        [NotMapped]
+        public BtcMarketCompass? BtcCompass { get; set; }
+        
+        [NotMapped]
+        public IndicatorResult? Indicators { get; set; }
+        
+        [MaxLength(100)]
+        public string NewsSentimentImpact { get; set; } = "Neytral";
+        
+        public List<SignalIndicatorSnapshot> IndicatorSnapshots { get; set; } = new();
+    }
+
+    [Table("SignalIndicatorSnapshots")]
+    public class SignalIndicatorSnapshot
+    {
+        [Key]
+        public int Id { get; set; }
+        
+        public int SignalId { get; set; }
+        
+        [Required]
+        [MaxLength(50)]
+        public string IndicatorName { get; set; } = "";
+        
+        [Column(TypeName = "decimal(18, 8)")]
+        public decimal Value { get; set; }
+        
+        public IndicatorVote Vote { get; set; } = IndicatorVote.Neutral;
+        
+        [Column(TypeName = "decimal(5, 2)")]
+        public decimal Weight { get; set; }
+    }
+
+    [Table("AuditLogs")]
+    public class AuditLog
+    {
+        [Key]
+        public int Id { get; set; }
+        
+        public int? AdminUserId { get; set; }
+        
+        [Required]
+        [MaxLength(50)]
+        public string Action { get; set; } = "";
+        
+        [MaxLength(100)]
+        public string TargetUsername { get; set; } = "";
+        
+        public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;
+    }
+
     public class IndicatorResult
     {
         // 1. RSI (14)
         public decimal Rsi { get; set; }
         public string RsiStatus { get; set; } = "Neytral";
+        public IndicatorVote RsiVote { get; set; } = IndicatorVote.Neutral;
 
         // 2. Stochastic RSI (14, 14, 3, 3)
         public decimal StochRsiK { get; set; }
         public decimal StochRsiD { get; set; }
         public string StochStatus { get; set; } = "Neytral";
+        public IndicatorVote StochVote { get; set; } = IndicatorVote.Neutral;
 
         // 3. MACD (12, 26, 9)
         public decimal Macd { get; set; }
         public decimal MacdSignal { get; set; }
         public decimal MacdHist { get; set; }
         public string MacdStatus { get; set; } = "Neytral";
+        public IndicatorVote MacdVote { get; set; } = IndicatorVote.Neutral;
 
-        // 4, 5, 6, 7. EMAs
+        // 4. EMAs (9, 20, 50, 200)
         public decimal Ema9 { get; set; }
         public decimal Ema20 { get; set; }
         public decimal Ema50 { get; set; }
         public decimal Ema200 { get; set; }
         public string EmaTrend { get; set; } = "Neytral";
+        public IndicatorVote EmaVote { get; set; } = IndicatorVote.Neutral;
 
-        // 8. SMA 20
+        // 5. SMA 20
         public decimal Sma20 { get; set; }
 
-        // 9. Bollinger Bands (20, 2)
+        // 6. Bollinger Bands (20, 2)
         public decimal BollingerUpper { get; set; }
         public decimal BollingerLower { get; set; }
         public decimal BollingerMiddle { get; set; }
         public decimal BollingerBandwidth { get; set; }
         public string BollingerStatus { get; set; } = "Neytral";
+        public IndicatorVote BollingerVote { get; set; } = IndicatorVote.Neutral;
 
-        // 10. ATR (14)
+        // 7. ATR (14)
         public decimal Atr { get; set; }
 
-        // 11. ADX (14) Trend Strength
+        // 8. ADX (14)
         public decimal Adx { get; set; }
         public decimal PlusDi { get; set; }
         public decimal MinusDi { get; set; }
-        public string AdxTrendStrength { get; set; } = "Z\u0259if Trend";
+        public string AdxTrendStrength { get; set; } = "Zəif Trend";
+        public IndicatorVote AdxVote { get; set; } = IndicatorVote.Neutral;
 
-        // 12. CCI (20)
+        // 9. CCI (20)
         public decimal Cci { get; set; }
         public string CciStatus { get; set; } = "Neytral";
+        public IndicatorVote CciVote { get; set; } = IndicatorVote.Neutral;
 
-        // 13. Williams %R (14)
+        // 10. Williams %R (14)
         public decimal WilliamsR { get; set; }
         public string WilliamsRStatus { get; set; } = "Neytral";
+        public IndicatorVote WilliamsRVote { get; set; } = IndicatorVote.Neutral;
 
-        // 14. SuperTrend (10, 3)
+        // 11. SuperTrend (10, 3)
         public decimal SuperTrend { get; set; }
         public string SuperTrendDirection { get; set; } = "Neytral";
+        public IndicatorVote SuperTrendVote { get; set; } = IndicatorVote.Neutral;
 
-        // 15. VWAP
+        // 12. VWAP
         public decimal Vwap { get; set; }
         public string VwapStatus { get; set; } = "Neytral";
+        public IndicatorVote VwapVote { get; set; } = IndicatorVote.Neutral;
 
-        // 16. OBV (On-Balance Volume)
+        // 13. OBV
         public decimal Obv { get; set; }
         public string ObvTrend { get; set; } = "Neytral";
+        public IndicatorVote ObvVote { get; set; } = IndicatorVote.Neutral;
 
-        // 17. Volume Surge EMA (20)
+        // 14. Volume Surge
         public decimal VolumeEma20 { get; set; }
         public decimal VolumeSurgeRatio { get; set; }
         public bool IsHighVolume { get; set; }
+        public IndicatorVote VolumeVote { get; set; } = IndicatorVote.Neutral;
 
-        // 18. Support & Resistance Pivots (Swing High/Low)
+        // 15. Support & Resistance Pivots
         public decimal SupportLevel { get; set; }
         public decimal ResistanceLevel { get; set; }
         public decimal PivotPoint { get; set; }
 
-        // 19. Fair Value Gaps (FVG) / Smart Money Concept
+        // 16. Fair Value Gaps (FVG)
         public bool HasBullishFvg { get; set; }
         public bool HasBearishFvg { get; set; }
-        public decimal FvgTop { get; set; }
-        public decimal FvgBottom { get; set; }
 
-        // 20. BTC Correlation / Alignment
+        // 17. BTC Correlation
         public string BtcAlignment { get; set; } = "Neytral";
 
-        // Confluence Scoring
-        public int ConfluenceScore { get; set; } // -100 to +100
+        // Weighted Confluence Scoring
+        public decimal TrendScore { get; set; }
+        public decimal MomentumScore { get; set; }
+        public decimal VolatilityScore { get; set; }
+        public decimal VolumeScore { get; set; }
+        public decimal MtfFactor { get; set; } = 1.0m;
+        public decimal ConfluenceScore { get; set; } // 0..100
+        
         public int BullishIndicatorsCount { get; set; }
         public int BearishIndicatorsCount { get; set; }
         public int NeutralIndicatorsCount { get; set; }
@@ -122,62 +336,17 @@ namespace CryptoSense.Models
         public string Source { get; set; } = "";
         public string Url { get; set; } = "";
         public DateTime PublishedAt { get; set; } = DateTime.UtcNow;
-        public string Sentiment { get; set; } = "NEYTRAL \u26AA";
+        public string Sentiment { get; set; } = "NEYTRAL ⚪";
         public int SentimentScore { get; set; }
     }
 
     public class NewsSentimentSummary
     {
         public int OverallScore { get; set; }
-        public string Status { get; set; } = "NEYTRAL \u26AA";
+        public string Status { get; set; } = "NEYTRAL ⚪";
         public int BullishCount { get; set; }
         public int BearishCount { get; set; }
         public List<CryptoNewsItem> LatestNews { get; set; } = new();
-    }
-
-    public class FuturesSignal
-    {
-        public int SignalNumber { get; set; } = 148;
-        public string Id { get; set; } = Guid.NewGuid().ToString("N");
-        public string Symbol { get; set; } = "";
-        public string CleanSymbol => Symbol.Replace("USDT", "");
-        public decimal CurrentPrice { get; set; }
-        public string Timeframe { get; set; } = "15m";
-        public string SignalType { get; set; } = "NEYTRAL"; // G??CL?? LONG, G??CL?? SHORT, NEYTRAL
-        public int Confidence { get; set; }
-        public decimal EntryLow { get; set; }
-        public decimal EntryHigh { get; set; }
-        public decimal TakeProfit1 { get; set; }
-        public decimal TakeProfit2 { get; set; }
-        public decimal TakeProfit3 { get; set; }
-        public decimal StopLoss { get; set; }
-        public decimal RiskRewardRatio { get; set; }
-        public List<string> AnalysisReasons { get; set; } = new();
-        public BtcMarketCompass? BtcCompass { get; set; }
-        public IndicatorResult? Indicators { get; set; }
-        public string NewsSentimentImpact { get; set; } = "Neytral";
-        public DateTime GeneratedAt { get; set; } = DateTime.UtcNow;
-        public string TimestampFormatted { get; set; } = DateTime.Now.ToString("dd.MM.yyyy | HH:mm:ss");
-        
-        public string OutcomeStatus { get; set; } = "AKT\u0130V \U0001F7E1";
-        public decimal ProfitPercentAchieved { get; set; } = 0;
-        public DateTime? ClosedAt { get; set; }
-        public bool IsClosed { get; set; } = false;
-        public bool Tp1Notified { get; set; } = false;
-        public bool Tp2Notified { get; set; } = false;
-        public bool Tp3Notified { get; set; } = false;
-    }
-
-    public class UserAccount
-    {
-        public string Username { get; set; } = "";
-        public string Password { get; set; } = "";
-        public string Role { get; set; } = "USER";
-        public string TelegramUsername { get; set; } = "";
-        public string TelegramChatId { get; set; } = "";
-        public bool IsActive { get; set; } = true;
-        public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
-        public DateTime LastLoginAt { get; set; } = DateTime.UtcNow;
     }
 
     public class CoinTicker
@@ -194,12 +363,13 @@ namespace CryptoSense.Models
     {
         public string SuperAdminTelegram { get; set; } = "@alimahammadov";
         public string SuperAdminChatId { get; set; } = "1219998176";
+        public long SuperAdminUserId { get; set; } = 1219998176;
         public string TelegramBotToken { get; set; } = "8671151605:AAHHPojQbGiSKtJUkeQQCnITfTHInQ3tX5U";
         public bool AutoScanEnabled { get; set; } = true;
-        public int MinConfidenceThreshold { get; set; } = 80;
+        public int MinConfidenceThreshold { get; set; } = 78;
         public List<string> SelectedCoins { get; set; } = new() { "BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT", "DOGEUSDT", "SUIUSDT", "PEPEUSDT", "AVAXUSDT" };
         public bool AlertAllCoins { get; set; } = true;
-        public string DefaultTimeframe { get; set; } = "15m";
+        public string DefaultTimeframe { get; set; } = "3m";
     }
 
     public class LoginRequest
@@ -212,5 +382,19 @@ namespace CryptoSense.Models
     {
         public string Username { get; set; } = "";
         public string Password { get; set; } = "";
+    }
+
+    public class PerformanceStats
+    {
+        public int TotalSignals { get; set; }
+        public int OpenSignals { get; set; }
+        public int SuccessSignals { get; set; }
+        public int FailedSignals { get; set; }
+        public int NeutralSignals { get; set; }
+        public decimal WinRatePercent { get; set; }
+        public decimal TotalNetProfitPercent { get; set; }
+        public decimal AvgProfitPerTradePercent { get; set; }
+        public decimal BestTradePercent { get; set; }
+        public decimal WorstTradePercent { get; set; }
     }
 }

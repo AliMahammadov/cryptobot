@@ -1,9 +1,12 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using CryptoSense.Data;
 using CryptoSense.Models;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
 
@@ -14,6 +17,7 @@ namespace CryptoSense.Services
         private readonly BinanceFuturesService _binanceService;
         private readonly SignalEngine _signalEngine;
         private readonly TelegramBotService _telegramService;
+        private readonly IServiceProvider _serviceProvider;
         private readonly AppConfig _config;
         private readonly Dictionary<string, DateTime> _lastAlertSent = new();
 
@@ -21,194 +25,290 @@ namespace CryptoSense.Services
             BinanceFuturesService binanceService,
             SignalEngine signalEngine,
             TelegramBotService telegramService,
+            IServiceProvider serviceProvider,
             IOptions<AppConfig> config)
         {
             _binanceService = binanceService;
             _signalEngine = signalEngine;
             _telegramService = telegramService;
+            _serviceProvider = serviceProvider;
             _config = config.Value;
         }
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
-            Console.WriteLine("KriptoBot 24/7 20-Indikatorlu Kvantitativ Skaner ve Netice Izleyici basladi.");
+            Console.WriteLine("KriptoBot v2 Kvantitativ Skaner və Nəticə İzləyicisi başladı.");
 
             while (!stoppingToken.IsCancellationRequested)
             {
                 try
                 {
-                    var tickers = await _binanceService.GetTopFuturesTickersAsync(30);
+                    var tickers = await _binanceService.GetTopFuturesTickersAsync(35);
                     var tickerDict = tickers.ToDictionary(t => t.Symbol, t => t.Price);
 
-                    // 1. LIVE SIGNAL OUTCOME TRACKER (TP, SL & EXACT CANDLE EXPIRATION)
-                    var activeSignals = SignalEngine.GetTrackedActiveSignals();
-                    foreach (var sig in activeSignals)
+                    // =========================================================================
+                    // 1. LIVE SIGNAL OUTCOME TRACKER (TP, SL & CANDLE EXPIRY EVALUATION)
+                    // =========================================================================
+                    using (var scope = _serviceProvider.CreateScope())
                     {
-                        if (tickerDict.TryGetValue(sig.Symbol, out var currentPrice))
+                        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+                        var activeSignals = await db.Signals
+                            .Where(s => s.Status == SignalStatus.Open && !s.IsClosed)
+                            .ToListAsync(stoppingToken);
+
+                        foreach (var sig in activeSignals)
                         {
-                            var isLong = sig.SignalType.Contains("LONG");
-                            var duration = sig.Timeframe switch
+                            if (tickerDict.TryGetValue(sig.Symbol, out var currentPrice))
                             {
-                                "1m" => TimeSpan.FromMinutes(1),
-                                "3m" => TimeSpan.FromMinutes(3),
-                                "5m" => TimeSpan.FromMinutes(5),
-                                "15m" => TimeSpan.FromMinutes(15),
-                                "1h" => TimeSpan.FromHours(1),
-                                "4h" => TimeSpan.FromHours(4),
-                                _ => TimeSpan.FromMinutes(15)
-                            };
+                                var isLong = sig.Direction == SignalDirection.Buy || sig.SignalType.Contains("LONG");
+                                var duration = sig.Timeframe switch
+                                {
+                                    "1m" => TimeSpan.FromMinutes(1),
+                                    "3m" => TimeSpan.FromMinutes(3),
+                                    "5m" => TimeSpan.FromMinutes(5),
+                                    "15m" => TimeSpan.FromMinutes(15),
+                                    "1h" => TimeSpan.FromHours(1),
+                                    "4h" => TimeSpan.FromHours(4),
+                                    _ => TimeSpan.FromMinutes(15)
+                                };
 
-                            var elapsed = DateTime.UtcNow - sig.GeneratedAt;
-                            bool isExpired = elapsed >= duration;
+                                var elapsed = DateTime.UtcNow - sig.GeneratedAt;
+                                bool isExpired = elapsed >= duration;
 
-                            if (isLong)
-                            {
-                                // Long TP3 Hit
-                                if (currentPrice >= sig.TakeProfit3 && !sig.Tp3Notified)
+                                if (isLong)
                                 {
-                                    sig.Tp3Notified = true;
-                                    sig.IsClosed = true;
-                                    sig.ClosedAt = DateTime.UtcNow;
-                                    var pct = Math.Round(((currentPrice - sig.EntryLow) / sig.EntryLow) * 100, 2);
-                                    SignalEngine.PersistSignals();
-                                    await _telegramService.SendOutcomeAlertAsync(sig, "H\u0259d\u0259f 3 (TP3)", currentPrice, pct);
+                                    // Long TP3 Hit
+                                    if (currentPrice >= sig.TakeProfit3 && !sig.Tp3Notified)
+                                    {
+                                        sig.Tp3Notified = true;
+                                        sig.IsClosed = true;
+                                        sig.Status = SignalStatus.Success;
+                                        sig.OutcomeStatus = "Hədəf 3 (TP3) (UĞURLU) ✅";
+                                        sig.ClosePrice = currentPrice;
+                                        sig.ClosedAt = DateTime.UtcNow;
+                                        sig.ResultPercent = Math.Round(((currentPrice - sig.EntryPrice) / sig.EntryPrice) * 100, 2);
+                                        await db.SaveChangesAsync(stoppingToken);
+                                        await _telegramService.SendOutcomeAlertAsync(sig, "Hədəf 3 (TP3)", currentPrice, sig.ResultPercent.Value);
+                                    }
+                                    // Long TP2 Hit
+                                    else if (currentPrice >= sig.TakeProfit2 && !sig.Tp2Notified)
+                                    {
+                                        sig.Tp2Notified = true;
+                                        sig.IsClosed = true;
+                                        sig.Status = SignalStatus.Success;
+                                        sig.OutcomeStatus = "Hədəf 2 (TP2) (UĞURLU) ✅";
+                                        sig.ClosePrice = currentPrice;
+                                        sig.ClosedAt = DateTime.UtcNow;
+                                        sig.ResultPercent = Math.Round(((currentPrice - sig.EntryPrice) / sig.EntryPrice) * 100, 2);
+                                        await db.SaveChangesAsync(stoppingToken);
+                                        await _telegramService.SendOutcomeAlertAsync(sig, "Hədəf 2 (TP2)", currentPrice, sig.ResultPercent.Value);
+                                    }
+                                    // Long TP1 Hit
+                                    else if (currentPrice >= sig.TakeProfit1 && !sig.Tp1Notified)
+                                    {
+                                        sig.Tp1Notified = true;
+                                        sig.IsClosed = true;
+                                        sig.Status = SignalStatus.Success;
+                                        sig.OutcomeStatus = "Hədəf 1 (TP1) (UĞURLU) ✅";
+                                        sig.ClosePrice = currentPrice;
+                                        sig.ClosedAt = DateTime.UtcNow;
+                                        sig.ResultPercent = Math.Round(((currentPrice - sig.EntryPrice) / sig.EntryPrice) * 100, 2);
+                                        await db.SaveChangesAsync(stoppingToken);
+                                        await _telegramService.SendOutcomeAlertAsync(sig, "Hədəf 1 (TP1)", currentPrice, sig.ResultPercent.Value);
+                                    }
+                                    // Long Stop Loss Hit (UGURSUZ)
+                                    else if (currentPrice <= sig.StopLoss && !sig.IsClosed)
+                                    {
+                                        sig.IsClosed = true;
+                                        sig.Status = SignalStatus.Failed;
+                                        sig.OutcomeStatus = "Stop Loss (SL) (UĞURSUZ) ❌";
+                                        sig.ClosePrice = currentPrice;
+                                        sig.ClosedAt = DateTime.UtcNow;
+                                        sig.ResultPercent = Math.Round(((currentPrice - sig.EntryPrice) / sig.EntryPrice) * 100, 2);
+                                        await db.SaveChangesAsync(stoppingToken);
+                                        await _telegramService.SendOutcomeAlertAsync(sig, "Stop Loss (SL)", currentPrice, sig.ResultPercent.Value);
+                                    }
+                                    // Long Candle Expiration
+                                    else if (isExpired && !sig.IsClosed)
+                                    {
+                                        sig.IsClosed = true;
+                                        sig.ClosePrice = currentPrice;
+                                        sig.ClosedAt = DateTime.UtcNow;
+                                        var pct = Math.Round(((currentPrice - sig.EntryPrice) / sig.EntryPrice) * 100, 2);
+                                        sig.ResultPercent = pct;
+
+                                        if (pct > 0.05m)
+                                        {
+                                            sig.Status = SignalStatus.Success;
+                                            sig.OutcomeStatus = $"{sig.Timeframe} Vaxtı Tamamlandı (MÜSBƏT) ✅";
+                                        }
+                                        else if (pct < -0.05m)
+                                        {
+                                            sig.Status = SignalStatus.Failed;
+                                            sig.OutcomeStatus = $"{sig.Timeframe} Vaxtı Tamamlandı (UĞURSUZ) ❌";
+                                        }
+                                        else
+                                        {
+                                            sig.Status = SignalStatus.Neutral;
+                                            sig.OutcomeStatus = $"{sig.Timeframe} Vaxtı Tamamlandı (NEYTRAL) ⚪";
+                                        }
+
+                                        await db.SaveChangesAsync(stoppingToken);
+                                        await _telegramService.SendOutcomeAlertAsync(sig, $"{sig.Timeframe} Vaxtı Tamamlandı", currentPrice, pct);
+                                    }
                                 }
-                                // Long TP2 Hit
-                                else if (currentPrice >= sig.TakeProfit2 && !sig.Tp2Notified)
+                                else // SHORT
                                 {
-                                    sig.Tp2Notified = true;
-                                    sig.IsClosed = true;
-                                    sig.ClosedAt = DateTime.UtcNow;
-                                    var pct = Math.Round(((currentPrice - sig.EntryLow) / sig.EntryLow) * 100, 2);
-                                    SignalEngine.PersistSignals();
-                                    await _telegramService.SendOutcomeAlertAsync(sig, "H\u0259d\u0259f 2 (TP2)", currentPrice, pct);
-                                }
-                                // Long TP1 Hit
-                                else if (currentPrice >= sig.TakeProfit1 && !sig.Tp1Notified)
-                                {
-                                    sig.Tp1Notified = true;
-                                    sig.IsClosed = true;
-                                    sig.ClosedAt = DateTime.UtcNow;
-                                    var pct = Math.Round(((currentPrice - sig.EntryLow) / sig.EntryLow) * 100, 2);
-                                    SignalEngine.PersistSignals();
-                                    await _telegramService.SendOutcomeAlertAsync(sig, "H\u0259d\u0259f 1 (TP1)", currentPrice, pct);
-                                }
-                                // Long Stop Loss Hit (UGURSUZ)
-                                else if (currentPrice <= sig.StopLoss && !sig.IsClosed)
-                                {
-                                    sig.IsClosed = true;
-                                    sig.ClosedAt = DateTime.UtcNow;
-                                    var pct = Math.Round(((currentPrice - sig.EntryLow) / sig.EntryLow) * 100, 2);
-                                    SignalEngine.PersistSignals();
-                                    await _telegramService.SendOutcomeAlertAsync(sig, "Stop Loss (SL)", currentPrice, pct);
-                                }
-                                // EXACT TIMEFRAME EXPIRATION (3m, 5m, 15m, 1h, 4h) -> REPORT FINAL CANDLE OUTCOME
-                                else if (isExpired && !sig.IsClosed)
-                                {
-                                    sig.IsClosed = true;
-                                    sig.ClosedAt = DateTime.UtcNow;
-                                    var pct = Math.Round(((currentPrice - sig.EntryLow) / sig.EntryLow) * 100, 2);
-                                    var outcomeName = pct >= 0 ? $"{sig.Timeframe} Vaxt\u0131 Tamamland\u0131 (M\u00FCsb\u0259t)" : $"{sig.Timeframe} Vaxt\u0131 Tamamland\u0131 (M\u0259nfi)";
-                                    SignalEngine.PersistSignals();
-                                    await _telegramService.SendOutcomeAlertAsync(sig, outcomeName, currentPrice, pct);
-                                }
-                            }
-                            else if (sig.SignalType.Contains("SHORT"))
-                            {
-                                // Short TP3 Hit
-                                if (currentPrice <= sig.TakeProfit3 && !sig.Tp3Notified)
-                                {
-                                    sig.Tp3Notified = true;
-                                    sig.IsClosed = true;
-                                    sig.ClosedAt = DateTime.UtcNow;
-                                    var pct = Math.Round(((sig.EntryHigh - currentPrice) / sig.EntryHigh) * 100, 2);
-                                    SignalEngine.PersistSignals();
-                                    await _telegramService.SendOutcomeAlertAsync(sig, "H\u0259d\u0259f 3 (TP3)", currentPrice, pct);
-                                }
-                                // Short TP2 Hit
-                                else if (currentPrice <= sig.TakeProfit2 && !sig.Tp2Notified)
-                                {
-                                    sig.Tp2Notified = true;
-                                    sig.IsClosed = true;
-                                    sig.ClosedAt = DateTime.UtcNow;
-                                    var pct = Math.Round(((sig.EntryHigh - currentPrice) / sig.EntryHigh) * 100, 2);
-                                    SignalEngine.PersistSignals();
-                                    await _telegramService.SendOutcomeAlertAsync(sig, "H\u0259d\u0259f 2 (TP2)", currentPrice, pct);
-                                }
-                                // Short TP1 Hit
-                                else if (currentPrice <= sig.TakeProfit1 && !sig.Tp1Notified)
-                                {
-                                    sig.Tp1Notified = true;
-                                    sig.IsClosed = true;
-                                    sig.ClosedAt = DateTime.UtcNow;
-                                    var pct = Math.Round(((sig.EntryHigh - currentPrice) / sig.EntryHigh) * 100, 2);
-                                    SignalEngine.PersistSignals();
-                                    await _telegramService.SendOutcomeAlertAsync(sig, "H\u0259d\u0259f 1 (TP1)", currentPrice, pct);
-                                }
-                                // Short Stop Loss Hit (UGURSUZ)
-                                else if (currentPrice >= sig.StopLoss && !sig.IsClosed)
-                                {
-                                    sig.IsClosed = true;
-                                    sig.ClosedAt = DateTime.UtcNow;
-                                    var pct = Math.Round(((sig.EntryHigh - currentPrice) / sig.EntryHigh) * 100, 2);
-                                    SignalEngine.PersistSignals();
-                                    await _telegramService.SendOutcomeAlertAsync(sig, "Stop Loss (SL)", currentPrice, pct);
-                                }
-                                // EXACT TIMEFRAME EXPIRATION (3m, 5m, 15m, 1h, 4h) -> REPORT FINAL CANDLE OUTCOME
-                                else if (isExpired && !sig.IsClosed)
-                                {
-                                    sig.IsClosed = true;
-                                    sig.ClosedAt = DateTime.UtcNow;
-                                    var pct = Math.Round(((sig.EntryHigh - currentPrice) / sig.EntryHigh) * 100, 2);
-                                    var outcomeName = pct >= 0 ? $"{sig.Timeframe} Vaxt\u0131 Tamamland\u0131 (M\u00FCsb\u0259t)" : $"{sig.Timeframe} Vaxt\u0131 Tamamland\u0131 (M\u0259nfi)";
-                                    SignalEngine.PersistSignals();
-                                    await _telegramService.SendOutcomeAlertAsync(sig, outcomeName, currentPrice, pct);
+                                    // Short TP3 Hit (Price drops to or below TP3)
+                                    if (currentPrice <= sig.TakeProfit3 && !sig.Tp3Notified)
+                                    {
+                                        sig.Tp3Notified = true;
+                                        sig.IsClosed = true;
+                                        sig.Status = SignalStatus.Success;
+                                        sig.OutcomeStatus = "Hədəf 3 (TP3) (UĞURLU) ✅";
+                                        sig.ClosePrice = currentPrice;
+                                        sig.ClosedAt = DateTime.UtcNow;
+                                        sig.ResultPercent = Math.Round(((sig.EntryPrice - currentPrice) / sig.EntryPrice) * 100, 2);
+                                        await db.SaveChangesAsync(stoppingToken);
+                                        await _telegramService.SendOutcomeAlertAsync(sig, "Hədəf 3 (TP3)", currentPrice, sig.ResultPercent.Value);
+                                    }
+                                    // Short TP2 Hit
+                                    else if (currentPrice <= sig.TakeProfit2 && !sig.Tp2Notified)
+                                    {
+                                        sig.Tp2Notified = true;
+                                        sig.IsClosed = true;
+                                        sig.Status = SignalStatus.Success;
+                                        sig.OutcomeStatus = "Hədəf 2 (TP2) (UĞURLU) ✅";
+                                        sig.ClosePrice = currentPrice;
+                                        sig.ClosedAt = DateTime.UtcNow;
+                                        sig.ResultPercent = Math.Round(((sig.EntryPrice - currentPrice) / sig.EntryPrice) * 100, 2);
+                                        await db.SaveChangesAsync(stoppingToken);
+                                        await _telegramService.SendOutcomeAlertAsync(sig, "Hədəf 2 (TP2)", currentPrice, sig.ResultPercent.Value);
+                                    }
+                                    // Short TP1 Hit
+                                    else if (currentPrice <= sig.TakeProfit1 && !sig.Tp1Notified)
+                                    {
+                                        sig.Tp1Notified = true;
+                                        sig.IsClosed = true;
+                                        sig.Status = SignalStatus.Success;
+                                        sig.OutcomeStatus = "Hədəf 1 (TP1) (UĞURLU) ✅";
+                                        sig.ClosePrice = currentPrice;
+                                        sig.ClosedAt = DateTime.UtcNow;
+                                        sig.ResultPercent = Math.Round(((sig.EntryPrice - currentPrice) / sig.EntryPrice) * 100, 2);
+                                        await db.SaveChangesAsync(stoppingToken);
+                                        await _telegramService.SendOutcomeAlertAsync(sig, "Hədəf 1 (TP1)", currentPrice, sig.ResultPercent.Value);
+                                    }
+                                    // Short Stop Loss Hit (Price rises to or above SL -> STRICT LOSS & FAILED!)
+                                    else if (currentPrice >= sig.StopLoss && !sig.IsClosed)
+                                    {
+                                        sig.IsClosed = true;
+                                        sig.Status = SignalStatus.Failed;
+                                        sig.OutcomeStatus = "Stop Loss (SL) (UĞURSUZ) ❌";
+                                        sig.ClosePrice = currentPrice;
+                                        sig.ClosedAt = DateTime.UtcNow;
+                                        // PnL for short when price rose is strictly negative
+                                        var pct = Math.Round(((sig.EntryPrice - currentPrice) / sig.EntryPrice) * 100, 2);
+                                        if (pct > 0) pct = -Math.Abs(pct);
+                                        sig.ResultPercent = pct;
+                                        await db.SaveChangesAsync(stoppingToken);
+                                        await _telegramService.SendOutcomeAlertAsync(sig, "Stop Loss (SL)", currentPrice, pct);
+                                    }
+                                    // Short Candle Expiration
+                                    else if (isExpired && !sig.IsClosed)
+                                    {
+                                        sig.IsClosed = true;
+                                        sig.ClosePrice = currentPrice;
+                                        sig.ClosedAt = DateTime.UtcNow;
+                                        var pct = Math.Round(((sig.EntryPrice - currentPrice) / sig.EntryPrice) * 100, 2);
+                                        sig.ResultPercent = pct;
+
+                                        if (pct > 0.05m)
+                                        {
+                                            sig.Status = SignalStatus.Success;
+                                            sig.OutcomeStatus = $"{sig.Timeframe} Vaxtı Tamamlandı (MÜSBƏT) ✅";
+                                        }
+                                        else if (pct < -0.05m)
+                                        {
+                                            sig.Status = SignalStatus.Failed;
+                                            sig.OutcomeStatus = $"{sig.Timeframe} Vaxtı Tamamlandı (UĞURSUZ) ❌";
+                                        }
+                                        else
+                                        {
+                                            sig.Status = SignalStatus.Neutral;
+                                            sig.OutcomeStatus = $"{sig.Timeframe} Vaxtı Tamamlandı (NEYTRAL) ⚪";
+                                        }
+
+                                        await db.SaveChangesAsync(stoppingToken);
+                                        await _telegramService.SendOutcomeAlertAsync(sig, $"{sig.Timeframe} Vaxtı Tamamlandı", currentPrice, pct);
+                                    }
                                 }
                             }
                         }
                     }
 
-                    // 2. AUTOMATIC 24/7 SCAN FOR FRESH 90%+ SIGNALS
-                    var activeTimeframes = new HashSet<string> { "15m", "5m", "3m", "1h" };
+                    // =========================================================================
+                    // 2. AUTOMATIC SCANNER FOR SUBSCRIBED TIMEFRAMES & COINS
+                    // =========================================================================
+                    var activeTimeframes = new HashSet<string>();
+                    var subscribedCoins = new HashSet<string>();
+
                     foreach (var s in TelegramBotService.UserPreferences.Values)
                     {
                         if (s.IsActive)
                         {
-                            if (s.Timeframe == "Ham\u0131s\u0131" || s.Timeframe == "Hamisi")
+                            if (s.Timeframe == "Hamısı" || s.Timeframe == "Hamisi")
                             {
                                 activeTimeframes.Add("3m");
                                 activeTimeframes.Add("5m");
                                 activeTimeframes.Add("15m");
                                 activeTimeframes.Add("1h");
-                                activeTimeframes.Add("4h");
                             }
                             else
                             {
                                 activeTimeframes.Add(s.Timeframe);
                             }
+
+                            foreach (var c in s.Coins) subscribedCoins.Add(c);
                         }
                     }
 
-                    var topCoins = new[] { "SOLUSDT", "BTCUSDT", "ETHUSDT", "DOGEUSDT", "XRPUSDT", "BNBUSDT", "SUIUSDT", "PEPEUSDT", "AVAXUSDT", "NEARUSDT", "LINKUSDT", "ADAUSDT" };
+                    // Baseline coins if users selected empty
+                    if (subscribedCoins.Count == 0)
+                    {
+                        var defaultCoins = new[] { "BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT", "DOGEUSDT", "SUIUSDT", "PEPEUSDT", "AVAXUSDT" };
+                        foreach (var c in defaultCoins) subscribedCoins.Add(c);
+                    }
+
+                    if (activeTimeframes.Count == 0)
+                    {
+                        activeTimeframes.Add("3m");
+                        activeTimeframes.Add("15m");
+                    }
 
                     foreach (var tf in activeTimeframes)
                     {
                         if (stoppingToken.IsCancellationRequested) break;
 
-                        foreach (var sym in topCoins)
+                        foreach (var sym in subscribedCoins)
                         {
                             if (stoppingToken.IsCancellationRequested) break;
 
-                            var signal = await _signalEngine.AnalyzeCoinAsync(sym, tf);
-                            if (signal.Confidence >= 88 && (signal.SignalType.Contains("LONG") || signal.SignalType.Contains("SHORT")))
+                            try
                             {
-                                var alertKey = $"{signal.Symbol}_{signal.Timeframe}";
-                                if (!_lastAlertSent.TryGetValue(alertKey, out var lastTime) || 
-                                    DateTime.UtcNow - lastTime > TimeSpan.FromMinutes(8))
+                                var signal = await _signalEngine.AnalyzeCoinAsync(sym, tf, isLiveScan: true);
+                                if (signal.Confidence >= _config.MinConfidenceThreshold && (signal.SignalType.Contains("LONG") || signal.SignalType.Contains("SHORT")))
                                 {
-                                    _lastAlertSent[alertKey] = DateTime.UtcNow;
-                                    await _telegramService.SendSignalAlertAsync(signal);
+                                    var alertKey = $"{signal.Symbol}_{signal.Timeframe}_{signal.SourceCandleOpenTimeUtc:yyyyMMddHHmmss}";
+                                    if (!_lastAlertSent.ContainsKey(alertKey))
+                                    {
+                                        _lastAlertSent[alertKey] = DateTime.UtcNow;
+                                        await _telegramService.SendSignalAlertAsync(signal);
+                                    }
                                 }
+                            }
+                            catch (Exception coinEx)
+                            {
+                                Console.WriteLine($"Coin scan error ({sym}): {coinEx.Message}");
                             }
                         }
                     }
@@ -218,7 +318,7 @@ namespace CryptoSense.Services
                     Console.WriteLine($"Scanner error: {ex.Message}");
                 }
 
-                await Task.Delay(3000, stoppingToken);
+                await Task.Delay(2500, stoppingToken);
             }
         }
     }

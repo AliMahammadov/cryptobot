@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="az">
 <head>
   <meta charset="utf-8">
@@ -91,15 +91,41 @@
     <div id="tabSignals" class="tab-pane">
       
       <div style="margin-bottom:12px;">
-        <h2 style="font-size:18px; font-weight:800; margin-bottom:4px;">âš¡ 90%+ GÃ¼clÃ¼ Futures SiqnallarÄ±</h2>
-        <p style="font-size:12px; color:var(--text-secondary);">YÃ¼ksÉ™k dÉ™qiqlikli, sadÉ™ vÉ™ tÉ™sdiqlÉ™nmiÅŸ giriÅŸ nÃ¶qtÉ™lÉ™ri</p>
+        <h2 style="font-size:18px; font-weight:800; margin-bottom:4px;">⚡ Kvantitativ Futures Siqnalları (v2)</h2>
+        <p style="font-size:12px; color:var(--text-secondary);">Şəffaf PnL, Confluence balı və real zamanlı nəticə izləməsi</p>
+      </div>
+
+      <!-- Real Performance Stats Banner -->
+      <div id="statsBanner" class="glass-card" style="margin-bottom:12px; padding:12px 14px; background:linear-gradient(135deg, rgba(16,24,40,0.8), rgba(23,32,51,0.9)); border:1px solid rgba(0,240,255,0.2);">
+        <div style="font-size:11px; font-weight:800; color:var(--neon-cyan); text-transform:uppercase; margin-bottom:8px; display:flex; justify-content:space-between;">
+          <span>📊 Sistemin Real Statistikası (Şəffaf)</span>
+          <span id="statWinRate" style="color:var(--neon-green); font-weight:900;">Win Rate: 0%</span>
+        </div>
+        <div style="display:grid; grid-template-columns:repeat(4, 1fr); gap:6px; text-align:center;">
+          <div style="background:rgba(0,0,0,0.3); padding:6px; border-radius:6px;">
+            <div style="font-size:9px; color:var(--text-muted);">CƏMİ</div>
+            <div id="statTotal" style="font-size:14px; font-weight:800; font-family:var(--font-mono);">0</div>
+          </div>
+          <div style="background:rgba(0,0,0,0.3); padding:6px; border-radius:6px;">
+            <div style="font-size:9px; color:var(--text-muted);">UĞURLU</div>
+            <div id="statWins" style="font-size:14px; font-weight:800; color:var(--neon-green); font-family:var(--font-mono);">0</div>
+          </div>
+          <div style="background:rgba(0,0,0,0.3); padding:6px; border-radius:6px;">
+            <div style="font-size:9px; color:var(--text-muted);">UĞURSUZ</div>
+            <div id="statLosses" style="font-size:14px; font-weight:800; color:var(--neon-red); font-family:var(--font-mono);">0</div>
+          </div>
+          <div style="background:rgba(0,0,0,0.3); padding:6px; border-radius:6px;">
+            <div style="font-size:9px; color:var(--text-muted);">XALİS PnL</div>
+            <div id="statNetPnl" style="font-size:14px; font-weight:800; color:var(--neon-cyan); font-family:var(--font-mono);">0.0%</div>
+          </div>
+        </div>
       </div>
 
       <div class="signal-feed-filters">
-        <button class="filter-btn active" data-filter="all">BÃ¼tÃ¼n Siqnallar</button>
-        <button class="filter-btn" data-filter="long">ğŸŸ¢ Long</button>
-        <button class="filter-btn" data-filter="short">ğŸ”´ Short</button>
-        <button class="filter-btn" data-filter="high">ğŸ”¥ 90%+</button>
+        <button class="filter-btn active" data-filter="all">Bütün Siqnallar</button>
+        <button class="filter-btn" data-filter="long">🟢 Long</button>
+        <button class="filter-btn" data-filter="short">🔴 Short</button>
+        <button class="filter-btn" data-filter="high">🔥 78%+</button>
       </div>
 
       <div id="signalsFeedContainer">

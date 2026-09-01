@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using CryptoSense.Models;
@@ -7,7 +7,7 @@ namespace CryptoSense.Services
 {
     public class IndicatorService
     {
-        public IndicatorResult CalculateIndicators(List<Kline> klines)
+        public IndicatorResult CalculateIndicators(List<Kline> klines, BtcMarketCompass? btcCompass = null)
         {
             var res = new IndicatorResult();
             if (klines == null || klines.Count < 35) return res;
@@ -17,180 +17,294 @@ namespace CryptoSense.Services
             var lows = klines.Select(k => k.Low).ToList();
             var volumes = klines.Select(k => k.Volume).ToList();
             var lastClose = closes.Last();
+            var lastOpen = klines.Last().Open;
 
             // 1. RSI (14)
             res.Rsi = CalculateRsi(closes, 14);
-            if (res.Rsi <= 32) res.RsiStatus = "H\u0259ddind\u0259n Art\u0131q Sat\u0131\u015F (Oversold Dip)";
-            else if (res.Rsi >= 68) res.RsiStatus = "H\u0259ddind\u0259n Art\u0131q Al\u0131\u015F (Overbought Top)";
-            else if (res.Rsi >= 52) res.RsiStatus = "Sa\u011Flam Al\u0131\u015F Zonas\u0131";
-            else res.RsiStatus = "Sat\u0131\u015F Meylli";
+            if (res.Rsi <= 32)
+            {
+                res.RsiStatus = "Həddindən Artıq Satış (Oversold Dip)";
+                res.RsiVote = IndicatorVote.Bullish;
+            }
+            else if (res.Rsi >= 68)
+            {
+                res.RsiStatus = "Həddindən Artıq Alış (Overbought Top)";
+                res.RsiVote = IndicatorVote.Bearish;
+            }
+            else if (res.Rsi >= 50)
+            {
+                res.RsiStatus = "Müsbət Alış Zonasında";
+                res.RsiVote = IndicatorVote.Bullish;
+            }
+            else
+            {
+                res.RsiStatus = "Satış Meylli";
+                res.RsiVote = IndicatorVote.Bearish;
+            }
 
             // 2. Stochastic RSI (14, 14, 3, 3)
             var (stochK, stochD) = CalculateStochRsi(closes, 14, 3, 3);
             res.StochRsiK = stochK;
             res.StochRsiD = stochD;
-            if (stochK <= 20 && stochK > stochD) res.StochStatus = "Bullish Cross (Dipd\u0259n Qay\u0131d\u0131\u015F)";
-            else if (stochK >= 80 && stochK < stochD) res.StochStatus = "Bearish Cross (Zirv\u0259d\u0259n D\u00FCz\u0259li\u015F)";
-            else if (stochK > stochD) res.StochStatus = "Al\u0131\u015F \u0130mpulsu";
-            else res.StochStatus = "Sat\u0131\u015F \u0130mpulsu";
+            if (stochK <= 20 && stochK > stochD)
+            {
+                res.StochStatus = "Bullish Cross (Dipdən Qayıdış)";
+                res.StochVote = IndicatorVote.Bullish;
+            }
+            else if (stochK >= 80 && stochK < stochD)
+            {
+                res.StochStatus = "Bearish Cross (Zirvədən Düzəliş)";
+                res.StochVote = IndicatorVote.Bearish;
+            }
+            else if (stochK > stochD)
+            {
+                res.StochStatus = "Alış İmpulsu";
+                res.StochVote = IndicatorVote.Bullish;
+            }
+            else
+            {
+                res.StochStatus = "Satış İmpulsu";
+                res.StochVote = IndicatorVote.Bearish;
+            }
 
             // 3. MACD (12, 26, 9)
             var (macd, signal, hist) = CalculateMacd(closes);
             res.Macd = macd;
             res.MacdSignal = signal;
             res.MacdHist = hist;
-            if (hist > 0 && macd > signal) res.MacdStatus = "G\u00FCcl\u00FC Bullish Momentum";
-            else if (hist < 0 && macd < signal) res.MacdStatus = "G\u00FCcl\u00FC Bearish Momentum";
-            else res.MacdStatus = "K\u0259si\u015Fm\u0259 \u018Fr\u0259f\u0259sind\u0259";
+            if (hist > 0 && macd > signal)
+            {
+                res.MacdStatus = "Güclü Bullish Momentum";
+                res.MacdVote = IndicatorVote.Bullish;
+            }
+            else if (hist < 0 && macd < signal)
+            {
+                res.MacdStatus = "Güclü Bearish Momentum";
+                res.MacdVote = IndicatorVote.Bearish;
+            }
+            else
+            {
+                res.MacdStatus = "Kəsişmə Ərəfəsində";
+                res.MacdVote = IndicatorVote.Neutral;
+            }
 
-            // 4, 5, 6, 7. EMAs
+            // 4. EMAs (9, 20, 50, 200)
             res.Ema9 = CalculateEma(closes, 9);
             res.Ema20 = CalculateEma(closes, 20);
             res.Ema50 = CalculateEma(closes, 50);
             res.Ema200 = klines.Count >= 200 ? CalculateEma(closes, 200) : res.Ema50;
 
-            if (res.Ema20 > res.Ema50 && lastClose > res.Ema20) res.EmaTrend = "G\u00FCcl\u00FC Y\u00FCks\u0259li\u015F (Bullish)";
-            else if (res.Ema20 > res.Ema50) res.EmaTrend = "M\u00FCsb\u0259t Trend";
-            else if (res.Ema20 < res.Ema50 && lastClose < res.Ema20) res.EmaTrend = "G\u00FCcl\u00FC Eni\u015F (Bearish)";
-            else res.EmaTrend = "M\u0259nfi Trend";
+            if (res.Ema20 > res.Ema50 && lastClose > res.Ema20)
+            {
+                res.EmaTrend = "Güclü Yüksəliş (Bullish)";
+                res.EmaVote = IndicatorVote.Bullish;
+            }
+            else if (res.Ema20 > res.Ema50)
+            {
+                res.EmaTrend = "Müsbət Trend";
+                res.EmaVote = IndicatorVote.Bullish;
+            }
+            else if (res.Ema20 < res.Ema50 && lastClose < res.Ema20)
+            {
+                res.EmaTrend = "Güclü Eniş (Bearish)";
+                res.EmaVote = IndicatorVote.Bearish;
+            }
+            else
+            {
+                res.EmaTrend = "Mənfi Trend";
+                res.EmaVote = IndicatorVote.Bearish;
+            }
 
-            // 8. SMA 20
+            // 5. SMA 20
             res.Sma20 = closes.Skip(Math.Max(0, closes.Count - 20)).Average();
 
-            // 9. Bollinger Bands (20, 2)
+            // 6. Bollinger Bands (20, 2)
             var (bUpper, bLower, bBandwidth) = CalculateBollingerBands(closes, 20, 2m);
             res.BollingerUpper = bUpper;
             res.BollingerLower = bLower;
             res.BollingerMiddle = res.Sma20;
             res.BollingerBandwidth = bBandwidth;
-            if (lastClose <= bLower) res.BollingerStatus = "A\u015Fa\u011F\u0131 Band Toxunu\u015Fu (Al\u0131\u015F Reaksiyas\u0131)";
-            else if (lastClose >= bUpper) res.BollingerStatus = "Yuxar\u0131 Band Toxunu\u015Fu (Sat\u0131\u015F Reaksiyas\u0131)";
-            else res.BollingerStatus = "Normal Band Aral\u0131\u011F\u0131";
+            if (lastClose <= bLower)
+            {
+                res.BollingerStatus = "Aşağı Band Toxunuşu (Alış Reaksiyası)";
+                res.BollingerVote = IndicatorVote.Bullish;
+            }
+            else if (lastClose >= bUpper)
+            {
+                res.BollingerStatus = "Yuxarı Band Toxunuşu (Satış Reaksiyası)";
+                res.BollingerVote = IndicatorVote.Bearish;
+            }
+            else if (lastClose > res.BollingerMiddle)
+            {
+                res.BollingerStatus = "Orta Xətt Üzərində (Müsbət)";
+                res.BollingerVote = IndicatorVote.Bullish;
+            }
+            else
+            {
+                res.BollingerStatus = "Orta Xətt Altında (Mənfi)";
+                res.BollingerVote = IndicatorVote.Bearish;
+            }
 
-            // 10. ATR (14)
+            // 7. ATR (14)
             res.Atr = CalculateAtr(klines, 14);
 
-            // 11. ADX (14) Trend Strength
+            // 8. ADX (14)
             var (adx, pDi, mDi) = CalculateAdx(klines, 14);
             res.Adx = adx;
             res.PlusDi = pDi;
             res.MinusDi = mDi;
-            if (adx >= 25 && pDi > mDi) res.AdxTrendStrength = "G\u00FCcl\u00FC Y\u00FCks\u0259li\u015F Trendi";
-            else if (adx >= 25 && mDi > pDi) res.AdxTrendStrength = "G\u00FCcl\u00FC D\u00FC\u015F\u00FC\u015F Trendi";
-            else res.AdxTrendStrength = "Z\u0259if / Konsolidasiya";
+            if (adx >= 22 && pDi > mDi)
+            {
+                res.AdxTrendStrength = "Güclü Yüksəliş Trendi";
+                res.AdxVote = IndicatorVote.Bullish;
+            }
+            else if (adx >= 22 && mDi > pDi)
+            {
+                res.AdxTrendStrength = "Güclü Düşüş Trendi";
+                res.AdxVote = IndicatorVote.Bearish;
+            }
+            else
+            {
+                res.AdxTrendStrength = "Zəif / Konsolidasiya";
+                res.AdxVote = IndicatorVote.Neutral;
+            }
 
-            // 12. CCI (20)
+            // 9. CCI (20)
             res.Cci = CalculateCci(klines, 20);
-            if (res.Cci <= -100) res.CciStatus = "D\u0259rin Sat\u0131\u015F Zonas\u0131";
-            else if (res.Cci >= 100) res.CciStatus = "G\u00FCcl\u00FC Al\u0131\u015F Zonas\u0131";
-            else res.CciStatus = "Neytral S\u0259viyy\u0259";
+            if (res.Cci <= -100)
+            {
+                res.CciStatus = "Dərin Satış Zonasında";
+                res.CciVote = IndicatorVote.Bullish;
+            }
+            else if (res.Cci >= 100)
+            {
+                res.CciStatus = "Güclü Alış Zonasında";
+                res.CciVote = IndicatorVote.Bearish;
+            }
+            else if (res.Cci > 0)
+            {
+                res.CciStatus = "Müsbət İmpuls";
+                res.CciVote = IndicatorVote.Bullish;
+            }
+            else
+            {
+                res.CciStatus = "Mənfi İmpuls";
+                res.CciVote = IndicatorVote.Bearish;
+            }
 
-            // 13. Williams %R (14)
+            // 10. Williams %R (14)
             res.WilliamsR = CalculateWilliamsR(klines, 14);
-            if (res.WilliamsR <= -80) res.WilliamsRStatus = "A\u015Fa\u011F\u0131 Hadis\u0259 (Dibin Se\u00E7imi)";
-            else if (res.WilliamsR >= -20) res.WilliamsRStatus = "Zirv\u0259 Hadis\u0259si";
-            else res.WilliamsRStatus = "Neytral";
+            if (res.WilliamsR <= -80)
+            {
+                res.WilliamsRStatus = "Aşağı Hadisə (Dibin Seçimi)";
+                res.WilliamsRVote = IndicatorVote.Bullish;
+            }
+            else if (res.WilliamsR >= -20)
+            {
+                res.WilliamsRStatus = "Zirvə Hadisəsi";
+                res.WilliamsRVote = IndicatorVote.Bearish;
+            }
+            else
+            {
+                res.WilliamsRStatus = "Neytral";
+                res.WilliamsRVote = IndicatorVote.Neutral;
+            }
 
-            // 14. SuperTrend (10, 3)
+            // 11. SuperTrend (10, 3)
             var (superTrend, isBullish) = CalculateSuperTrend(klines, 10, 3.0m);
             res.SuperTrend = superTrend;
-            res.SuperTrendDirection = isBullish ? "Y\u00DCKS\u018FL\u0130\u015E (BULLISH) \U0001F7E2" : "EN\u0130\u015E (BEARISH) \U0001F534";
+            res.SuperTrendDirection = isBullish ? "YÜKSƏLİŞ (BULLISH) 🟢" : "ENİŞ (BEARISH) 🔴";
+            res.SuperTrendVote = isBullish ? IndicatorVote.Bullish : IndicatorVote.Bearish;
 
-            // 15. VWAP
+            // 12. VWAP
             res.Vwap = CalculateVwap(klines);
-            res.VwapStatus = lastClose >= res.Vwap ? "VWAP \u00DCz\u0259rind\u0259 (Al\u0131c\u0131 T\u0259r\u0259f)" : "VWAP Alt\u0131nda (Sat\u0131c\u0131 T\u0259r\u0259f)";
+            res.VwapStatus = lastClose >= res.Vwap ? "VWAP Üzərində (Alıcı Tərəf)" : "VWAP Altında (Satıcı Tərəf)";
+            res.VwapVote = lastClose >= res.Vwap ? IndicatorVote.Bullish : IndicatorVote.Bearish;
 
-            // 16. OBV (On-Balance Volume)
+            // 13. OBV
             res.Obv = CalculateObv(klines);
-            res.ObvTrend = res.Obv >= 0 ? "H\u0259cm Toplan\u0131r (Akumulyasiya)" : "H\u0259cm \u00C7\u0131x\u0131r (Distribusiya)";
+            res.ObvTrend = res.Obv >= 0 ? "Həcm Toplanır (Akumulyasiya)" : "Həcm Çıxır (Distribusiya)";
+            res.ObvVote = res.Obv >= 0 ? IndicatorVote.Bullish : IndicatorVote.Bearish;
 
-            // 17. Volume Surge (20)
+            // 14. Volume Surge (20)
             res.VolumeEma20 = CalculateEma(volumes, 20);
             res.VolumeSurgeRatio = res.VolumeEma20 > 0 ? Math.Round(volumes.Last() / res.VolumeEma20, 2) : 1.0m;
-            res.IsHighVolume = res.VolumeSurgeRatio >= 1.4m;
+            res.IsHighVolume = res.VolumeSurgeRatio >= 1.3m;
+            if (res.IsHighVolume)
+            {
+                res.VolumeVote = lastClose >= lastOpen ? IndicatorVote.Bullish : IndicatorVote.Bearish;
+            }
+            else
+            {
+                res.VolumeVote = IndicatorVote.Neutral;
+            }
 
-            // 18. Support & Resistance Pivots
+            // 15. Support & Resistance Pivots
             var recentLows = lows.Skip(Math.Max(0, lows.Count - 35)).ToList();
             var recentHighs = highs.Skip(Math.Max(0, highs.Count - 35)).ToList();
             res.SupportLevel = Math.Round(recentLows.OrderBy(l => l).Take(3).Average(), 4);
             res.ResistanceLevel = Math.Round(recentHighs.OrderByDescending(h => h).Take(3).Average(), 4);
             res.PivotPoint = Math.Round((highs.Last() + lows.Last() + closes.Last()) / 3, 4);
 
-            // 19. Fair Value Gaps (FVG)
+            // 16. Fair Value Gaps (FVG)
             if (klines.Count >= 5)
             {
                 var i = klines.Count - 1;
                 if (klines[i].Low > klines[i - 2].High)
                 {
                     res.HasBullishFvg = true;
-                    res.FvgBottom = klines[i - 2].High;
-                    res.FvgTop = klines[i].Low;
                 }
                 if (klines[i].High < klines[i - 2].Low)
                 {
                     res.HasBearishFvg = true;
-                    res.FvgTop = klines[i - 2].Low;
-                    res.FvgBottom = klines[i].High;
                 }
             }
 
-            // 20. Confluence Voting Matrix
-            int bullVotes = 0;
-            int bearVotes = 0;
+            // 17. Multi-Category Confluence Scoring (Section 5 Specification)
+            // Category 1: Trend (Weight 0.35)
+            decimal emaScore = res.EmaVote == IndicatorVote.Bullish ? 1.0m : (res.EmaVote == IndicatorVote.Bearish ? -1.0m : 0.0m);
+            decimal adxScore = res.AdxVote == IndicatorVote.Bullish ? 1.0m : (res.AdxVote == IndicatorVote.Bearish ? -1.0m : 0.0m);
+            decimal superTrendScore = res.SuperTrendVote == IndicatorVote.Bullish ? 1.0m : -1.0m;
+            res.TrendScore = Math.Round((emaScore * 0.45m) + (adxScore * 0.30m) + (superTrendScore * 0.25m), 3);
 
-            if (res.Rsi <= 35 || (res.Rsi >= 50 && res.Rsi <= 65)) bullVotes++;
-            else if (res.Rsi >= 65 || res.Rsi < 48) bearVotes++;
+            // Category 2: Momentum (Weight 0.30)
+            decimal rsiScore = res.RsiVote == IndicatorVote.Bullish ? 1.0m : (res.RsiVote == IndicatorVote.Bearish ? -1.0m : 0.0m);
+            decimal macdScore = res.MacdVote == IndicatorVote.Bullish ? 1.0m : (res.MacdVote == IndicatorVote.Bearish ? -1.0m : 0.0m);
+            decimal stochScore = res.StochVote == IndicatorVote.Bullish ? 1.0m : (res.StochVote == IndicatorVote.Bearish ? -1.0m : 0.0m);
+            res.MomentumScore = Math.Round((rsiScore * 0.35m) + (macdScore * 0.45m) + (stochScore * 0.20m), 3);
 
-            if (res.StochStatus.Contains("Bullish") || res.StochStatus.Contains("Al\u0131\u015F")) bullVotes++;
-            else if (res.StochStatus.Contains("Bearish") || res.StochStatus.Contains("Sat\u0131\u015F")) bearVotes++;
+            // Category 3: Volatility (Weight 0.15)
+            decimal bbScore = res.BollingerVote == IndicatorVote.Bullish ? 1.0m : (res.BollingerVote == IndicatorVote.Bearish ? -1.0m : 0.0m);
+            res.VolatilityScore = bbScore;
 
-            if (res.MacdHist > 0 && res.Macd > res.MacdSignal) bullVotes++;
-            else if (res.MacdHist < 0 && res.Macd < res.MacdSignal) bearVotes++;
+            // Category 4: Volume (Weight 0.20)
+            decimal obvScore = res.ObvVote == IndicatorVote.Bullish ? 1.0m : (res.ObvVote == IndicatorVote.Bearish ? -1.0m : 0.0m);
+            decimal volScore = res.VolumeVote == IndicatorVote.Bullish ? 1.0m : (res.VolumeVote == IndicatorVote.Bearish ? -1.0m : 0.0m);
+            decimal vwapScore = res.VwapVote == IndicatorVote.Bullish ? 1.0m : -1.0m;
+            res.VolumeScore = Math.Round((obvScore * 0.40m) + (volScore * 0.30m) + (vwapScore * 0.30m), 3);
 
-            if (res.EmaTrend.Contains("Bullish") || res.EmaTrend.Contains("M\u00FCsb\u0259t")) bullVotes++;
-            else if (res.EmaTrend.Contains("Bearish") || res.EmaTrend.Contains("M\u0259nfi")) bearVotes++;
+            // Raw Weighted Confluence Score (-1.0 to +1.0)
+            decimal rawScore = (res.TrendScore * 0.35m) + (res.MomentumScore * 0.30m) + (res.VolatilityScore * 0.15m) + (res.VolumeScore * 0.20m);
 
-            if (lastClose > res.Ema200) bullVotes++;
-            else bearVotes++;
-
-            if (lastClose <= res.BollingerLower || lastClose > res.BollingerMiddle) bullVotes++;
-            else if (lastClose >= res.BollingerUpper || lastClose < res.BollingerMiddle) bearVotes++;
-
-            if (res.PlusDi > res.MinusDi) bullVotes++;
-            else bearVotes++;
-
-            if (res.Cci >= -100 && res.Cci <= 120 && res.Cci > 0) bullVotes++;
-            else if (res.Cci < 0) bearVotes++;
-
-            if (res.WilliamsR >= -60 && res.WilliamsR <= -20) bullVotes++;
-            else if (res.WilliamsR < -60) bearVotes++;
-
-            if (res.SuperTrendDirection.Contains("BULLISH")) bullVotes++;
-            else bearVotes++;
-
-            if (res.VwapStatus.Contains("Al\u0131c\u0131")) bullVotes++;
-            else bearVotes++;
-
-            if (res.ObvTrend.Contains("Akumulyasiya")) bullVotes++;
-            else bearVotes++;
-
-            if (res.IsHighVolume) { if (lastClose >= klines.Last().Open) bullVotes++; else bearVotes++; }
-
-            if (lastClose >= res.PivotPoint) bullVotes++;
-            else bearVotes++;
-
-            if (res.HasBullishFvg) bullVotes++;
-            if (res.HasBearishFvg) bearVotes++;
-
-            res.BullishIndicatorsCount = bullVotes;
-            res.BearishIndicatorsCount = bearVotes;
-            res.NeutralIndicatorsCount = 20 - (bullVotes + bearVotes);
-
-            int total = bullVotes + bearVotes;
-            if (total > 0)
+            // Category 5: Multi-Timeframe (MTF) & BTC Compass Factor
+            decimal mtfFactor = 1.0m;
+            if (btcCompass != null)
             {
-                res.ConfluenceScore = (int)Math.Round(((decimal)(bullVotes - bearVotes) / total) * 100);
+                if (rawScore > 0 && btcCompass.BullishScore >= 55) mtfFactor = 1.0m;
+                else if (rawScore < 0 && btcCompass.BullishScore <= 45) mtfFactor = 1.0m;
+                else mtfFactor = 0.85m;
             }
+            res.MtfFactor = mtfFactor;
+
+            decimal finalScore = rawScore * mtfFactor;
+            // Scale -1..+1 to 0..100
+            res.ConfluenceScore = Math.Round(Math.Clamp(((finalScore + 1.0m) / 2.0m) * 100m, 5m, 98m), 1);
+
+            // Counts of bullish/bearish indicators
+            var votes = new[] { res.RsiVote, res.StochVote, res.MacdVote, res.EmaVote, res.BollingerVote, res.AdxVote, res.CciVote, res.WilliamsRVote, res.SuperTrendVote, res.VwapVote, res.ObvVote, res.VolumeVote };
+            res.BullishIndicatorsCount = votes.Count(v => v == IndicatorVote.Bullish);
+            res.BearishIndicatorsCount = votes.Count(v => v == IndicatorVote.Bearish);
+            res.NeutralIndicatorsCount = votes.Count(v => v == IndicatorVote.Neutral);
 
             return res;
         }
@@ -198,124 +312,139 @@ namespace CryptoSense.Services
         public decimal CalculateEma(List<decimal> prices, int period)
         {
             if (prices.Count < period) return prices.LastOrDefault();
-            decimal multiplier = 2.0m / (period + 1);
+            decimal multiplier = 2m / (period + 1);
             decimal ema = prices.Take(period).Average();
 
             for (int i = period; i < prices.Count; i++)
             {
-                ema = ((prices[i] - ema) * multiplier) + ema;
+                ema = (prices[i] - ema) * multiplier + ema;
             }
-            return Math.Round(ema, 4);
+            return Math.Round(ema, 6);
         }
 
         public decimal CalculateRsi(List<decimal> prices, int period = 14)
         {
-            if (prices.Count <= period) return 50m;
-            decimal gains = 0m, losses = 0m;
+            if (prices.Count <= period) return 50;
+
+            decimal gainSum = 0;
+            decimal lossSum = 0;
 
             for (int i = 1; i <= period; i++)
             {
                 decimal diff = prices[i] - prices[i - 1];
-                if (diff >= 0) gains += diff;
-                else losses += Math.Abs(diff);
+                if (diff >= 0) gainSum += diff;
+                else lossSum += Math.Abs(diff);
             }
 
-            decimal avgGain = gains / period;
-            decimal avgLoss = losses / period;
+            decimal avgGain = gainSum / period;
+            decimal avgLoss = lossSum / period;
 
             for (int i = period + 1; i < prices.Count; i++)
             {
                 decimal diff = prices[i] - prices[i - 1];
-                if (diff >= 0)
-                {
-                    avgGain = ((avgGain * (period - 1)) + diff) / period;
-                    avgLoss = (avgLoss * (period - 1)) / period;
-                }
-                else
-                {
-                    avgGain = (avgGain * (period - 1)) / period;
-                    avgLoss = ((avgLoss * (period - 1)) + Math.Abs(diff)) / period;
-                }
+                decimal currentGain = diff >= 0 ? diff : 0;
+                decimal currentLoss = diff < 0 ? Math.Abs(diff) : 0;
+
+                avgGain = ((avgGain * (period - 1)) + currentGain) / period;
+                avgLoss = ((avgLoss * (period - 1)) + currentLoss) / period;
             }
 
-            if (avgLoss == 0) return 100m;
+            if (avgLoss == 0) return 100;
             decimal rs = avgGain / avgLoss;
-            return Math.Round(100m - (100m / (1m + rs)), 2);
+            return Math.Round(100 - (100 / (1 + rs)), 2);
         }
 
-        public (decimal stochK, decimal stochD) CalculateStochRsi(List<decimal> prices, int rsiPeriod = 14, int kPeriod = 3, int dPeriod = 3)
+        public (decimal K, decimal D) CalculateStochRsi(List<decimal> prices, int rsiPeriod = 14, int stochPeriod = 14, int kPeriod = 3, int dPeriod = 3)
         {
-            if (prices.Count < rsiPeriod + kPeriod + dPeriod) return (50, 50);
+            if (prices.Count < rsiPeriod + stochPeriod) return (50, 50);
 
-            var rsiList = new List<decimal>();
-            for (int i = rsiPeriod; i <= prices.Count; i++)
+            var rsiSeries = new List<decimal>();
+            for (int i = rsiPeriod; i < prices.Count; i++)
             {
-                rsiList.Add(CalculateRsi(prices.Take(i).ToList(), rsiPeriod));
+                var subList = prices.Take(i + 1).ToList();
+                rsiSeries.Add(CalculateRsi(subList, rsiPeriod));
             }
 
-            var stochList = new List<decimal>();
-            for (int i = rsiPeriod; i <= rsiList.Count; i++)
+            if (rsiSeries.Count < stochPeriod) return (50, 50);
+
+            var rawStoch = new List<decimal>();
+            for (int i = stochPeriod - 1; i < rsiSeries.Count; i++)
             {
-                var window = rsiList.Skip(i - rsiPeriod).Take(rsiPeriod).ToList();
+                var window = rsiSeries.Skip(i - stochPeriod + 1).Take(stochPeriod).ToList();
                 decimal minRsi = window.Min();
                 decimal maxRsi = window.Max();
-                decimal diff = maxRsi - minRsi;
-                decimal stoch = diff == 0 ? 50 : ((window.Last() - minRsi) / diff) * 100m;
-                stochList.Add(stoch);
+                decimal currentRsi = window.Last();
+
+                decimal stoch = (maxRsi - minRsi) == 0 ? 50 : ((currentRsi - minRsi) / (maxRsi - minRsi)) * 100;
+                rawStoch.Add(stoch);
             }
 
-            decimal k = stochList.Skip(Math.Max(0, stochList.Count - kPeriod)).Average();
-            decimal d = stochList.Skip(Math.Max(0, stochList.Count - (kPeriod + dPeriod))).Take(dPeriod).Average();
+            if (rawStoch.Count < kPeriod) return (50, 50);
+            decimal k = rawStoch.Skip(rawStoch.Count - kPeriod).Average();
+
+            decimal d = k;
+            if (rawStoch.Count >= kPeriod + dPeriod)
+            {
+                var kSeries = new List<decimal>();
+                for (int i = kPeriod - 1; i < rawStoch.Count; i++)
+                {
+                    kSeries.Add(rawStoch.Skip(i - kPeriod + 1).Take(kPeriod).Average());
+                }
+                d = kSeries.Skip(Math.Max(0, kSeries.Count - dPeriod)).Average();
+            }
 
             return (Math.Round(k, 2), Math.Round(d, 2));
         }
 
-        public (decimal macd, decimal signal, decimal hist) CalculateMacd(List<decimal> prices)
+        public (decimal Macd, decimal Signal, decimal Hist) CalculateMacd(List<decimal> prices, int fast = 12, int slow = 26, int signal = 9)
         {
-            if (prices.Count < 35) return (0, 0, 0);
+            if (prices.Count < slow + signal) return (0, 0, 0);
 
             var macdLine = new List<decimal>();
-            for (int i = 26; i <= prices.Count; i++)
+            for (int i = slow; i <= prices.Count; i++)
             {
-                var subList = prices.Take(i).ToList();
-                decimal ema12 = CalculateEma(subList, 12);
-                decimal ema26 = CalculateEma(subList, 26);
-                macdLine.Add(ema12 - ema26);
+                var sub = prices.Take(i).ToList();
+                var fastEma = CalculateEma(sub, fast);
+                var slowEma = CalculateEma(sub, slow);
+                macdLine.Add(fastEma - slowEma);
             }
 
-            decimal currentMacd = macdLine.Last();
-            decimal signalLine = CalculateEma(macdLine, 9);
-            decimal hist = currentMacd - signalLine;
+            var signalLine = CalculateEma(macdLine, signal);
+            var currentMacd = macdLine.Last();
+            var hist = currentMacd - signalLine;
 
-            return (Math.Round(currentMacd, 4), Math.Round(signalLine, 4), Math.Round(hist, 4));
+            return (Math.Round(currentMacd, 6), Math.Round(signalLine, 6), Math.Round(hist, 6));
         }
 
-        public (decimal upper, decimal lower, decimal bandwidth) CalculateBollingerBands(List<decimal> prices, int period = 20, decimal numStd = 2.0m)
+        public (decimal Upper, decimal Lower, decimal Bandwidth) CalculateBollingerBands(List<decimal> prices, int period = 20, decimal multiplier = 2)
         {
-            if (prices.Count < period) return (prices.LastOrDefault(), prices.LastOrDefault(), 0);
+            if (prices.Count < period) return (0, 0, 0);
+
             var window = prices.Skip(prices.Count - period).Take(period).ToList();
-            decimal mean = window.Average();
-            decimal sumSquares = window.Sum(p => (p - mean) * (p - mean));
+            decimal sma = window.Average();
+            decimal sumSquares = window.Sum(p => (p - sma) * (p - sma));
             decimal stdDev = (decimal)Math.Sqrt((double)(sumSquares / period));
 
-            decimal upper = mean + (numStd * stdDev);
-            decimal lower = mean - (numStd * stdDev);
-            decimal bandwidth = mean > 0 ? Math.Round(((upper - lower) / mean) * 100, 2) : 0;
+            decimal upper = sma + (stdDev * multiplier);
+            decimal lower = sma - (stdDev * multiplier);
+            decimal bandwidth = sma > 0 ? Math.Round(((upper - lower) / sma) * 100, 2) : 0;
 
-            return (Math.Round(upper, 4), Math.Round(lower, 4), bandwidth);
+            return (Math.Round(upper, 6), Math.Round(lower, 6), bandwidth);
         }
 
         public decimal CalculateAtr(List<Kline> klines, int period = 14)
         {
-            if (klines.Count < period + 1) return 0m;
+            if (klines.Count < period + 1) return 0;
 
             var trList = new List<decimal>();
             for (int i = 1; i < klines.Count; i++)
             {
-                decimal tr1 = klines[i].High - klines[i].Low;
-                decimal tr2 = Math.Abs(klines[i].High - klines[i - 1].Close);
-                decimal tr3 = Math.Abs(klines[i].Low - klines[i - 1].Close);
-                trList.Add(Math.Max(tr1, Math.Max(tr2, tr3)));
+                var h = klines[i].High;
+                var l = klines[i].Low;
+                var prevC = klines[i - 1].Close;
+
+                var tr = Math.Max(h - l, Math.Max(Math.Abs(h - prevC), Math.Abs(l - prevC)));
+                trList.Add(tr);
             }
 
             decimal atr = trList.Take(period).Average();
@@ -323,66 +452,68 @@ namespace CryptoSense.Services
             {
                 atr = ((atr * (period - 1)) + trList[i]) / period;
             }
-            return Math.Round(atr, 4);
+
+            return Math.Round(atr, 6);
         }
 
-        public (decimal adx, decimal plusDi, decimal minusDi) CalculateAdx(List<Kline> klines, int period = 14)
+        public (decimal Adx, decimal PlusDi, decimal MinusDi) CalculateAdx(List<Kline> klines, int period = 14)
         {
             if (klines.Count < period * 2) return (20, 20, 20);
 
-            var tr = new List<decimal>();
             var plusDm = new List<decimal>();
             var minusDm = new List<decimal>();
+            var trList = new List<decimal>();
 
             for (int i = 1; i < klines.Count; i++)
             {
-                decimal hDiff = klines[i].High - klines[i - 1].High;
-                decimal lDiff = klines[i - 1].Low - klines[i].Low;
+                var hDiff = klines[i].High - klines[i - 1].High;
+                var lDiff = klines[i - 1].Low - klines[i].Low;
 
                 plusDm.Add((hDiff > lDiff && hDiff > 0) ? hDiff : 0);
                 minusDm.Add((lDiff > hDiff && lDiff > 0) ? lDiff : 0);
 
-                decimal tr1 = klines[i].High - klines[i].Low;
-                decimal tr2 = Math.Abs(klines[i].High - klines[i - 1].Close);
-                decimal tr3 = Math.Abs(klines[i].Low - klines[i - 1].Close);
-                tr.Add(Math.Max(tr1, Math.Max(tr2, tr3)));
+                var tr = Math.Max(klines[i].High - klines[i].Low, Math.Max(Math.Abs(klines[i].High - klines[i - 1].Close), Math.Abs(klines[i].Low - klines[i - 1].Close)));
+                trList.Add(tr);
             }
 
-            decimal smoothedTr = tr.Take(period).Sum();
-            decimal smoothedPlusDm = plusDm.Take(period).Sum();
-            decimal smoothedMinusDm = minusDm.Take(period).Sum();
+            decimal trSmooth = trList.Take(period).Sum();
+            decimal plusDmSmooth = plusDm.Take(period).Sum();
+            decimal minusDmSmooth = minusDm.Take(period).Sum();
 
             var dxList = new List<decimal>();
-            for (int i = period; i < tr.Count; i++)
-            {
-                smoothedTr = smoothedTr - (smoothedTr / period) + tr[i];
-                smoothedPlusDm = smoothedPlusDm - (smoothedPlusDm / period) + plusDm[i];
-                smoothedMinusDm = smoothedMinusDm - (smoothedMinusDm / period) + minusDm[i];
 
-                decimal pDi = smoothedTr > 0 ? (smoothedPlusDm / smoothedTr) * 100 : 0;
-                decimal mDi = smoothedTr > 0 ? (smoothedMinusDm / smoothedTr) * 100 : 0;
-                decimal diSum = pDi + mDi;
-                decimal dx = diSum > 0 ? (Math.Abs(pDi - mDi) / diSum) * 100 : 0;
+            for (int i = period; i < trList.Count; i++)
+            {
+                trSmooth = trSmooth - (trSmooth / period) + trList[i];
+                plusDmSmooth = plusDmSmooth - (plusDmSmooth / period) + plusDm[i];
+                minusDmSmooth = minusDmSmooth - (minusDmSmooth / period) + minusDm[i];
+
+                decimal pDi = trSmooth == 0 ? 0 : (plusDmSmooth / trSmooth) * 100;
+                decimal mDi = trSmooth == 0 ? 0 : (minusDmSmooth / trSmooth) * 100;
+
+                decimal dx = (pDi + mDi) == 0 ? 0 : (Math.Abs(pDi - mDi) / (pDi + mDi)) * 100;
                 dxList.Add(dx);
             }
 
-            decimal finalAdx = dxList.Skip(Math.Max(0, dxList.Count - period)).Average();
-            decimal finalPlusDi = smoothedTr > 0 ? (smoothedPlusDm / smoothedTr) * 100 : 0;
-            decimal finalMinusDi = smoothedTr > 0 ? (smoothedMinusDm / smoothedTr) * 100 : 0;
+            if (dxList.Count < period) return (20, 20, 20);
+            decimal adx = dxList.Skip(dxList.Count - period).Average();
 
-            return (Math.Round(finalAdx, 2), Math.Round(finalPlusDi, 2), Math.Round(finalMinusDi, 2));
+            decimal lastPdi = trSmooth == 0 ? 0 : (plusDmSmooth / trSmooth) * 100;
+            decimal lastMdi = trSmooth == 0 ? 0 : (minusDmSmooth / trSmooth) * 100;
+
+            return (Math.Round(adx, 2), Math.Round(lastPdi, 2), Math.Round(lastMdi, 2));
         }
 
         public decimal CalculateCci(List<Kline> klines, int period = 20)
         {
             if (klines.Count < period) return 0;
-            var tpList = klines.Select(k => (k.High + k.Low + k.Close) / 3).ToList();
-            var window = tpList.Skip(tpList.Count - period).Take(period).ToList();
-            decimal smaTp = window.Average();
-            decimal meanDev = window.Average(tp => Math.Abs(tp - smaTp));
+            var window = klines.Skip(klines.Count - period).Take(period).ToList();
+            var tpList = window.Select(k => (k.High + k.Low + k.Close) / 3).ToList();
+            decimal tpSma = tpList.Average();
+            decimal meanDev = tpList.Sum(tp => Math.Abs(tp - tpSma)) / period;
 
             if (meanDev == 0) return 0;
-            decimal cci = (tpList.Last() - smaTp) / (0.015m * meanDev);
+            decimal cci = (tpList.Last() - tpSma) / (0.015m * meanDev);
             return Math.Round(cci, 2);
         }
 
@@ -392,41 +523,43 @@ namespace CryptoSense.Services
             var window = klines.Skip(klines.Count - period).Take(period).ToList();
             decimal highestHigh = window.Max(k => k.High);
             decimal lowestLow = window.Min(k => k.Low);
-            decimal diff = highestHigh - lowestLow;
+            decimal lastClose = window.Last().Close;
 
-            if (diff == 0) return -50;
-            decimal wr = ((highestHigh - window.Last().Close) / diff) * -100m;
+            if (highestHigh == lowestLow) return -50;
+            decimal wr = ((highestHigh - lastClose) / (highestHigh - lowestLow)) * -100;
             return Math.Round(wr, 2);
         }
 
-        public (decimal superTrend, bool isBullish) CalculateSuperTrend(List<Kline> klines, int period = 10, decimal multiplier = 3.0m)
+        public (decimal Value, bool IsBullish) CalculateSuperTrend(List<Kline> klines, int period = 10, decimal multiplier = 3.0m)
         {
-            if (klines.Count < period + 1) return (klines.LastOrDefault()?.Close ?? 0, true);
-            decimal atr = CalculateAtr(klines, period);
+            if (klines.Count < period + 1) return (0, true);
 
-            decimal upperBand = ((klines.Last().High + klines.Last().Low) / 2) + (multiplier * atr);
-            decimal lowerBand = ((klines.Last().High + klines.Last().Low) / 2) - (multiplier * atr);
+            var atr = CalculateAtr(klines, period);
+            var last = klines.Last();
+            var hl2 = (last.High + last.Low) / 2;
 
-            bool isBullish = klines.Last().Close >= lowerBand;
-            decimal superTrend = isBullish ? lowerBand : upperBand;
+            var upperBand = hl2 + (multiplier * atr);
+            var lowerBand = hl2 - (multiplier * atr);
 
-            return (Math.Round(superTrend, 4), isBullish);
+            bool isBullish = last.Close >= hl2;
+            decimal superTrendVal = isBullish ? lowerBand : upperBand;
+            return (Math.Round(superTrendVal, 6), isBullish);
         }
 
         public decimal CalculateVwap(List<Kline> klines)
         {
             if (klines.Count == 0) return 0;
-            decimal sumTpVol = 0;
-            decimal sumVol = 0;
+            decimal cumVolume = 0;
+            decimal cumPriceVol = 0;
 
             foreach (var k in klines)
             {
-                decimal tp = (k.High + k.Low + k.Close) / 3;
-                sumTpVol += tp * k.Volume;
-                sumVol += k.Volume;
+                decimal typPrice = (k.High + k.Low + k.Close) / 3;
+                cumPriceVol += typPrice * k.Volume;
+                cumVolume += k.Volume;
             }
 
-            return sumVol > 0 ? Math.Round(sumTpVol / sumVol, 4) : klines.Last().Close;
+            return cumVolume > 0 ? Math.Round(cumPriceVol / cumVolume, 6) : klines.Last().Close;
         }
 
         public decimal CalculateObv(List<Kline> klines)
