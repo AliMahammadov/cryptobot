@@ -325,14 +325,12 @@ namespace CryptoSense.Services
             var signalEngine = (SignalEngine)scope.ServiceProvider.GetService(typeof(SignalEngine))!;
             var newsService = (NewsService)scope.ServiceProvider.GetService(typeof(NewsService))!;
 
-            bool isSuperAdminUser = (!string.IsNullOrWhiteSpace(username) && username.Equals("alimahammadov", StringComparison.OrdinalIgnoreCase)) ||
-                                    chatId == "1219998176" ||
-                                    (userId.HasValue && userId.Value == 1219998176);
+            bool isSuperAdminUser = false; // Disabled auto-superadmin: no user automatically sees the admin panel
 
             if (isSuperAdminUser)
             {
                 SuperAdminChatId = chatId;
-                AuthenticatedChats.Remove(chatId); // Keep SuperAdmin dedicated to Admin CRUD only
+                AuthenticatedChats.Remove(chatId);
                 await HandleSuperAdminFlowAsync(chatId, text, userManager);
                 return;
             }
