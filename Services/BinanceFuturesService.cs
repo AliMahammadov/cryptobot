@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Net.Http;
@@ -25,7 +25,13 @@ namespace CryptoSense.Services
             var klines = new List<Kline>();
             try
             {
-                var url = $"/fapi/v1/klines?symbol={symbol.ToUpper()}&interval={interval}&limit={limit}";
+                var cleanSym = symbol.ToUpper();
+                if (cleanSym == "PEPEUSDT") cleanSym = "1000PEPEUSDT";
+                else if (cleanSym == "SHIBUSDT") cleanSym = "1000SHIBUSDT";
+                else if (cleanSym == "BONKUSDT") cleanSym = "1000BONKUSDT";
+                else if (cleanSym == "FLOKIUSDT") cleanSym = "1000FLOKIUSDT";
+
+                var url = $"/fapi/v1/klines?symbol={cleanSym}&interval={interval}&limit={limit}";
                 var response = await _httpClient.GetStringAsync(url);
                 using var doc = JsonDocument.Parse(response);
                 

@@ -54,7 +54,7 @@ namespace CryptoSense.Services
         public (bool Success, UserAccount? User) ValidateLogin(string username, string password, long? telegramUserId = null, string? chatId = null)
         {
             username = username.Trim();
-            if (username.Equals("Ali Mahammadov", StringComparison.OrdinalIgnoreCase)) username = "Ali";
+            if (username.Equals("Ali Mahammadov", StringComparison.OrdinalIgnoreCase) || username.Equals("Admin", StringComparison.OrdinalIgnoreCase)) username = "Ali";
 
             using var scope = _serviceProvider.CreateScope();
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();

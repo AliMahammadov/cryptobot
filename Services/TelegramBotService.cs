@@ -830,6 +830,59 @@ namespace CryptoSense.Services
 
         private async Task HandleSuperAdminFlowAsync(string chatId, string text, UserManagerService userManager)
         {
+            // 1. MENU BUTTON CLICKS (Take priority over any pending state)
+            if (text == "➕ İstifadəçi Yarat" || text == "/adduser")
+            {
+                _userStates[chatId] = "ADMIN_WAITING_CREATE_USER";
+                var prompt = "➕ <b>Yeni İstifadəçi Yaratmaq</b>\n\n" +
+                             "Yaratmaq istədiyiniz <b>İstifadəçi Adını</b> və <b>Parolu</b> aralarında boşluq qoyaraq yazın:\n\n" +
+                             "📌 <b>Məsələn:</b>\n" +
+                             "<code>Murad 123456</code>";
+                await SendMessageAsync(prompt, chatId, BuildAdminKeyboard());
+                return;
+            }
+            else if (text == "👥 İstifadəçilərin Siyahısı" || text == "/users")
+            {
+                _userStates.TryRemove(chatId, out _);
+                var users = userManager.GetAllUsers();
+                var sb = new StringBuilder();
+                sb.AppendLine("👥 <b>Sistemdəki Qeydiyyatlı İstifadəçilər:</b>");
+                sb.AppendLine($"Ümumi say: <b>{users.Count} nəfər</b>");
+                sb.AppendLine("-----------------------------------");
+                int index = 1;
+                foreach (var u in users)
+                {
+                    var tgName = !string.IsNullOrEmpty(u.TelegramUsername) ? $"@{u.TelegramUsername}" : (u.TelegramChatId != null ? $"ID: {u.TelegramChatId}" : "Daxil olmayıb");
+                    sb.AppendLine($"{index}. <b>{u.Username}</b> | Rol: <code>{u.Role}</code> | Status: Aktiv 🟢");
+                    sb.AppendLine($"   Telegram: <code>{tgName}</code>");
+                    index++;
+                }
+                sb.AppendLine("-----------------------------------");
+                await SendMessageAsync(sb.ToString(), chatId, BuildAdminKeyboard());
+                return;
+            }
+            else if (text == "🗑 İstifadəçi Sil" || text == "/deleteuser")
+            {
+                _userStates[chatId] = "ADMIN_WAITING_DELETE_USER";
+                var prompt = "🗑 <b>İstifadəçi Silmək</b>\n\n" +
+                             "Sistemdən silmək istədiyiniz istifadəçinin <b>Adını</b> yazın:\n\n" +
+                             "📌 <b>Məsələn:</b>\n" +
+                             "<code>Murad</code>";
+                await SendMessageAsync(prompt, chatId, BuildAdminKeyboard());
+                return;
+            }
+            else if (text == "🔑 Parolu Dəyiş" || text == "/resetpwd")
+            {
+                _userStates[chatId] = "ADMIN_WAITING_RESET_PWD";
+                var prompt = "🔑 <b>İstifadəçi Parolunu Dəyişmək</b>\n\n" +
+                             "İstifadəçi adını və yeni parolu aralarında boşluqla yazın:\n\n" +
+                             "📌 <b>Məsələn:</b>\n" +
+                             "<code>Murad yeni123</code>";
+                await SendMessageAsync(prompt, chatId, BuildAdminKeyboard());
+                return;
+            }
+
+            // 2. STATE HANDLERS (Only executed when not clicking a menu button)
             if (_userStates.TryGetValue(chatId, out var state) && state == "ADMIN_WAITING_CREATE_USER")
             {
                 _userStates.TryRemove(chatId, out _);
@@ -837,7 +890,7 @@ namespace CryptoSense.Services
                 if (parts.Length >= 2)
                 {
                     var newUsername = parts[0];
-                    var newPassword = parts[1];
+                    var newPassword = string.Join(" ", parts.Skip(1));
                     var created = userManager.CreateUser(newUsername, newPassword);
                     if (created)
                     {
@@ -884,7 +937,7 @@ namespace CryptoSense.Services
                 if (parts.Length >= 2)
                 {
                     var uName = parts[0];
-                    var newPwd = parts[1];
+                    var newPwd = string.Join(" ", parts.Skip(1));
                     var res = userManager.ResetPassword(uName, newPwd);
                     if (res)
                     {
@@ -903,61 +956,11 @@ namespace CryptoSense.Services
                 }
             }
 
-            if (text == "➕ İstifadəçi Yarat" || text == "/adduser")
-            {
-                _userStates[chatId] = "ADMIN_WAITING_CREATE_USER";
-                var prompt = "➕ <b>Yeni İstifadəçi Yaratmaq</b>\n\n" +
-                             "Yaratmaq istədiyiniz <b>İstifadəçi Adını</b> və <b>Parolu</b> aralarında boşluq qoyaraq yazın:\n\n" +
-                             "📌 <b>Məsələn:</b>\n" +
-                             "<code>Murad 123456</code>";
-                await SendMessageAsync(prompt, chatId, BuildAdminKeyboard());
-                return;
-            }
-            else if (text == "👥 İstifadəçilərin Siyahısı" || text == "/users")
-            {
-                var users = userManager.GetAllUsers();
-                var sb = new StringBuilder();
-                sb.AppendLine("👥 <b>Sistemdəki Qeydiyyatlı İstifadəçilər:</b>");
-                sb.AppendLine($"Ümumi say: <b>{users.Count} nəfər</b>");
-                sb.AppendLine("-----------------------------------");
-                int index = 1;
-                foreach (var u in users)
-                {
-                    var tgName = !string.IsNullOrEmpty(u.TelegramUsername) ? $"@{u.TelegramUsername}" : (u.TelegramChatId != null ? $"ID: {u.TelegramChatId}" : "Daxil olmayıb");
-                    sb.AppendLine($"{index}. <b>{u.Username}</b> | Rol: <code>{u.Role}</code> | Status: Aktiv 🟢");
-                    sb.AppendLine($"   Telegram: <code>{tgName}</code>");
-                    index++;
-                }
-                sb.AppendLine("-----------------------------------");
-                await SendMessageAsync(sb.ToString(), chatId, BuildAdminKeyboard());
-                return;
-            }
-            else if (text == "🗑 İstifadəçi Sil" || text == "/deleteuser")
-            {
-                _userStates[chatId] = "ADMIN_WAITING_DELETE_USER";
-                var prompt = "🗑 <b>İstifadəçi Silmək</b>\n\n" +
-                             "Sistemdən silmək istədiyiniz istifadəçinin <b>Adını</b> yazın:\n\n" +
-                             "📌 <b>Məsələn:</b>\n" +
-                             "<code>Murad</code>";
-                await SendMessageAsync(prompt, chatId, BuildAdminKeyboard());
-                return;
-            }
-            else if (text == "🔑 Parolu Dəyiş" || text == "/resetpwd")
-            {
-                _userStates[chatId] = "ADMIN_WAITING_RESET_PWD";
-                var prompt = "🔑 <b>İstifadəçi Parolunu Dəyişmək</b>\n\n" +
-                             "İstifadəçi adını və yeni parolu aralarında boşluqla yazın:\n\n" +
-                             "📌 <b>Məsələn:</b>\n" +
-                             "<code>Murad yeni123</code>";
-                await SendMessageAsync(prompt, chatId, BuildAdminKeyboard());
-                return;
-            }
-            else
-            {
-                var welcomeAdmin = "👑 <b>Super Admin İdarəetmə Paneli (CRUD):</b>\n\n" +
-                                   "İstifadəçiləri yaratmaq, silmək və ya parolları dəyişmək üçün aşağıdakı düymələrdən istifadə edin:";
-                await SendMessageAsync(welcomeAdmin, chatId, BuildAdminKeyboard());
-            }
+            // 3. FALLBACK FOR ANY OTHER TEXT IN ADMIN MODE
+            var welcomeAdmin = "👑 <b>Super Admin İdarəetmə Paneli (CRUD):</b>\n\n" +
+                               "İstifadəçiləri yaratmaq, silmək və ya parolları dəyişmək üçün aşağıdakı düymələrdən istifadə edin:\n\n" +
+                               "<i>Çıxış üçün: <code>/logout</code></i>";
+            await SendMessageAsync(welcomeAdmin, chatId, BuildAdminKeyboard());
         }
 
         private static object BuildUserKeyboard(UserSettings settings)
