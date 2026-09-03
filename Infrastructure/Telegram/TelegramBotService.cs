@@ -12,6 +12,7 @@ using CryptoSense.Application.DTOs;
 using CryptoSense.Application.Interfaces;
 using CryptoSense.Domain.Entities;
 using CryptoSense.Domain.Enums;
+using CryptoSense.Domain.Interfaces;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
@@ -273,6 +274,21 @@ namespace CryptoSense.Infrastructure.Telegram
                 settings.LastSignalSentUtc = DateTime.UtcNow;
                 settings.LastHeartbeatSentUtc = DateTime.UtcNow;
                 await SendMessageAsync(msg, specificChatId);
+
+                // Update signal status in DB so outcome tracker knows this signal was delivered
+                try
+                {
+                    using var s = _serviceProvider.CreateScope();
+                    var uow = s.ServiceProvider.GetRequiredService<IUnitOfWork>();
+                    var dbSig = await uow.Signals.GetByIdAsync(signal.Id);
+                    if (dbSig != null)
+                    {
+                        dbSig.SignalAlertSent = true;
+                        await uow.Signals.UpdateAsync(dbSig);
+                        await uow.SaveChangesAsync();
+                    }
+                }
+                catch { }
                 return;
             }
 
@@ -319,38 +335,45 @@ namespace CryptoSense.Infrastructure.Telegram
             var userManager = scope.ServiceProvider.GetRequiredService<IUserManagerService>();
             var activeUsers = await userManager.GetAllUsersAsync();
 
+            var targetChatIds = new HashSet<string>();
             foreach (var user in activeUsers)
             {
-                if (string.IsNullOrEmpty(user.TelegramChatId) || !user.IsActive) continue;
-                var chatId = user.TelegramChatId;
+                if (!string.IsNullOrEmpty(user.TelegramChatId) && user.IsActive)
+                {
+                    targetChatIds.Add(user.TelegramChatId);
+                }
+            }
+            foreach (var kvp in UserPreferences)
+            {
+                if (kvp.Value.IsActive && !string.IsNullOrEmpty(kvp.Key))
+                {
+                    targetChatIds.Add(kvp.Key);
+                }
+            }
 
+            foreach (var chatId in targetChatIds)
+            {
                 var settings = GetSettings(chatId);
-
-                // User preferences check:
                 if (!settings.IsActive) continue;
-
-                // Check coin filter
-                if (settings.Coins.Count > 0 && !settings.Coins.Contains(signal.Symbol)) continue;
-
-                // Check timeframe filter
-                if (settings.Timeframe != "Hamısı" && settings.Timeframe != "Hamisi" && settings.Timeframe != signal.Timeframe) continue;
 
                 var mapKey = $"{signal.Id}_{chatId}";
                 int userSigNum = 0;
-                bool receivedThisSignal = _signalUserNumberMap.TryGetValue(mapKey, out var mappedNum) && mappedNum > 0;
-                if (!receivedThisSignal && signal.UserSignalNumbers.TryGetValue(chatId, out var fbNum) && fbNum > 0)
+                bool explicitlyMapped = _signalUserNumberMap.TryGetValue(mapKey, out var mappedNum) && mappedNum > 0;
+                if (!explicitlyMapped && signal.UserSignalNumbers.TryGetValue(chatId, out var fbNum) && fbNum > 0)
                 {
                     mappedNum = fbNum;
-                    receivedThisSignal = true;
+                    explicitlyMapped = true;
                 }
 
-                // Only send outcome alert if this user actually received the initial signal alert
-                if (!receivedThisSignal)
+                if (explicitlyMapped)
                 {
-                    continue;
+                    userSigNum = mappedNum;
                 }
-
-                userSigNum = mappedNum;
+                else
+                {
+                    // If trade signal was created, use the signal's sequential number or user counter
+                    userSigNum = signal.SignalNumber > 0 ? signal.SignalNumber : settings.AlertCounter;
+                }
 
                 var msg = TelegramMessageFormatter.FormatOutcomeAlert(signal, userSigNum, outcomeType, hitPrice, profitPct);
                 await SendMessageAsync(msg, chatId);
