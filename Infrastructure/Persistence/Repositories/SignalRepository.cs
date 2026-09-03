@@ -35,7 +35,7 @@ namespace CryptoSense.Infrastructure.Persistence.Repositories
         public async Task<List<FuturesSignal>> GetOpenTrackedSignalsAsync()
         {
             return await _context.Signals
-                .Where(s => s.Status == SignalStatus.Open && !s.IsClosed)
+                .Where(s => s.Status == SignalStatus.Open && !s.IsClosed && s.SignalAlertSent)
                 .OrderByDescending(s => s.GeneratedAt)
                 .ToListAsync();
         }
@@ -43,6 +43,7 @@ namespace CryptoSense.Infrastructure.Persistence.Repositories
         public async Task<List<FuturesSignal>> GetRecentSignalsAsync(int count = 25)
         {
             return await _context.Signals
+                .Where(s => s.SignalAlertSent)
                 .OrderByDescending(s => s.GeneratedAt)
                 .Take(count)
                 .ToListAsync();
@@ -64,10 +65,17 @@ namespace CryptoSense.Infrastructure.Persistence.Repositories
             return Task.CompletedTask;
         }
 
+        public async Task ClearAllSignalsAsync()
+        {
+            _context.SignalIndicatorSnapshots.RemoveRange(_context.SignalIndicatorSnapshots);
+            _context.Signals.RemoveRange(_context.Signals);
+            await _context.SaveChangesAsync();
+        }
+
         public async Task<PerformanceStats> GetPerformanceStatsAsync(string? specificTimeframe = null, List<string>? userCoins = null)
         {
             var query = _context.Signals
-                .Where(s => s.SignalType.Contains("LONG") || s.SignalType.Contains("SHORT"));
+                .Where(s => (s.SignalType.Contains("LONG") || s.SignalType.Contains("SHORT")) && s.SignalAlertSent);
 
             if (!string.IsNullOrEmpty(specificTimeframe) && specificTimeframe != "Hamısı" && specificTimeframe != "Hamisi")
             {
@@ -109,7 +117,7 @@ namespace CryptoSense.Infrastructure.Persistence.Repositories
         public async Task<List<CryptoSense.Application.DTOs.CoinPerformanceBreakdownDto>> GetCoinPerformanceBreakdownAsync(List<string>? monitoredCoins = null)
         {
             var signals = await _context.Signals
-                .Where(s => s.SignalType.Contains("LONG") || s.SignalType.Contains("SHORT"))
+                .Where(s => (s.SignalType.Contains("LONG") || s.SignalType.Contains("SHORT")) && s.SignalAlertSent)
                 .ToListAsync();
 
             var closedSignals = signals.Where(s => s.IsClosed || s.Status != SignalStatus.Open).ToList();

@@ -302,6 +302,46 @@ namespace CryptoSense.Infrastructure.Testing
                 return Task.FromResult(settings.Coins.Count == 2 && settings.Coins.Contains("BTCUSDT") && settings.Coins.Contains("SOLUSDT"));
             });
 
+            // 11. Database Signal Reset & Clean Slate Verification
+            await AssertTest("Test 18: Reset Workflow - ClearAllSignalsAsync & Stats Reset to Zero", async () =>
+            {
+                await _signalEngine.ClearAllSignalsAsync();
+                var stats = await _signalEngine.GetPerformanceStatsAsync();
+                var active = await _signalEngine.GetTrackedActiveSignalsAsync();
+                return stats.TotalSignals == 0 && stats.OpenSignals == 0 && stats.SuccessSignals == 0 && stats.FailedSignals == 0 && active.Count == 0;
+            });
+
+            // 12. SignalAlertSent Filter Verification (Only delivered signals tracked)
+            await AssertTest("Test 19: SignalAlertSent Filter Integrity", async () =>
+            {
+                var sig = new FuturesSignal
+                {
+                    Symbol = "BTCUSDT",
+                    Timeframe = "3m",
+                    Direction = SignalDirection.Buy,
+                    SignalType = "GÜCLÜ LONG (ALIŞ) 🟢",
+                    EntryPrice = 85000,
+                    TakeProfit1 = 86000,
+                    TakeProfit2 = 87000,
+                    TakeProfit3 = 88000,
+                    StopLoss = 84000,
+                    Confidence = 90,
+                    SignalAlertSent = true // Delivered
+                };
+
+                await _unitOfWork.Signals.AddAsync(sig);
+                await _unitOfWork.SaveChangesAsync();
+
+                var active = await _signalEngine.GetTrackedActiveSignalsAsync();
+                bool found = active.Any(s => s.Symbol == "BTCUSDT" && s.SignalAlertSent);
+
+                // Clean up
+                await _signalEngine.ClearAllSignalsAsync();
+                var afterClear = await _signalEngine.GetTrackedActiveSignalsAsync();
+
+                return found && afterClear.Count == 0;
+            });
+
             Console.WriteLine("\n========================================================");
             Console.WriteLine($"🏁 TEST NƏTİCƏLƏRİ: {passed} UĞURLU (PASS), {failed} UĞURSUZ (FAIL)");
             Console.WriteLine("========================================================\n");

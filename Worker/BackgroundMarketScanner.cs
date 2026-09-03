@@ -22,6 +22,7 @@ namespace CryptoSense.Worker
         private readonly AppConfig _config;
         private readonly Dictionary<string, DateTime> _lastAlertSent = new();
         private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, DateTime> _activeCandleLocks = new();
+        public static void ClearLocks() => _activeCandleLocks.Clear();
 
         public BackgroundMarketScanner(
             ITelegramBotService telegramService,
@@ -319,13 +320,16 @@ namespace CryptoSense.Worker
             var activeTimeframes = new HashSet<string>();
             var subscribedCoins = new HashSet<string>();
             bool anyUserWantsAllCoins = false;
+            bool anyUserActive = false;
 
             foreach (var s in TelegramBotService.UserPreferences.Values)
             {
                 if (s.IsActive)
                 {
+                    anyUserActive = true;
                     if (s.Timeframe == "Hamısı" || s.Timeframe == "Hamisi")
                     {
+                        activeTimeframes.Add("1m");
                         activeTimeframes.Add("3m");
                         activeTimeframes.Add("5m");
                         activeTimeframes.Add("15m");
@@ -346,6 +350,12 @@ namespace CryptoSense.Worker
                         foreach (var c in s.Coins) subscribedCoins.Add(c);
                     }
                 }
+            }
+
+            if (!anyUserActive)
+            {
+                // All users have stopped notifications; pause scanning cycle
+                return;
             }
 
             if (anyUserWantsAllCoins || subscribedCoins.Count == 0)

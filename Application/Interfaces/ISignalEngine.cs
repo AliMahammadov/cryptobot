@@ -12,5 +12,6 @@ namespace CryptoSense.Application.Interfaces
         Task<List<FuturesSignal>> GetSignalHistoryAsync(int count = 25);
         Task<PerformanceStats> GetPerformanceStatsAsync(string? specificTimeframe = null, List<string>? userCoins = null);
         Task<List<CryptoSense.Application.DTOs.CoinPerformanceBreakdownDto>> GetCoinPerformanceBreakdownAsync(List<string>? monitoredCoins = null);
+        Task ClearAllSignalsAsync();
     }
 }

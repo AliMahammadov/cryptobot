@@ -17,5 +17,6 @@ namespace CryptoSense.Domain.Interfaces
         Task UpdateAsync(FuturesSignal signal);
         Task<PerformanceStats> GetPerformanceStatsAsync(string? specificTimeframe = null, List<string>? userCoins = null);
         Task<List<CryptoSense.Application.DTOs.CoinPerformanceBreakdownDto>> GetCoinPerformanceBreakdownAsync(List<string>? monitoredCoins = null);
+        Task ClearAllSignalsAsync();
     }
 }

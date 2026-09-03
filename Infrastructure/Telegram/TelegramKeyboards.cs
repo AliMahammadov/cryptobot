@@ -17,8 +17,9 @@ namespace CryptoSense.Infrastructure.Telegram
                         new[] { new { text = "👑 Admin Paneli" }, new { text = "🧭 Bitcoin Kompası" } },
                         new[] { new { text = "⭐ Mənim Coinlərim" }, new { text = "⚡ Bütün Siqnallar" } },
                         new[] { new { text = "⚙️ Coin Seçimi" }, new { text = "🗑 Coin Sil" } },
-                        new[] { new { text = "📊 Statistika" }, new { text = "📰 Bazar Xəbərləri" } },
-                        new[] { new { text = toggleBtn }, new { text = "🧹 Siqnalları Sıfırla" } }
+                        new[] { new { text = "📊 Statistika" }, new { text = "📈 Dərin Statistika" } },
+                        new[] { new { text = "📰 Bazar Xəbərləri" }, new { text = "🧹 Siqnalları Sıfırla" } },
+                        new[] { new { text = toggleBtn } }
                     },
                     resize_keyboard = true,
                     one_time_keyboard = false
@@ -30,10 +31,10 @@ namespace CryptoSense.Infrastructure.Telegram
                 keyboard = new[]
                 {
                     new[] { new { text = "⭐ Mənim Coinlərim" }, new { text = "🧭 Bitcoin Kompası" } },
-                    new[] { new { text = "⚙️ Coin Seçimi" }, new { text = "🗑 Coin Sil" } },
-                    new[] { new { text = "⚡ Bütün Siqnallar" }, new { text = "📊 Statistika" } },
-                    new[] { new { text = toggleBtn }, new { text = "🧹 Siqnalları Sıfırla" } },
-                    new[] { new { text = "📰 Bazar Xəbərləri" } }
+                    new[] { new { text = "⚡ Bütün Siqnallar" }, new { text = "⚙️ Coin Seçimi" } },
+                    new[] { new { text = "📊 Statistika" }, new { text = "📈 Dərin Statistika" } },
+                    new[] { new { text = "🗑 Coin Sil" }, new { text = "📰 Bazar Xəbərləri" } },
+                    new[] { new { text = toggleBtn }, new { text = "🧹 Siqnalları Sıfırla" } }
                 },
                 resize_keyboard = true,
                 one_time_keyboard = false
@@ -48,7 +49,7 @@ namespace CryptoSense.Infrastructure.Telegram
                 {
                     new[] { new { text = "➕ İstifadəçi Yarat" }, new { text = "👥 İstifadəçilərin Siyahısı" } },
                     new[] { new { text = "🗑 İstifadəçi Sil" }, new { text = "🔑 Parolu Dəyiş" } },
-                    new[] { new { text = "📈 Coinlər Üzrə Dərin Statistika" }, new { text = "🌐 Bütün Coinlərin Siyahısı" } },
+                    new[] { new { text = "📈 Dərin Statistika" }, new { text = "🌐 Bütün Coinlərin Siyahısı" } },
                     new[] { new { text = "📊 Əsas Menyu (Siqnallar)" } }
                 },
                 resize_keyboard = true,
@@ -62,9 +63,10 @@ namespace CryptoSense.Infrastructure.Telegram
             {
                 keyboard = new[]
                 {
-                    new[] { new { text = "⏱ 3 Dəqiqə (3m) Siqnalları" }, new { text = "⏱ 5 Dəqiqə (5m) Siqnalları" } },
-                    new[] { new { text = "⏱ 15 Dəqiqə (15m) Siqnalları" }, new { text = "⏱ 1 Saat (1h) Siqnalları" } },
-                    new[] { new { text = "⏱ 4 Saat (4h) Siqnalları" }, new { text = "🌟 Bütün Zamanlar (Hamısı) Siqnalları" } },
+                    new[] { new { text = "⏱ 1 Dəqiqə (1m) Siqnalları" }, new { text = "⏱ 3 Dəqiqə (3m) Siqnalları" } },
+                    new[] { new { text = "⏱ 5 Dəqiqə (5m) Siqnalları" }, new { text = "⏱ 15 Dəqiqə (15m) Siqnalları" } },
+                    new[] { new { text = "⏱ 1 Saat (1h) Siqnalları" }, new { text = "⏱ 4 Saat (4h) Siqnalları" } },
+                    new[] { new { text = "🌟 Bütün Zamanlar (Hamısı) Siqnalları" } },
                     new[] { new { text = "⬅️ Əsas Menyu" } }
                 },
                 resize_keyboard = true,

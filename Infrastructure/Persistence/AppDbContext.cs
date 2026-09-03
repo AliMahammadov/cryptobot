@@ -37,6 +37,10 @@ namespace CryptoSense.Infrastructure.Persistence
             modelBuilder.Entity<SignalIndicatorSnapshot>(entity =>
             {
                 entity.HasIndex(i => i.SignalId);
+                entity.HasOne<FuturesSignal>()
+                    .WithMany(s => s.IndicatorSnapshots)
+                    .HasForeignKey(i => i.SignalId)
+                    .OnDelete(DeleteBehavior.Cascade);
             });
         }
     }

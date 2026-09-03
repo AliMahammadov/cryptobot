@@ -559,14 +559,14 @@ namespace CryptoSense.Infrastructure.Telegram
                         var welcomeAdmin = $"👑 <b>Giriş Təsdiqləndi! Xoş Gəldiniz, Super Admin ({user.Username})!</b>\n\n" +
                                            $"🚀 <b>Kripto Signals Bot Xidməti AKTİVDİR 🟢</b>\n\n" +
                                            $"📖 <b>Sistemdən Necə İstifadə Etməli?</b>\n" +
-                                           $"• <b>⏱ Zaman Çərçivəsi:</b> Siqnalları almaq istədiyiniz şam müddətini (məs. 3m, 5m, 15m) seçin.\n" +
-                                           $"• <b>⚙️ Coin Seçimi:</b> Yalnız xüsusi coinləri (maks. 10 ədəd) izləmək üçün adlarını daxil edin.\n" +
-                                           $"• <b>⚡ Bütün Siqnallar:</b> İstədiyiniz zaman kəsiyində bazarı dərhal canlı skan edin.\n" +
+                                           $"• <b>⭐ Mənim Coinlərim:</b> Yalnız seçdiyiniz coinlər üzrə istədiyiniz zaman kəsiyində ticarət aparın.\n" +
+                                           $"• <b>⚡ Bütün Siqnallar:</b> Bütün bazar (50 coin) üzrə istənilən zaman kəsiyində canlı skan başladın.\n" +
+                                           $"• <b>⚙️ Coin Seçimi / 🗑 Sil:</b> Şəxsi ticarət siyahınızı (maks. 10 ədəd) tənzimləyin.\n" +
                                            $"• <b>🧭 Bitcoin Kompası:</b> Bazarın ümumi trendini və qüvvəsini izləyin.\n" +
-                                           $"• <b>📊 Statistika:</b> Seçdiyiniz coinlər və zaman üzrə şəxsi performansınızı görün.\n" +
-                                           $"• <b>📈 Dərin Coin Statistikası:</b> Bütün əməliyyat aparılan coinlərin hər şam üzrə qlobal nəticələrini görün.\n" +
-                                           $"• <b>🛑 Dayandır / 🧹 Sıfırla:</b> Bildiriş axınını idarə edin və ya köhnə izləmələri dayandırın.\n" +
-                                           $"• <b>👑 Admin Paneli:</b> İstifadəçi yaratmaq, silmək və parolları dəyişmək üçün.\n\n" +
+                                           $"• <b>📊 Statistika:</b> Şəxsi əməliyyat performansınızı görün.\n" +
+                                           $"• <b>📈 Dərin Statistika:</b> Bütün 50 coinin şamlar üzrə dərin win-rate və əməliyyat nəticələrinə baxın.\n" +
+                                           $"• <b>🛑 Dayandır / 🧹 Sıfırla:</b> Bildirişləri dayandırın və ya bütün tarixi sıfırlayın.\n" +
+                                           $"• <b>👑 Admin Paneli:</b> İstifadəçi idarəetməsi.\n\n" +
                                            $"<i>Sistem 24/7 rejimdə canlı bazar qiymətlərini analiz edir və yüksək dəqiqlikli fürsətləri sizə göndərir.</i>\n\n" +
                                            $"<i>Çıxış etmək üçün: <code>/logout</code></i>";
 
@@ -581,13 +581,13 @@ namespace CryptoSense.Infrastructure.Telegram
                         var onboardingMsg = $"✅ <b>Giriş Təsdiqləndi! Xoş Gəldiniz, {user.Username}!</b>\n\n" +
                                             $"🚀 <b>Kripto Signals Bot Xidməti AKTİVDİR 🟢</b>\n\n" +
                                             $"📖 <b>Sistemdən Necə İstifadə Etməli?</b>\n" +
-                                            $"• <b>⏱ Zaman Çərçivəsi:</b> Siqnalları almaq istədiyiniz şam müddətini (məs. 3m, 5m, 15m) seçin.\n" +
-                                            $"• <b>⚙️ Coin Seçimi:</b> Yalnız xüsusi coinləri (maks. 10 ədəd) izləmək üçün adlarını daxil edin.\n" +
-                                            $"• <b>⚡ Bütün Siqnallar:</b> İstədiyiniz zaman kəsiyində bazarı dərhal canlı skan edin.\n" +
+                                            $"• <b>⭐ Mənim Coinlərim:</b> Yalnız seçdiyiniz coinlər üzrə istədiyiniz zaman kəsiyində ticarət aparın.\n" +
+                                            $"• <b>⚡ Bütün Siqnallar:</b> Bütün bazar (50 coin) üzrə istənilən zaman kəsiyində canlı skan başladın.\n" +
+                                            $"• <b>⚙️ Coin Seçimi / 🗑 Sil:</b> Şəxsi ticarət siyahınızı (maks. 10 ədəd) tənzimləyin.\n" +
                                             $"• <b>🧭 Bitcoin Kompası:</b> Bazarın ümumi trendini və qüvvəsini izləyin.\n" +
-                                            $"• <b>📊 Statistika:</b> Seçdiyiniz coinlər və zaman üzrə şəxsi performansınızı görün.\n" +
-                                            $"• <b>📈 Dərin Coin Statistikası:</b> Bütün əməliyyat aparılan coinlərin hər şam üzrə qlobal nəticələrini görün.\n" +
-                                            $"• <b>🛑 Dayandır / 🧹 Sıfırla:</b> Bildiriş axınını idarə edin və köhnə izləmələri dayandırın.\n\n" +
+                                            $"• <b>📊 Statistika:</b> Şəxsi əməliyyat performansınızı görün.\n" +
+                                            $"• <b>📈 Dərin Statistika:</b> Bütün 50 coinin şamlar üzrə dərin win-rate və əməliyyat nəticələrinə baxın.\n" +
+                                            $"• <b>🛑 Dayandır / 🧹 Sıfırla:</b> Bildirişləri dayandırın və ya bütün tarixi sıfırlayın.\n\n" +
                                             $"<i>Sistem 24/7 rejimdə canlı bazar qiymətlərini analiz edir və yüksək dəqiqlikli fürsətləri sizə göndərir.</i>\n\n" +
                                             $"<i>Çıxış etmək üçün: <code>/logout</code></i>";
                         
@@ -887,7 +887,8 @@ namespace CryptoSense.Infrastructure.Telegram
                 }
             }
 
-            if (text == "⏱ 3 Dəqiqə (3m) Siqnalları" ||
+            if (text == "⏱ 1 Dəqiqə (1m) Siqnalları" ||
+                text == "⏱ 3 Dəqiqə (3m) Siqnalları" ||
                 text == "⏱ 5 Dəqiqə (5m) Siqnalları" ||
                 text == "⏱ 15 Dəqiqə (15m) Siqnalları" ||
                 text == "⏱ 1 Saat (1h) Siqnalları" ||
@@ -895,14 +896,17 @@ namespace CryptoSense.Infrastructure.Telegram
                 text == "🌟 Bütün Zamanlar (Hamısı) Siqnalları")
             {
                 string targetTf = "Hamısı";
-                if (text.Contains("15m") || text.Contains("15 Dəqiqə") || text.Contains("15 deqiqe")) targetTf = "15m";
+                if (text.Contains("1m") || text.Contains("1 Dəqiqə") || text.Contains("1 deqiqe")) targetTf = "1m";
                 else if (text.Contains("3m") || text.Contains("3 Dəqiqə") || text.Contains("3 deqiqe")) targetTf = "3m";
                 else if (text.Contains("5m") || text.Contains("5 Dəqiqə") || text.Contains("5 deqiqe")) targetTf = "5m";
+                else if (text.Contains("15m") || text.Contains("15 Dəqiqə") || text.Contains("15 deqiqe")) targetTf = "15m";
                 else if (text.Contains("1h") || text.Contains("1 Saat")) targetTf = "1h";
                 else if (text.Contains("4h") || text.Contains("4 Saat")) targetTf = "4h";
                 else if (text.Contains("Bütün Zamanlar") || text.Contains("Hamısı")) targetTf = "Hamısı";
 
                 userSettings.Timeframe = targetTf;
+                userSettings.Coins.Clear(); // Switch to all 50 coins mode!
+                userSettings.IsActive = true;
                 userSettings.LastResumeTime = DateTime.UtcNow;
                 SaveSettings();
 
@@ -915,7 +919,7 @@ namespace CryptoSense.Infrastructure.Telegram
                     : new[] { targetTf };
 
                 var tfDisplay = targetTf == "Hamısı" ? "Bütün Zamanlar (1m, 3m, 5m, 15m, 1h, 4h)" : targetTf;
-                await SendMessageAsync($"🌐 <b>50 coin üzrə canlı izləmə və analiz başladıldı.</b>\n<i>Aktiv Zaman: {tfDisplay} | 78%+ Confluence siqnalları axtarılır...</i>", chatId);
+                await SendMessageAsync($"🌐 <b>Bütün Bazar (50 Coin) üzrə canlı izləmə və analiz başladıldı! 🟢</b>\n<i>Aktiv Zaman: {tfDisplay} | 75%+ Confluence siqnalları axtarılır...</i>", chatId, TelegramKeyboards.BuildUserKeyboard(userSettings, isAdmin));
 
                 var foundSignals = new List<FuturesSignal>();
                 foreach (var tf in tfsToScan)
@@ -925,7 +929,7 @@ namespace CryptoSense.Infrastructure.Telegram
                         try
                         {
                             var sig = await signalEngine.AnalyzeCoinAsync(sym, tf, isLiveScan: false);
-                            if (sig.Confidence >= 78 && (sig.SignalType.Contains("LONG") || sig.SignalType.Contains("SHORT")))
+                            if (sig.Confidence >= 75 && (sig.SignalType.Contains("LONG") || sig.SignalType.Contains("SHORT")))
                             {
                                 foundSignals.Add(sig);
                             }
@@ -945,8 +949,8 @@ namespace CryptoSense.Infrastructure.Telegram
                 else
                 {
                     var noSigMsg = $"⚡ <b>Bazar Skan Nəticəsi ({tfDisplay}):</b>\n\n" +
-                                   $"ℹ️ <i>Hal-hazırda {tfDisplay} üzrə 78%+ Confluence tələbinə cavab verən risk-təsdiqli siqnal aşkarlanmadı.</i>\n\n" +
-                                   $"🟢 <b>Sistem canlı izləmədədir.</b> Şərtlər ödənildikdə yeni şam yaranan kimi siqnal dərhal sizə göndəriləcək.";
+                                   $"ℹ️ <i>Hal-hazırda {tfDisplay} üzrə 50 coin arasında 75%+ Confluence tələbinə cavab verən risk-təsdiqli yeni siqnal aşkarlanmadı.</i>\n\n" +
+                                   $"🟢 <b>Sistem canlı izləmədədir.</b> 50 coinin hər birində yeni şam bağlandıqca şərtlər ödənildiyi an siqnal dərhal sizə göndəriləcək.";
                     await SendMessageAsync(noSigMsg, chatId, TelegramKeyboards.BuildUserKeyboard(userSettings, isAdmin));
                 }
                 return;
@@ -1055,7 +1059,7 @@ namespace CryptoSense.Infrastructure.Telegram
                                        $"🪙 Ticarət Aparılan Coinlər ({userSettings.Coins.Count} ədəd):\n<code>{cleanList}</code>\n\n" +
                                        $"✅ <b>Sistem artıq YALNIZ VƏ YALNIZ seçdiyiniz bu coinlər üzrə bütün şamlarda canlı skan və ticarət siqnallarına başladı!</b>\n" +
                                        $"<i>Kənar coindən siqnal gəlməyəcək.</i>", chatId, TelegramKeyboards.BuildUserKeyboard(userSettings, isAdmin));
-                await ScanUserCoinsInstantlyAsync(userSettings, chatId, "3m");
+                await ScanUserCoinsInstantlyAsync(userSettings, chatId, "Hamısı");
                 return;
             }
             else if (text.Contains("Geri") || text.Contains("Əsas Menyu") || text == "/menu")
@@ -1066,11 +1070,15 @@ namespace CryptoSense.Infrastructure.Telegram
 
             if (text == "/start" || text == "/help" || text.Contains("Menyu"))
             {
+                var coinSummary = userSettings.Coins.Count > 0 
+                    ? $"{userSettings.Coins.Count} ədəd ({string.Join(", ", userSettings.Coins.Select(c => c.Replace("USDT", "")))})"
+                    : "Bütün Bazar (50 Coin) 🌐";
+
                 var welcome = "📊 <b>KriptoBot v2 Xidməti - Canlı Bazar Paneli</b>\n\n" +
                               "👤 İstifadəçi: <b>" + userSettings.Username + "</b>\n" +
                               "Bildiriş Statusu: " + (userSettings.IsActive ? "<b>AKTİV 🟢</b>" : "<b>DAYANDIRILIB 🔴</b>") + "\n" +
                               "Aktiv Zaman Çərçivəsi: <b>" + userSettings.Timeframe + "</b>\n" +
-                              "Seçilmiş Coinlər: <b>" + userSettings.Coins.Count + "/10 ədəd</b>\n\n" +
+                              "İzlənilən Coinlər: <b>" + coinSummary + "</b>\n\n" +
                               "Əməliyyatlar üçün aşağıdakı menyudan istifadə edin:";
                 await SendMessageAsync(welcome, chatId, TelegramKeyboards.BuildUserKeyboard(userSettings, isAdmin));
             }
@@ -1079,10 +1087,9 @@ namespace CryptoSense.Infrastructure.Telegram
                 userSettings.IsActive = false;
                 SaveSettings();
                 await SendMessageAsync(
-                    "🛑 <b>Yeni Siqnal Bildirişləri Dayandırıldı.</b>\n\n" +
-                    "<i>Sizə yeni siqnallar göndərilməyəcək.</i>\n" +
-                    "⚠️ <b>Qeyd:</b> Hal-hazırda açıq olan mövcud siqnallarınız varsa, onların müddəti tamamlandıqda və ya Stop-Loss vurduqda nəticə hesabatı sizə çatdırılacaq.\n\n" +
-                    "Yenidən yeni siqnalları almaq üçün <b>▶️ Bildirişləri Başlat</b> düyməsinə vurun.", 
+                    "🛑 <b>Bildirişlər Dayandırıldı. 🔴</b>\n\n" +
+                    "<i>Sizə heç bir yeni siqnal və bildiriş göndərilməyəcək.</i>\n\n" +
+                    "Yenidən canlı bildirişləri açmaq üçün <b>▶️ Bildirişləri Başlat</b> düyməsinə vurun.", 
                     chatId, 
                     TelegramKeyboards.BuildUserKeyboard(userSettings, isAdmin));
             }
@@ -1100,27 +1107,34 @@ namespace CryptoSense.Infrastructure.Telegram
             }
             else if (text.Contains("Sıfırla") || text.Contains("Sifirla") || text == "/clear" || text == "/reset")
             {
-                userSettings.IsActive = false;
+                userSettings.AlertCounter = 0;
                 userSettings.LastResumeTime = DateTime.UtcNow;
                 SaveSettings();
+
+                _signalUserNumberMap.Clear();
+                CryptoSense.Worker.BackgroundMarketScanner.ClearLocks();
+
+                try
+                {
+                    using var sc = _serviceProvider.CreateScope();
+                    var se = sc.ServiceProvider.GetRequiredService<ISignalEngine>();
+                    await se.ClearAllSignalsAsync();
+                }
+                catch { }
+
                 await SendMessageAsync(
-                    "🧹 <b>Siqnal İzləmələri Sıfırlandı və Dayandırıldı!</b>\n\n" +
-                    "<i>Profiliniz üçün keçmiş siqnal qeydləri təmizləndi və yeni siqnal axını dayandırıldı.</i>\n" +
-                    "⚠️ <b>Qeyd:</b> Yalnız hal-hazırda almış olduğunuz aktiv siqnalların nəticəsi çıxdıqdan sonra proses tam dayanacaq.\n\n" +
-                    "Yenidən yeni siqnallar almaq istədikdə <b>▶️ Bildirişləri Başlat</b> düyməsinə vurun.", 
+                    "🧹 <b>Bütün Siqnal Tarixçəsi və Statistikalar Sıfırlandı! ✅</b>\n\n" +
+                    "• Bazadakı bütün keçmiş siqnal qeydləri təmizləndi.\n" +
+                    "• Statistik göstəricilər sıfırlandı (0 əməliyyat).\n" +
+                    "• Sayğaclar və aktiv kilidlər sıfırlandı.\n\n" +
+                    "<i>Sistem sıfır nöqtəsindən tam təmiz şəkildə canlı izləməyə davam edir.</i>", 
                     chatId, 
                     TelegramKeyboards.BuildUserKeyboard(userSettings, isAdmin));
             }
-            else if (text.Contains("Dərin Coin") || text.Contains("Derin Coin") || text == "📈 Dərin Coin Statistikası" || text == "📈 Coinlər Üzrə Dərin Statistika" || text == "/coin_stats")
+            else if (text.Contains("Dərin") || text.Contains("Derin") || text == "📈 Dərin Statistika" || text == "/coin_stats")
             {
-                if (!isAdmin)
-                {
-                    await SendMessageAsync("⛔ <b>Bu bölmə yalnız Super Admin üçün əlçatandır.</b>", chatId, TelegramKeyboards.BuildUserKeyboard(userSettings, isAdmin));
-                    return;
-                }
-
                 _userStates.TryRemove(chatId, out _);
-                await SendMessageAsync("⏳ <b>Bütün coinlər və zaman çərçivələri üzrə qlobal nəticələr hesablanır...</b>", chatId);
+                await SendMessageAsync("⏳ <b>Bütün coinlər və zaman çərçivələri üzrə dərin nəticələr hesablanır...</b>", chatId);
 
                 var monitored = _config.SelectedCoins != null && _config.SelectedCoins.Count > 0
                     ? _config.SelectedCoins
@@ -1128,7 +1142,7 @@ namespace CryptoSense.Infrastructure.Telegram
 
                 var breakdown = await signalEngine.GetCoinPerformanceBreakdownAsync(monitored);
                 var report = TelegramMessageFormatter.FormatCoinPerformanceBreakdown(breakdown, monitored);
-                await SendMessageAsync(report, chatId, TelegramKeyboards.BuildAdminKeyboard());
+                await SendMessageAsync(report, chatId, TelegramKeyboards.BuildUserKeyboard(userSettings, isAdmin));
             }
             else if (text.Contains("Statistika") || text == "/stats")
             {

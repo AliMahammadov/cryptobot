@@ -398,7 +398,7 @@ namespace CryptoSense.Application.Services
                 new() { IndicatorName = "VWAP", Value = indicators.Vwap, Vote = indicators.VwapVote, Weight = 0.30m }
             };
 
-            if (determinedType.Contains("LONG") || determinedType.Contains("SHORT"))
+            if (isLiveScan && (determinedType.Contains("LONG") || determinedType.Contains("SHORT")))
             {
                 try
                 {
@@ -432,6 +432,11 @@ namespace CryptoSense.Application.Services
         public async Task<List<CryptoSense.Application.DTOs.CoinPerformanceBreakdownDto>> GetCoinPerformanceBreakdownAsync(List<string>? monitoredCoins = null)
         {
             return await _unitOfWork.Signals.GetCoinPerformanceBreakdownAsync(monitoredCoins);
+        }
+
+        public async Task ClearAllSignalsAsync()
+        {
+            await _unitOfWork.Signals.ClearAllSignalsAsync();
         }
     }
 }
