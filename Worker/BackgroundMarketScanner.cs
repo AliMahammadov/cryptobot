@@ -280,6 +280,7 @@ namespace CryptoSense.Worker
                                     activeTimeframes.Add("5m");
                                     activeTimeframes.Add("15m");
                                     activeTimeframes.Add("1h");
+                                    activeTimeframes.Add("4h");
                                 }
                                 else
                                 {

@@ -616,12 +616,12 @@ namespace CryptoSense.Infrastructure.Telegram
                 }
                 else
                 {
-                    string targetTf = "3m";
-                    if (text.Contains("3m")) targetTf = "3m";
-                    else if (text.Contains("5m")) targetTf = "5m";
-                    else if (text.Contains("15m")) targetTf = "15m";
-                    else if (text.Contains("1h")) targetTf = "1h";
-                    else if (text.Contains("4h")) targetTf = "4h";
+                    string targetTf = "15m";
+                    if (text.Contains("15m") || text.Contains("15 Dəqiqə") || text.Contains("15 deqiqe")) targetTf = "15m";
+                    else if (text.Contains("3m") || text.Contains("3 Dəqiqə") || text.Contains("3 deqiqe")) targetTf = "3m";
+                    else if (text.Contains("5m") || text.Contains("5 Dəqiqə") || text.Contains("5 deqiqe")) targetTf = "5m";
+                    else if (text.Contains("1h") || text.Contains("1 Saat")) targetTf = "1h";
+                    else if (text.Contains("4h") || text.Contains("4 Saat")) targetTf = "4h";
 
                     userSettings.Timeframe = targetTf;
                     userSettings.LastResumeTime = DateTime.UtcNow;
