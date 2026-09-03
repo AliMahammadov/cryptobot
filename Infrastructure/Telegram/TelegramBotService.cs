@@ -467,7 +467,17 @@ namespace CryptoSense.Infrastructure.Telegram
                                     }
                                 }
 
-                                await HandleIncomingMessageAsync(chatId, fromUser, fromUserId, messageId, text);
+                                _ = Task.Run(async () =>
+                                {
+                                    try
+                                    {
+                                        await HandleIncomingMessageAsync(chatId, fromUser, fromUserId, messageId, text);
+                                    }
+                                    catch (Exception ex)
+                                    {
+                                        Console.WriteLine($"[TelegramBotService] Handler error: {ex.Message}");
+                                    }
+                                });
                             }
                         }
                     }
@@ -476,7 +486,7 @@ namespace CryptoSense.Infrastructure.Telegram
                 {
                 }
 
-                await Task.Delay(1000, stoppingToken);
+                await Task.Delay(100, stoppingToken);
             }
         }
 
