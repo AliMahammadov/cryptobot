@@ -141,25 +141,32 @@ namespace CryptoSense.Infrastructure.Telegram
         public static string FormatCoinPerformanceBreakdown(List<CryptoSense.Application.DTOs.CoinPerformanceBreakdownDto> breakdown, List<string> monitoredCoins)
         {
             var sb = new StringBuilder();
-            sb.AppendLine("📈 <b>Coinlər Üzrə Dərin Win-Rate Statistikası</b>");
-            sb.AppendLine("<i>(Bütün istifadəçilərə göndərilən qlobal sistem siqnalları üzrə)</i>");
+            sb.AppendLine("📈 <b>Bütün İstifadəçilər Üzrə Dərin Coin Win-Rate Statistikası</b>");
+            sb.AppendLine("<i>(Bütün əməliyyat aparılan coinlərin canlı qlobal nəticələri)</i>");
             sb.AppendLine("-----------------------------------");
 
-            if (breakdown.Count == 0)
+            var tradedCoins = breakdown.Where(c => c.TotalTrades > 0).ToList();
+            var untradedCoins = breakdown.Where(c => c.TotalTrades == 0).Select(c => c.CleanSymbol).ToList();
+
+            if (tradedCoins.Count == 0)
             {
-                sb.AppendLine("ℹ️ <i>Hələ qeydə alınmış əməliyyat nəticəsi yoxdur.</i>");
+                sb.AppendLine("ℹ️ <i>Hal-hazırda tamamlanmış əməliyyat nəticəsi yoxdur. Şamlar bitdikcə və hədəflərə çatdıqca bütün nəticələr burada avtomatik yenilənəcək.</i>");
+                sb.AppendLine();
             }
             else
             {
-                foreach (var coin in breakdown)
+                int totalAllTrades = tradedCoins.Sum(c => c.TotalTrades);
+                int totalAllSuccess = tradedCoins.Sum(c => c.SuccessTrades);
+                int totalAllFailed = tradedCoins.Sum(c => c.FailedTrades);
+                decimal globalWinRate = totalAllTrades > 0 ? Math.Round(((decimal)totalAllSuccess / totalAllTrades) * 100, 1) : 0;
+
+                sb.AppendLine($"📊 <b>Ümumi Sistem Performansı:</b> {totalAllTrades} əməliyyat | Win-Rate: <b>{globalWinRate.ToString("F1", CultureInfo.InvariantCulture)}%</b>");
+                sb.AppendLine($"✅ Uğurlu: <b>{totalAllSuccess}</b> | ❌ Uğursuz: <b>{totalAllFailed}</b>");
+                sb.AppendLine("-----------------------------------");
+
+                foreach (var coin in tradedCoins.OrderByDescending(c => c.TotalTrades).ThenByDescending(c => c.OverallWinRate))
                 {
                     var cleanSym = coin.CleanSymbol;
-                    if (coin.TotalTrades == 0)
-                    {
-                        sb.AppendLine($"🪙 <b>{cleanSym}:</b> <i>Hələ tamamlanmış əməliyyat yoxdur</i>");
-                        continue;
-                    }
-
                     var icon = coin.OverallWinRate >= 70 ? "🟢" : (coin.OverallWinRate >= 50 ? "🟡" : "🔴");
                     sb.AppendLine($"🪙 <b>{cleanSym}: {coin.OverallWinRate.ToString("F1", CultureInfo.InvariantCulture)}%</b> {icon} ({coin.TotalTrades} əməliyyat: {coin.SuccessTrades} Uğurlu, {coin.FailedTrades} Uğursuz)");
 
@@ -183,12 +190,20 @@ namespace CryptoSense.Infrastructure.Telegram
                 }
             }
 
-            sb.AppendLine("-----------------------------------");
+            if (untradedCoins.Count > 0)
+            {
+                sb.AppendLine("-----------------------------------");
+                sb.AppendLine($"⏳ <b>Hələ əməliyyat gözləyən digər coinlər ({untradedCoins.Count} ədəd):</b>");
+                sb.AppendLine($"<code>{string.Join(", ", untradedCoins)}</code>");
+                sb.AppendLine();
+            }
+
             var cleanMonitored = monitoredCoins.Select(c => c.Replace("USDT", "")).Distinct();
-            sb.AppendLine($"🌐 <b>Sistemin Canlı İzlədiyi Coinlər ({cleanMonitored.Count()} ədəd):</b>");
+            sb.AppendLine("-----------------------------------");
+            sb.AppendLine($"🌐 <b>Sistemin Canlı İzlədiyi Bütün Coinlər ({cleanMonitored.Count()} ədəd):</b>");
             sb.AppendLine($"<code>{string.Join(", ", cleanMonitored)}</code>");
             sb.AppendLine();
-            sb.AppendLine("💡 <i>Qeyd: Hər bir coin üzrə həm ümumi, həm də ayrı-ayrı şam çərçivələrindəki real nəticələr göstərilir.</i>");
+            sb.AppendLine("💡 <i>Bu statistika bütün istifadəçilərə göndərilən və bazarda baş verən bütün siqnalları real vaxtda əks etdirir.</i>");
 
             return sb.ToString();
         }

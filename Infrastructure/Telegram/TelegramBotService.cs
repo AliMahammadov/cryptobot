@@ -416,7 +416,8 @@ namespace CryptoSense.Infrastructure.Telegram
                                            $"• <b>⚙️ Coin Seçimi:</b> Yalnız xüsusi coinləri (maks. 10 ədəd) izləmək üçün adlarını daxil edin.\n" +
                                            $"• <b>⚡ Bütün Siqnallar:</b> İstədiyiniz zaman kəsiyində bazarı dərhal canlı skan edin.\n" +
                                            $"• <b>🧭 Bitcoin Kompası:</b> Bazarın ümumi trendini və qüvvəsini izləyin.\n" +
-                                           $"• <b>📊 Statistika:</b> Seçdiyiniz coinlər və zaman üzrə real dinamik performansınızı görün.\n" +
+                                           $"• <b>📊 Statistika:</b> Seçdiyiniz coinlər və zaman üzrə şəxsi performansınızı görün.\n" +
+                                           $"• <b>📈 Dərin Coin Statistikası:</b> Bütün əməliyyat aparılan coinlərin hər şam üzrə qlobal nəticələrini görün.\n" +
                                            $"• <b>🛑 Dayandır / 🧹 Sıfırla:</b> Bildiriş axınını idarə edin və ya köhnə izləmələri dayandırın.\n" +
                                            $"• <b>👑 Admin Paneli:</b> İstifadəçi yaratmaq, silmək və parolları dəyişmək üçün.\n\n" +
                                            $"<i>Sistem 24/7 rejimdə canlı bazar qiymətlərini analiz edir və yüksək dəqiqlikli fürsətləri sizə göndərir.</i>\n\n" +
@@ -437,7 +438,8 @@ namespace CryptoSense.Infrastructure.Telegram
                                             $"• <b>⚙️ Coin Seçimi:</b> Yalnız xüsusi coinləri (maks. 10 ədəd) izləmək üçün adlarını daxil edin.\n" +
                                             $"• <b>⚡ Bütün Siqnallar:</b> İstədiyiniz zaman kəsiyində bazarı dərhal canlı skan edin.\n" +
                                             $"• <b>🧭 Bitcoin Kompası:</b> Bazarın ümumi trendini və qüvvəsini izləyin.\n" +
-                                            $"• <b>📊 Statistika:</b> Seçdiyiniz coinlər və zaman üzrə real dinamik performansınızı görün.\n" +
+                                            $"• <b>📊 Statistika:</b> Seçdiyiniz coinlər və zaman üzrə şəxsi performansınızı görün.\n" +
+                                            $"• <b>📈 Dərin Coin Statistikası:</b> Bütün əməliyyat aparılan coinlərin hər şam üzrə qlobal nəticələrini görün.\n" +
                                             $"• <b>🛑 Dayandır / 🧹 Sıfırla:</b> Bildiriş axınını idarə edin və köhnə izləmələri dayandırın.\n\n" +
                                             $"<i>Sistem 24/7 rejimdə canlı bazar qiymətlərini analiz edir və yüksək dəqiqlikli fürsətləri sizə göndərir.</i>\n\n" +
                                             $"<i>Çıxış etmək üçün: <code>/logout</code></i>";
@@ -878,6 +880,19 @@ namespace CryptoSense.Infrastructure.Telegram
                     "Yenidən yeni siqnallar almaq istədikdə <b>▶️ Bildirişləri Başlat</b> düyməsinə vurun.", 
                     chatId, 
                     TelegramKeyboards.BuildUserKeyboard(userSettings, isAdmin));
+            }
+            else if (text.Contains("Dərin Coin") || text.Contains("Derin Coin") || text == "📈 Dərin Coin Statistikası" || text == "📈 Coinlər Üzrə Dərin Statistika" || text == "/coin_stats")
+            {
+                _userStates.TryRemove(chatId, out _);
+                await SendMessageAsync("⏳ <b>Bütün coinlər və zaman çərçivələri üzrə qlobal nəticələr hesablanır...</b>", chatId);
+
+                var monitored = _config.SelectedCoins != null && _config.SelectedCoins.Count > 0
+                    ? _config.SelectedCoins
+                    : new List<string> { "BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT", "DOGEUSDT", "SUIUSDT", "PEPEUSDT", "AVAXUSDT", "NOTUSDT" };
+
+                var breakdown = await signalEngine.GetCoinPerformanceBreakdownAsync(monitored);
+                var report = TelegramMessageFormatter.FormatCoinPerformanceBreakdown(breakdown, monitored);
+                await SendMessageAsync(report, chatId, TelegramKeyboards.BuildUserKeyboard(userSettings, isAdmin));
             }
             else if (text.Contains("Statistika") || text == "/stats")
             {

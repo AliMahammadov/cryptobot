@@ -47,7 +47,7 @@ namespace CryptoSense.Worker
                         var signalEngine = scope.ServiceProvider.GetRequiredService<ISignalEngine>();
                         var unitOfWork = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
 
-                        var tickers = await marketData.GetTopFuturesTickersAsync(35);
+                        var tickers = await marketData.GetTopFuturesTickersAsync(250);
                         var tickerDict = new Dictionary<string, decimal>();
                         foreach (var t in tickers)
                         {
@@ -280,6 +280,7 @@ namespace CryptoSense.Worker
                         // =========================================================================
                         var activeTimeframes = new HashSet<string>();
                         var subscribedCoins = new HashSet<string>();
+                        bool anyUserWantsAllCoins = false;
 
                         foreach (var s in TelegramBotService.UserPreferences.Values)
                         {
@@ -298,13 +299,22 @@ namespace CryptoSense.Worker
                                     activeTimeframes.Add(s.Timeframe);
                                 }
 
-                                foreach (var c in s.Coins) subscribedCoins.Add(c);
+                                if (s.Coins.Count == 0)
+                                {
+                                    anyUserWantsAllCoins = true;
+                                }
+                                else
+                                {
+                                    foreach (var c in s.Coins) subscribedCoins.Add(c);
+                                }
                             }
                         }
 
-                        if (subscribedCoins.Count == 0)
+                        if (anyUserWantsAllCoins || subscribedCoins.Count == 0)
                         {
-                            var defaultCoins = new[] { "BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT", "DOGEUSDT", "SUIUSDT", "PEPEUSDT", "AVAXUSDT" };
+                            var defaultCoins = _config.SelectedCoins != null && _config.SelectedCoins.Count > 0
+                                ? _config.SelectedCoins
+                                : new List<string> { "BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT", "DOGEUSDT", "SUIUSDT", "PEPEUSDT", "AVAXUSDT", "NOTUSDT" };
                             foreach (var c in defaultCoins) subscribedCoins.Add(c);
                         }
 
