@@ -512,11 +512,12 @@ namespace CryptoSense.Infrastructure.Telegram
             // =========================================================================
             var currentUser = await userManager.GetUserByChatIdOrTelegramIdAsync(chatId, userId);
 
-            // If user typed explicit login credentials (even if previously logged in):
+            // If user typed explicit login credentials or 2-word login (e.g. "dudu 123" or "Ali 23031999Am"):
             var loginParts = text.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
             bool isExplicitLoginCommand = text.StartsWith("/login", StringComparison.OrdinalIgnoreCase) ||
                                           text.StartsWith("/admin", StringComparison.OrdinalIgnoreCase) ||
-                                          text.Contains("23031999Am");
+                                          text.Contains("23031999Am") ||
+                                          (!text.StartsWith("/") && loginParts.Length == 2 && loginParts[0].Length >= 2 && loginParts[1].Length >= 2);
 
             bool isMenuButtonClick = text.StartsWith("🧭") || text.StartsWith("⚡") || text.StartsWith("⭐") || 
                                      text.StartsWith("📊") || text.StartsWith("📈") || text.StartsWith("⚙️") || 
@@ -548,6 +549,7 @@ namespace CryptoSense.Infrastructure.Telegram
 
                 if (isValid && user != null)
                 {
+                    currentUser = user;
                     _userStates.TryRemove(chatId, out _);
                     var settings = GetSettings(chatId);
                     settings.TelegramUserId = userId;
@@ -597,19 +599,23 @@ namespace CryptoSense.Infrastructure.Telegram
                         
                         await SendMessageAsync(onboardingMsg, chatId, TelegramKeyboards.BuildUserKeyboard(settings, isAdmin: false));
                         await NotifySuperAdminUserLoginAsync(user.Username, $"Telegram (@{telegramUsername})");
+                        SaveSettings();
                         return;
                     }
                 }
                 else
                 {
-                    var failMsg = "❌ <b>Giriş Uğursuz Oldu!</b>\n\n" +
-                                  "İstifadəçi adı və ya parol yalnışdır.\n" +
-                                  "Zəhmət olmasa məlumatlarınızı yoxlayıb yenidən daxil edin:\n\n" +
-                                  "💡 <b>Nümunə:</b> <code>Murad 123456</code>\n\n" +
-                                  "<i>Hesabınız yoxdursa, Admin (<a href=\"https://t.me/Ali_Mahammadov\">@Ali_Mahammadov</a>) ilə əlaqə saxlayın.</i>";
+                    if (currentUser == null || text.StartsWith("/login", StringComparison.OrdinalIgnoreCase) || text.StartsWith("/admin", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var failMsg = "❌ <b>Giriş Uğursuz Oldu!</b>\n\n" +
+                                      "İstifadəçi adı və ya parol yalnışdır.\n" +
+                                      "Zəhmət olmasa məlumatlarınızı yoxlayıb yenidən daxil edin:\n\n" +
+                                      "💡 <b>Nümunə:</b> <code>Murad 123456</code>\n\n" +
+                                      "<i>Hesabınız yoxdursa, Admin (<a href=\"https://t.me/Ali_Mahammadov\">@Ali_Mahammadov</a>) ilə əlaqə saxlayın.</i>";
 
-                    await SendMessageAsync(failMsg, chatId, new { remove_keyboard = true });
-                    return;
+                        await SendMessageAsync(failMsg, chatId, new { remove_keyboard = true });
+                        return;
+                    }
                 }
             }
 

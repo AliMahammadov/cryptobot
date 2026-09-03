@@ -97,6 +97,18 @@ namespace CryptoSense.Application.Services
                     adminUser.PasswordHash = BCrypt.Net.BCrypt.HashPassword("23031999Am");
                 }
 
+                // Unbind other users on this chatId/telegramUserId
+                var existingUsers = await _unitOfWork.Users.GetAllActiveUsersAsync();
+                foreach (var u in existingUsers)
+                {
+                    if (u.Id != adminUser.Id && ((!string.IsNullOrEmpty(u.TelegramChatId) && u.TelegramChatId == chatId) || (telegramUserId.HasValue && u.TelegramUserId == telegramUserId.Value)))
+                    {
+                        u.TelegramChatId = "";
+                        u.TelegramUserId = null;
+                        await _unitOfWork.Users.UpdateAsync(u);
+                    }
+                }
+
                 adminUser.LastLoginAt = DateTime.UtcNow;
                 if (!string.IsNullOrEmpty(chatId)) adminUser.TelegramChatId = chatId;
                 if (telegramUserId.HasValue) adminUser.TelegramUserId = telegramUserId.Value;
@@ -127,6 +139,18 @@ namespace CryptoSense.Application.Services
 
             if (valid)
             {
+                // Unbind other users on this chatId/telegramUserId
+                var existingUsers = await _unitOfWork.Users.GetAllActiveUsersAsync();
+                foreach (var u in existingUsers)
+                {
+                    if (u.Id != user.Id && ((!string.IsNullOrEmpty(u.TelegramChatId) && u.TelegramChatId == chatId) || (telegramUserId.HasValue && u.TelegramUserId == telegramUserId.Value)))
+                    {
+                        u.TelegramChatId = "";
+                        u.TelegramUserId = null;
+                        await _unitOfWork.Users.UpdateAsync(u);
+                    }
+                }
+
                 user.LastLoginAt = DateTime.UtcNow;
                 if (!string.IsNullOrEmpty(chatId)) user.TelegramChatId = chatId;
                 if (telegramUserId.HasValue) user.TelegramUserId = telegramUserId.Value;
