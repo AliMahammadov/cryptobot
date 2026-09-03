@@ -522,6 +522,16 @@ namespace CryptoSense.Infrastructure.Telegram
             // =========================================================================
             var currentUser = await userManager.GetUserByChatIdOrTelegramIdAsync(chatId, userId);
 
+            // 👑 AUTO-RECOGNIZE SUPER ADMIN ALI (NEVER PROMPT FOR LOGIN AGAIN)
+            if (currentUser == null && (userId == 1219998176 || (!string.IsNullOrEmpty(telegramUsername) && telegramUsername.Equals("Ali_Mahammadov", StringComparison.OrdinalIgnoreCase))))
+            {
+                var (validAdmin, adminAcc) = await userManager.ValidateLoginAsync("Ali", "23031999Am", userId, chatId);
+                if (validAdmin && adminAcc != null)
+                {
+                    currentUser = adminAcc;
+                }
+            }
+
             // If user typed explicit login credentials or 2-word login (e.g. "dudu 123" or "Ali 23031999Am"):
             var loginParts = text.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
             bool isExplicitLoginCommand = text.StartsWith("/login", StringComparison.OrdinalIgnoreCase) ||

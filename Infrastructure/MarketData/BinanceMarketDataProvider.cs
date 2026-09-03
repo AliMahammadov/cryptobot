@@ -12,9 +12,16 @@ namespace CryptoSense.Infrastructure.MarketData
     public class BinanceMarketDataProvider : IMarketDataProvider
     {
         private readonly HttpClient _httpClient;
-        private static readonly HttpClient _visionClient = new() { Timeout = TimeSpan.FromSeconds(6) };
+        private static readonly HttpClient _spotClient = new() { Timeout = TimeSpan.FromSeconds(6) };
         private const string BaseUrl = "https://fapi.binance.com";
-        private const string VisionUrl = "https://data-api.binance.vision";
+        private static readonly string[] SpotEndpoints = new[]
+        {
+            "https://api.binance.com",
+            "https://api1.binance.com",
+            "https://api2.binance.com",
+            "https://api3.binance.com",
+            "https://data-api.binance.vision"
+        };
         private static DateTime _futuresCoolDownUntil = DateTime.MinValue;
         private static readonly object _coolDownLock = new();
 
@@ -24,10 +31,25 @@ namespace CryptoSense.Infrastructure.MarketData
             _httpClient.BaseAddress = new Uri(BaseUrl);
             _httpClient.DefaultRequestHeaders.Add("User-Agent", "CryptoSense-CleanArch/2.0");
 
-            if (!_visionClient.DefaultRequestHeaders.Contains("User-Agent"))
+            if (!_spotClient.DefaultRequestHeaders.Contains("User-Agent"))
             {
-                _visionClient.DefaultRequestHeaders.Add("User-Agent", "CryptoSense-Vision/2.0");
+                _spotClient.DefaultRequestHeaders.Add("User-Agent", "CryptoSense-SpotFallback/2.0");
             }
+        }
+
+        private static async Task<string?> FetchFromPublicSpotAsync(string relativePath)
+        {
+            foreach (var endpoint in SpotEndpoints)
+            {
+                try
+                {
+                    var url = $"{endpoint}{relativePath}";
+                    var response = await _spotClient.GetStringAsync(url);
+                    if (!string.IsNullOrWhiteSpace(response)) return response;
+                }
+                catch { }
+            }
+            return null;
         }
 
         public async Task<List<Kline>> GetKlinesAsync(string symbol, string interval = "15m", int limit = 100)
@@ -67,17 +89,19 @@ namespace CryptoSense.Infrastructure.MarketData
                 }
             }
 
-            // Fallback to Binance Vision Public Market Data API
+            // Fallback to Official Binance Public Spot APIs
             try
             {
-                var visionUrl = $"{VisionUrl}/api/v3/klines?symbol={spotSym}&interval={interval}&limit={limit}";
-                var response = await _visionClient.GetStringAsync(visionUrl);
-                var list = ParseKlines(response);
-                if (list.Count > 0) return list;
+                var response = await FetchFromPublicSpotAsync($"/api/v3/klines?symbol={spotSym}&interval={interval}&limit={limit}");
+                if (!string.IsNullOrEmpty(response))
+                {
+                    var list = ParseKlines(response);
+                    if (list.Count > 0) return list;
+                }
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[BinanceMarketDataProvider] Vision fallback error for {spotSym}: {ex.Message}");
+                Console.WriteLine($"[BinanceMarketDataProvider] Spot klines fallback error for {spotSym}: {ex.Message}");
             }
 
             return new List<Kline>();
@@ -128,16 +152,19 @@ namespace CryptoSense.Infrastructure.MarketData
                 }
             }
 
-            // Fallback to Binance Vision 24hr ticker
+            // Fallback to Official Binance Public Spot APIs
             try
             {
-                var response = await _visionClient.GetStringAsync($"{VisionUrl}/api/v3/ticker/24hr");
-                var list = ParseTickers(response);
-                if (list.Count > 0) return list.OrderByDescending(t => t.VolumeQuote).Take(topCount).ToList();
+                var response = await FetchFromPublicSpotAsync("/api/v3/ticker/24hr");
+                if (!string.IsNullOrEmpty(response))
+                {
+                    var list = ParseTickers(response);
+                    if (list.Count > 0) return list.OrderByDescending(t => t.VolumeQuote).Take(topCount).ToList();
+                }
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[BinanceMarketDataProvider] Vision ticker fallback error: {ex.Message}");
+                Console.WriteLine($"[BinanceMarketDataProvider] Spot ticker fallback error: {ex.Message}");
             }
 
             return new List<CoinTicker>();
@@ -178,30 +205,60 @@ namespace CryptoSense.Infrastructure.MarketData
                 catch { }
             }
 
-            // Fallback to Vision / Spot
+            // Fallback to Official Binance Public Spot APIs
             try
             {
                 var spotSym = cleanSym.StartsWith("1000") ? cleanSym.Substring(4) : cleanSym;
-                var response = await _visionClient.GetStringAsync($"{VisionUrl}/api/v3/ticker/24hr?symbol={spotSym}");
-                using var doc = JsonDocument.Parse(response);
-                var item = doc.RootElement;
-                if (decimal.TryParse(item.GetProperty("lastPrice").GetString(), NumberStyles.Any, CultureInfo.InvariantCulture, out var price))
+                var response = await FetchFromPublicSpotAsync($"/api/v3/ticker/24hr?symbol={spotSym}");
+                if (!string.IsNullOrEmpty(response))
                 {
-                    decimal.TryParse(item.GetProperty("priceChangePercent").GetString(), NumberStyles.Any, CultureInfo.InvariantCulture, out var change);
-                    decimal.TryParse(item.GetProperty("quoteVolume").GetString(), NumberStyles.Any, CultureInfo.InvariantCulture, out var vol);
-                    decimal high = 0, low = 0;
-                    if (item.TryGetProperty("highPrice", out var hp)) decimal.TryParse(hp.GetString(), NumberStyles.Any, CultureInfo.InvariantCulture, out high);
-                    if (item.TryGetProperty("lowPrice", out var lp)) decimal.TryParse(lp.GetString(), NumberStyles.Any, CultureInfo.InvariantCulture, out low);
-
-                    return new CoinTicker
+                    using var doc = JsonDocument.Parse(response);
+                    var item = doc.RootElement;
+                    if (decimal.TryParse(item.GetProperty("lastPrice").GetString(), NumberStyles.Any, CultureInfo.InvariantCulture, out var price))
                     {
-                        Symbol = cleanSym,
-                        Price = price,
-                        PriceChangePercent = change,
-                        VolumeQuote = vol,
-                        High24h = high,
-                        Low24h = low
-                    };
+                        decimal.TryParse(item.GetProperty("priceChangePercent").GetString(), NumberStyles.Any, CultureInfo.InvariantCulture, out var change);
+                        decimal.TryParse(item.GetProperty("quoteVolume").GetString(), NumberStyles.Any, CultureInfo.InvariantCulture, out var vol);
+                        decimal high = 0, low = 0;
+                        if (item.TryGetProperty("highPrice", out var hp)) decimal.TryParse(hp.GetString(), NumberStyles.Any, CultureInfo.InvariantCulture, out high);
+                        if (item.TryGetProperty("lowPrice", out var lp)) decimal.TryParse(lp.GetString(), NumberStyles.Any, CultureInfo.InvariantCulture, out low);
+
+                        return new CoinTicker
+                        {
+                            Symbol = cleanSym,
+                            Price = price,
+                            PriceChangePercent = change,
+                            VolumeQuote = vol,
+                            High24h = high,
+                            Low24h = low
+                        };
+                    }
+                }
+            }
+            catch { }
+
+            // Third tier fallback: Bybit Public Spot Ticker
+            try
+            {
+                var spotSym = cleanSym.StartsWith("1000") ? cleanSym.Substring(4) : cleanSym;
+                var bybitUrl = $"https://api.bybit.com/v5/market/tickers?category=spot&symbol={spotSym}";
+                var response = await _spotClient.GetStringAsync(bybitUrl);
+                using var doc = JsonDocument.Parse(response);
+                if (doc.RootElement.TryGetProperty("result", out var res) && res.TryGetProperty("list", out var listEl))
+                {
+                    var first = listEl.EnumerateArray().FirstOrDefault();
+                    if (first.ValueKind != JsonValueKind.Undefined && 
+                        decimal.TryParse(first.GetProperty("lastPrice").GetString(), NumberStyles.Any, CultureInfo.InvariantCulture, out var bPrice))
+                    {
+                        decimal.TryParse(first.GetProperty("price24hPcnt").GetString(), NumberStyles.Any, CultureInfo.InvariantCulture, out var bChange);
+                        decimal.TryParse(first.GetProperty("turnover24h").GetString(), NumberStyles.Any, CultureInfo.InvariantCulture, out var bVol);
+                        return new CoinTicker
+                        {
+                            Symbol = cleanSym,
+                            Price = bPrice,
+                            PriceChangePercent = bChange * 100m,
+                            VolumeQuote = bVol
+                        };
+                    }
                 }
             }
             catch { }
