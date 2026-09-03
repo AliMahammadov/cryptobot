@@ -71,19 +71,39 @@ namespace CryptoSense.Infrastructure.MarketData
                     var symbol = item.GetProperty("symbol").GetString() ?? "";
                     if (!symbol.EndsWith("USDT")) continue;
 
+                    var price = decimal.Parse(item.GetProperty("lastPrice").GetString()!, CultureInfo.InvariantCulture);
+                    var priceChange = decimal.Parse(item.GetProperty("priceChangePercent").GetString()!, CultureInfo.InvariantCulture);
+                    var quoteVol = decimal.Parse(item.GetProperty("quoteVolume").GetString()!, CultureInfo.InvariantCulture);
+                    var high = decimal.Parse(item.GetProperty("highPrice").GetString()!, CultureInfo.InvariantCulture);
+                    var low = decimal.Parse(item.GetProperty("lowPrice").GetString()!, CultureInfo.InvariantCulture);
+
                     list.Add(new CoinTicker
                     {
                         Symbol = symbol,
-                        Price = decimal.Parse(item.GetProperty("lastPrice").GetString()!, CultureInfo.InvariantCulture),
-                        PriceChangePercent = decimal.Parse(item.GetProperty("priceChangePercent").GetString()!, CultureInfo.InvariantCulture),
-                        VolumeQuote = decimal.Parse(item.GetProperty("quoteVolume").GetString()!, CultureInfo.InvariantCulture),
-                        High24h = decimal.Parse(item.GetProperty("highPrice").GetString()!, CultureInfo.InvariantCulture),
-                        Low24h = decimal.Parse(item.GetProperty("lowPrice").GetString()!, CultureInfo.InvariantCulture)
+                        Price = price,
+                        PriceChangePercent = priceChange,
+                        VolumeQuote = quoteVol,
+                        High24h = high,
+                        Low24h = low
                     });
+
+                    // Add normalized alias for 1000-prefix meme tokens (1000PEPEUSDT -> PEPEUSDT)
+                    if (symbol.StartsWith("1000"))
+                    {
+                        list.Add(new CoinTicker
+                        {
+                            Symbol = symbol.Substring(4),
+                            Price = price,
+                            PriceChangePercent = priceChange,
+                            VolumeQuote = quoteVol,
+                            High24h = high,
+                            Low24h = low
+                        });
+                    }
                 }
 
                 list.Sort((a, b) => b.VolumeQuote.CompareTo(a.VolumeQuote));
-                result = list.GetRange(0, Math.Min(topCount, list.Count));
+                result = list;
             }
             catch (Exception ex)
             {

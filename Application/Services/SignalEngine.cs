@@ -316,5 +316,10 @@ namespace CryptoSense.Application.Services
         {
             return await _unitOfWork.Signals.GetPerformanceStatsAsync(specificTimeframe, userCoins);
         }
+
+        public async Task<List<CryptoSense.Application.DTOs.CoinPerformanceBreakdownDto>> GetCoinPerformanceBreakdownAsync(List<string>? monitoredCoins = null)
+        {
+            return await _unitOfWork.Signals.GetCoinPerformanceBreakdownAsync(monitoredCoins);
+        }
     }
 }

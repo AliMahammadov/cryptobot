@@ -137,5 +137,60 @@ namespace CryptoSense.Infrastructure.Telegram
             sb.AppendLine("-----------------------------------");
             return sb.ToString();
         }
+
+        public static string FormatCoinPerformanceBreakdown(List<CryptoSense.Application.DTOs.CoinPerformanceBreakdownDto> breakdown, List<string> monitoredCoins)
+        {
+            var sb = new StringBuilder();
+            sb.AppendLine("📈 <b>Coinlər Üzrə Dərin Win-Rate Statistikası</b>");
+            sb.AppendLine("<i>(Bütün istifadəçilərə göndərilən qlobal sistem siqnalları üzrə)</i>");
+            sb.AppendLine("-----------------------------------");
+
+            if (breakdown.Count == 0)
+            {
+                sb.AppendLine("ℹ️ <i>Hələ qeydə alınmış əməliyyat nəticəsi yoxdur.</i>");
+            }
+            else
+            {
+                foreach (var coin in breakdown)
+                {
+                    var cleanSym = coin.CleanSymbol;
+                    if (coin.TotalTrades == 0)
+                    {
+                        sb.AppendLine($"🪙 <b>{cleanSym}:</b> <i>Hələ tamamlanmış əməliyyat yoxdur</i>");
+                        continue;
+                    }
+
+                    var icon = coin.OverallWinRate >= 70 ? "🟢" : (coin.OverallWinRate >= 50 ? "🟡" : "🔴");
+                    sb.AppendLine($"🪙 <b>{cleanSym}: {coin.OverallWinRate.ToString("F1", CultureInfo.InvariantCulture)}%</b> {icon} ({coin.TotalTrades} əməliyyat: {coin.SuccessTrades} Uğurlu, {coin.FailedTrades} Uğursuz)");
+
+                    var sortedTfs = coin.TimeframeStats.OrderBy(t => t.Key switch
+                    {
+                        "1m" => 1,
+                        "3m" => 2,
+                        "5m" => 3,
+                        "15m" => 4,
+                        "1h" => 5,
+                        "4h" => 6,
+                        _ => 10
+                    });
+
+                    foreach (var tf in sortedTfs)
+                    {
+                        var tfIcon = tf.Value.WinRate >= 70 ? "✅" : (tf.Value.WinRate >= 50 ? "🟡" : "❌");
+                        sb.AppendLine($"   • <b>{tf.Key}:</b> {tf.Value.WinRate.ToString("F1", CultureInfo.InvariantCulture)}% ({tf.Value.SuccessTrades}/{tf.Value.TotalTrades}) {tfIcon}");
+                    }
+                    sb.AppendLine();
+                }
+            }
+
+            sb.AppendLine("-----------------------------------");
+            var cleanMonitored = monitoredCoins.Select(c => c.Replace("USDT", "")).Distinct();
+            sb.AppendLine($"🌐 <b>Sistemin Canlı İzlədiyi Coinlər ({cleanMonitored.Count()} ədəd):</b>");
+            sb.AppendLine($"<code>{string.Join(", ", cleanMonitored)}</code>");
+            sb.AppendLine();
+            sb.AppendLine("💡 <i>Qeyd: Hər bir coin üzrə həm ümumi, həm də ayrı-ayrı şam çərçivələrindəki real nəticələr göstərilir.</i>");
+
+            return sb.ToString();
+        }
     }
 }

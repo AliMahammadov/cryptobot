@@ -48,7 +48,11 @@ namespace CryptoSense.Worker
                         var unitOfWork = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
 
                         var tickers = await marketData.GetTopFuturesTickersAsync(35);
-                        var tickerDict = tickers.ToDictionary(t => t.Symbol, t => t.Price);
+                        var tickerDict = new Dictionary<string, decimal>();
+                        foreach (var t in tickers)
+                        {
+                            tickerDict[t.Symbol] = t.Price;
+                        }
 
                         // =========================================================================
                         // 1. LIVE SIGNAL OUTCOME TRACKER (TP, SL & CANDLE EXPIRY EVALUATION)
@@ -59,22 +63,47 @@ namespace CryptoSense.Worker
                         {
                             if (sig.OutcomeAlertSent || sig.IsClosed) continue;
 
-                            if (tickerDict.TryGetValue(sig.Symbol, out var currentPrice))
+                            decimal currentPrice = 0;
+                            if (!tickerDict.TryGetValue(sig.Symbol, out currentPrice))
+                            {
+                                if (!tickerDict.TryGetValue("1000" + sig.Symbol, out currentPrice))
+                                {
+                                    if (sig.Symbol.StartsWith("1000"))
+                                    {
+                                        tickerDict.TryGetValue(sig.Symbol.Substring(4), out currentPrice);
+                                    }
+                                }
+                            }
+
+                            var duration = sig.Timeframe switch
+                            {
+                                "1m" => TimeSpan.FromMinutes(1),
+                                "3m" => TimeSpan.FromMinutes(3),
+                                "5m" => TimeSpan.FromMinutes(5),
+                                "15m" => TimeSpan.FromMinutes(15),
+                                "1h" => TimeSpan.FromHours(1),
+                                "4h" => TimeSpan.FromHours(4),
+                                _ => TimeSpan.FromMinutes(15)
+                            };
+
+                            var elapsed = DateTime.UtcNow - sig.GeneratedAt;
+                            bool isExpired = elapsed >= duration;
+
+                            if (currentPrice == 0 && isExpired)
+                            {
+                                try
+                                {
+                                    var klines = await marketData.GetKlinesAsync(sig.Symbol, sig.Timeframe, 2);
+                                    if (klines.Count > 0) currentPrice = klines.Last().Close;
+                                }
+                                catch { }
+
+                                if (currentPrice == 0) currentPrice = sig.EntryPrice;
+                            }
+
+                            if (currentPrice > 0)
                             {
                                 var isLong = sig.Direction == SignalDirection.Buy || sig.SignalType.Contains("LONG");
-                                var duration = sig.Timeframe switch
-                                {
-                                    "1m" => TimeSpan.FromMinutes(1),
-                                    "3m" => TimeSpan.FromMinutes(3),
-                                    "5m" => TimeSpan.FromMinutes(5),
-                                    "15m" => TimeSpan.FromMinutes(15),
-                                    "1h" => TimeSpan.FromHours(1),
-                                    "4h" => TimeSpan.FromHours(4),
-                                    _ => TimeSpan.FromMinutes(15)
-                                };
-
-                                var elapsed = DateTime.UtcNow - sig.GeneratedAt;
-                                bool isExpired = elapsed >= duration;
 
                                 if (isLong)
                                 {

@@ -28,7 +28,9 @@ namespace CryptoSense.Infrastructure.Telegram
         public static string? SuperAdminChatId = null;
         public static ConcurrentDictionary<string, UserSettings> UserPreferences { get; } = new();
         private static readonly ConcurrentDictionary<string, string> _userStates = new();
+        private static readonly ConcurrentDictionary<string, int> _signalUserNumberMap = new();
         private static readonly string SettingsFilePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "user_preferences.json");
+        private static readonly string SignalMapFilePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "signal_user_numbers.json");
 
         static TelegramBotService()
         {
@@ -51,6 +53,19 @@ namespace CryptoSense.Infrastructure.Telegram
                         }
                     }
                 }
+
+                if (File.Exists(SignalMapFilePath))
+                {
+                    var mapJson = File.ReadAllText(SignalMapFilePath);
+                    var loadedMap = JsonSerializer.Deserialize<Dictionary<string, int>>(mapJson);
+                    if (loadedMap != null)
+                    {
+                        foreach (var kvp in loadedMap)
+                        {
+                            _signalUserNumberMap[kvp.Key] = kvp.Value;
+                        }
+                    }
+                }
             }
             catch { }
         }
@@ -62,6 +77,10 @@ namespace CryptoSense.Infrastructure.Telegram
                 var dict = new Dictionary<string, UserSettings>(UserPreferences);
                 var json = JsonSerializer.Serialize(dict, new JsonSerializerOptions { WriteIndented = true });
                 File.WriteAllText(SettingsFilePath, json);
+
+                var mapDict = new Dictionary<string, int>(_signalUserNumberMap);
+                var mapJson = JsonSerializer.Serialize(mapDict);
+                File.WriteAllText(SignalMapFilePath, mapJson);
             }
             catch { }
         }
@@ -160,6 +179,8 @@ namespace CryptoSense.Infrastructure.Telegram
             {
                 var settings = GetSettings(specificChatId);
                 var userSigNum = signal.UserSignalNumbers.GetOrAdd(specificChatId, _ => ++settings.AlertCounter);
+                _signalUserNumberMap[$"{signal.Id}_{specificChatId}"] = userSigNum;
+                SaveSettings();
                 var msg = TelegramMessageFormatter.FormatSignalAlert(signal, userSigNum);
                 settings.LastSignalSentUtc = DateTime.UtcNow;
                 settings.LastHeartbeatSentUtc = DateTime.UtcNow;
@@ -195,6 +216,8 @@ namespace CryptoSense.Infrastructure.Telegram
                 if (settings.Coins.Count > 0 && !settings.Coins.Contains(signal.Symbol)) continue;
 
                 var userSigNum = signal.UserSignalNumbers.GetOrAdd(chatId, _ => ++settings.AlertCounter);
+                _signalUserNumberMap[$"{signal.Id}_{chatId}"] = userSigNum;
+                SaveSettings();
                 var msg = TelegramMessageFormatter.FormatSignalAlert(signal, userSigNum);
                 settings.LastSignalSentUtc = DateTime.UtcNow;
                 settings.LastHeartbeatSentUtc = DateTime.UtcNow;
@@ -227,8 +250,20 @@ namespace CryptoSense.Infrastructure.Telegram
                 // Check if signal occurred before user resumed
                 if (signal.GeneratedAt < settings.LastResumeTime.AddSeconds(-5)) continue;
 
-                signal.UserSignalNumbers.TryGetValue(chatId, out var userSigNum);
-                if (userSigNum == 0) userSigNum = signal.SignalNumber;
+                int userSigNum = 0;
+                var mapKey = $"{signal.Id}_{chatId}";
+                if (_signalUserNumberMap.TryGetValue(mapKey, out var mappedNum) && mappedNum > 0)
+                {
+                    userSigNum = mappedNum;
+                }
+                else if (signal.UserSignalNumbers.TryGetValue(chatId, out var fallbackNum) && fallbackNum > 0)
+                {
+                    userSigNum = fallbackNum;
+                }
+                else
+                {
+                    userSigNum = signal.SignalNumber;
+                }
 
                 var msg = TelegramMessageFormatter.FormatOutcomeAlert(signal, userSigNum, outcomeType, hitPrice, profitPct);
                 await SendMessageAsync(msg, chatId);
@@ -515,6 +550,45 @@ namespace CryptoSense.Infrastructure.Telegram
                              "📌 <b>Məsələn:</b>\n" +
                              "<code>Murad yeni123</code>";
                 await SendMessageAsync(prompt, chatId, TelegramKeyboards.BuildAdminKeyboard());
+                return;
+            }
+
+            if (isAdmin && (text == "📈 Coinlər Üzrə Dərin Statistika" || text == "/coin_stats"))
+            {
+                _userStates.TryRemove(chatId, out _);
+                await SendMessageAsync("⏳ <b>Bütün coinlər və zaman çərçivələri üzrə qlobal statistika hesablanır...</b>", chatId);
+
+                var monitored = _config.SelectedCoins != null && _config.SelectedCoins.Count > 0
+                    ? _config.SelectedCoins
+                    : new List<string> { "BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT", "DOGEUSDT", "SUIUSDT", "PEPEUSDT", "AVAXUSDT", "NOTUSDT" };
+
+                var breakdown = await signalEngine.GetCoinPerformanceBreakdownAsync(monitored);
+                var report = TelegramMessageFormatter.FormatCoinPerformanceBreakdown(breakdown, monitored);
+                await SendMessageAsync(report, chatId, TelegramKeyboards.BuildAdminKeyboard());
+                return;
+            }
+
+            if (isAdmin && (text == "🌐 Bütün Coinlərin Siyahısı" || text == "/all_coins"))
+            {
+                _userStates.TryRemove(chatId, out _);
+                var monitored = _config.SelectedCoins != null && _config.SelectedCoins.Count > 0
+                    ? _config.SelectedCoins
+                    : new List<string> { "BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT", "DOGEUSDT", "SUIUSDT", "PEPEUSDT", "AVAXUSDT", "NOTUSDT" };
+
+                var cleanCoins = monitored.Select(c => c.Replace("USDT", "")).Distinct().ToList();
+                var msg = "🌐 <b>Sistemin Canlı İzlədiyi Bütün Coinlər və Zamanlar</b>\n\n" +
+                          $"📊 <b>Ümumi Coin Sayı:</b> <b>{cleanCoins.Count} ədəd</b>\n" +
+                          $"🪙 <b>İzlənən Coinlər:</b>\n<code>{string.Join(", ", cleanCoins)}</code>\n\n" +
+                          "⏱ <b>Dövri Olaraq Analiz Olunan Şamlar:</b>\n" +
+                          "• <b>3 Dəqiqə (3m)</b> — Scalping və sürətli fürsətlər\n" +
+                          "• <b>5 Dəqiqə (5m)</b> — Dinamik intraday siqnalları\n" +
+                          "• <b>15 Dəqiqə (15m)</b> — Yüksək dəqiqlikli standart trend\n" +
+                          "• <b>1 Saat (1h)</b> — Orta müddətli güclü dalğa\n" +
+                          "• <b>4 Saat (4h)</b> — Əsas makro trend və güclü səviyyələr\n\n" +
+                          "🔍 <b>Skan Mexanizmi:</b>\n" +
+                          $"Sistem arxa fonda hər 10 saniyədən bir bu {cleanCoins.Count} coinin hər birini aktiv zaman kəsiyində (EMA, MACD, RSI, ATR, Confluence və BTC Kompası) analiz edir və Confluence >= 78% olanda şam kilidi ilə istifadəçilərə çatdırır.";
+
+                await SendMessageAsync(msg, chatId, TelegramKeyboards.BuildAdminKeyboard());
                 return;
             }
 

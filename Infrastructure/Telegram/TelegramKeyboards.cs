@@ -49,6 +49,7 @@ namespace CryptoSense.Infrastructure.Telegram
                 {
                     new[] { new { text = "➕ İstifadəçi Yarat" }, new { text = "👥 İstifadəçilərin Siyahısı" } },
                     new[] { new { text = "🗑 İstifadəçi Sil" }, new { text = "🔑 Parolu Dəyiş" } },
+                    new[] { new { text = "📈 Coinlər Üzrə Dərin Statistika" }, new { text = "🌐 Bütün Coinlərin Siyahısı" } },
                     new[] { new { text = "📊 Əsas Menyu (Siqnallar)" } }
                 },
                 resize_keyboard = true,
