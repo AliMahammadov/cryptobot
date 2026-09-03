@@ -113,6 +113,7 @@ namespace CryptoSense.Infrastructure.Persistence.Repositories
                 .ToListAsync();
 
             var closedSignals = signals.Where(s => s.IsClosed || s.Status != SignalStatus.Open).ToList();
+            var openSignals = signals.Where(s => !s.IsClosed && s.Status == SignalStatus.Open).ToList();
             
             static string Norm(string sym)
             {
@@ -125,7 +126,12 @@ namespace CryptoSense.Infrastructure.Persistence.Repositories
                 .GroupBy(s => Norm(s.Symbol))
                 .ToDictionary(g => g.Key, g => g.ToList());
 
+            var groupedOpenByCoin = openSignals
+                .GroupBy(s => Norm(s.Symbol))
+                .ToDictionary(g => g.Key, g => g.ToList());
+
             var allNormCoins = new HashSet<string>(groupedByCoin.Keys);
+            foreach (var k in groupedOpenByCoin.Keys) allNormCoins.Add(k);
             if (monitoredCoins != null)
             {
                 foreach (var c in monitoredCoins) allNormCoins.Add(Norm(c));
@@ -137,7 +143,8 @@ namespace CryptoSense.Infrastructure.Persistence.Repositories
             {
                 var dto = new CryptoSense.Application.DTOs.CoinPerformanceBreakdownDto
                 {
-                    Symbol = normCoin + "USDT"
+                    Symbol = normCoin + "USDT",
+                    ActiveTrades = groupedOpenByCoin.TryGetValue(normCoin, out var openList) ? openList.Count : 0
                 };
 
                 if (groupedByCoin.TryGetValue(normCoin, out var list) && list.Count > 0)

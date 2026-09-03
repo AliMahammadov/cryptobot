@@ -29,10 +29,22 @@ namespace CryptoSense.Domain.Entities
     {
         public decimal Price { get; set; }
         public decimal Change24h { get; set; }
+        public decimal High24h { get; set; }
+        public decimal Low24h { get; set; }
+        public decimal VolumeQuote { get; set; }
+        public decimal BtcDominance { get; set; }
+        public decimal UsdtDominance { get; set; }
+        public decimal MarketCapChange24h { get; set; }
+        public decimal Ema20 { get; set; }
+        public decimal Ema50 { get; set; }
+        public decimal Rsi15m { get; set; }
+        public decimal MacdHist { get; set; }
+        public decimal SuperTrend { get; set; }
+        public decimal SupportLevel { get; set; }
+        public decimal ResistanceLevel { get; set; }
         public string Trend { get; set; } = "Neytral";
         public int BullishScore { get; set; }
         public string Summary { get; set; } = "";
-        public decimal Rsi15m { get; set; }
         public string EmaStructure { get; set; } = "";
         public string TimestampFormatted { get; set; } = CryptoSense.Domain.Common.TimeHelper.NowFormatted;
     }

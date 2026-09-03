@@ -91,17 +91,49 @@ namespace CryptoSense.Application.Services
                 if (btcKlines.Count == 0) return _cachedBtcCompass ?? compass;
 
                 var currentPrice = btcKlines.Last().Close;
-                var openPrice = btcKlines.First().Open;
                 compass.Price = currentPrice;
-                compass.Change24h = openPrice > 0 ? Math.Round(((currentPrice - openPrice) / openPrice) * 100, 2) : 0;
+
+                // Live 24h Ticker & Dominance
+                try
+                {
+                    var tickers = await _marketData.GetTopFuturesTickersAsync(100);
+                    var btcTicker = tickers.FirstOrDefault(t => t.Symbol == "BTCUSDT");
+                    if (btcTicker != null)
+                    {
+                        compass.Change24h = btcTicker.PriceChangePercent;
+                        compass.High24h = btcTicker.High24h;
+                        compass.Low24h = btcTicker.Low24h;
+                        compass.VolumeQuote = btcTicker.VolumeQuote;
+                    }
+                    else
+                    {
+                        var openPrice = btcKlines.First().Open;
+                        compass.Change24h = openPrice > 0 ? Math.Round(((currentPrice - openPrice) / openPrice) * 100, 2) : 0;
+                        compass.High24h = btcKlines.Max(k => k.High);
+                        compass.Low24h = btcKlines.Min(k => k.Low);
+                        compass.VolumeQuote = btcKlines.Sum(k => k.Volume * k.Close);
+                    }
+
+                    var macro = await _marketData.GetMacroMarketOverviewAsync();
+                    compass.BtcDominance = macro.BtcDominance;
+                    compass.UsdtDominance = macro.UsdtDominance;
+                    compass.MarketCapChange24h = macro.MarketCapChange24h;
+                }
+                catch { }
 
                 var indicators = _indicatorEngine.CalculateIndicators(btcKlines);
                 compass.Rsi15m = indicators.Rsi;
                 compass.EmaStructure = indicators.EmaTrend;
+                compass.Ema20 = indicators.Ema20;
+                compass.Ema50 = indicators.Ema50;
+                compass.MacdHist = indicators.MacdHist;
+                compass.SuperTrend = indicators.SuperTrend;
+                compass.SupportLevel = indicators.SupportLevel;
+                compass.ResistanceLevel = indicators.ResistanceLevel;
 
                 int score = 50;
-                if (indicators.EmaTrend.Contains("Bullish") || indicators.EmaTrend.Contains("Müsbət")) score += 20;
-                if (indicators.EmaTrend.Contains("Bearish") || indicators.EmaTrend.Contains("Mənfi")) score -= 20;
+                if (indicators.Ema20 > indicators.Ema50) score += 20;
+                else score -= 20;
                 if (indicators.MacdHist > 0) score += 15;
                 else score -= 15;
                 if (indicators.Rsi >= 50 && indicators.Rsi <= 68) score += 15;
@@ -183,63 +215,73 @@ namespace CryptoSense.Application.Services
             reasons.Add($"Bitcoin Kompası: {btcCompass.Trend} ({btcCompass.BullishScore}%)");
             reasons.Add($"Dominasiya: BTC.D {macroOverview.BtcDominance}% | USDT.D {macroOverview.UsdtDominance}%");
 
-            // 3. High-Probability Decision Logic (Target: >=70% Win-Rate)
+            // 3. Institutional Retest & Pullback Decision Logic
             SignalDirection direction = SignalDirection.Buy;
             string determinedType = "NEYTRAL (GÖZLƏMƏ) ⚪";
-            int confidence = 65;
+            int confidence = (int)Math.Clamp(Math.Round(indicators.ConfluenceScore), 40, 95);
 
-            bool emaBullish = currentPrice > indicators.Ema20 && indicators.Ema20 >= indicators.Ema50;
-            bool smaBullish = currentPrice > indicators.Sma20;
-            bool macdBullish = indicators.MacdHist > 0 && indicators.Macd >= indicators.MacdSignal;
-            bool superTrendBullish = indicators.SuperTrendVote == IndicatorVote.Bullish;
+            // A. Trend Filter
+            bool isUptrend = indicators.Ema20 > indicators.Ema50 && currentPrice >= indicators.Ema50;
+            bool isDowntrend = indicators.Ema20 < indicators.Ema50 && currentPrice <= indicators.Ema50;
 
-            bool emaBearish = currentPrice < indicators.Ema20 && indicators.Ema20 <= indicators.Ema50;
-            bool smaBearish = currentPrice < indicators.Sma20;
-            bool macdBearish = indicators.MacdHist < 0 && indicators.Macd <= indicators.MacdSignal;
-            bool superTrendBearish = indicators.SuperTrendVote == IndicatorVote.Bearish;
+            // B. Pullback to Value Zone (EMA20 or Support)
+            decimal distToEma20Pct = Math.Abs(currentPrice - indicators.Ema20) / (currentPrice > 0 ? currentPrice : 1);
+            bool isPullbackZone = distToEma20Pct <= 0.0085m;
 
+            // C. Rejection Wick Analysis (Buyer / Seller Rejection)
+            decimal candleRange = closedCandle.High - closedCandle.Low;
+            decimal lowerWick = Math.Min(closedCandle.Open, closedCandle.Close) - closedCandle.Low;
+            decimal upperWick = closedCandle.High - Math.Max(closedCandle.Open, closedCandle.Close);
+
+            bool buyerRejection = candleRange > 0 && (lowerWick / candleRange) >= 0.35m;
+            bool sellerRejection = candleRange > 0 && (upperWick / candleRange) >= 0.35m;
+
+            // D. Momentum & Breakout
+            bool breakoutLong = indicators.ResistanceLevel > 0 && currentPrice >= indicators.ResistanceLevel;
+            bool breakoutShort = indicators.SupportLevel > 0 && currentPrice <= indicators.SupportLevel;
+
+            // E. RSI Safe Zone Filter
+            bool rsiAllowsLong = indicators.Rsi >= 38 && indicators.Rsi <= 68;
+            bool rsiAllowsShort = indicators.Rsi >= 32 && indicators.Rsi <= 62;
+
+            // F. Macro & Bitcoin Compass Alignment
             bool isAltcoin = symbol != "BTCUSDT";
-            bool highBtcDominance = macroOverview.BtcDominance >= 56.0m;
+            bool highBtcDominance = macroOverview.BtcDominance >= 58.0m;
+            bool btcConfirmsLong = isAltcoin ? (btcCompass.BullishScore >= 45 && !highBtcDominance) : (btcCompass.BullishScore >= 45);
+            bool btcConfirmsShort = isAltcoin ? (btcCompass.BullishScore <= 55 || highBtcDominance) : (btcCompass.BullishScore <= 55);
 
-            // Altcoin / BTC logic:
-            // When BTC.D is high and rising, or BTC is weak, altcoins bleed -> Altcoin LONGs are blocked!
-            bool btcAllowsLong = isAltcoin 
-                ? (btcCompass.BullishScore >= 48 && !highBtcDominance)
-                : (btcCompass.BullishScore >= 45);
-
-            // Altcoin SHORTs are favored when BTC is weak or BTC dominance is high
-            bool btcAllowsShort = isAltcoin
-                ? (btcCompass.BullishScore <= 55 || highBtcDominance)
-                : (btcCompass.BullishScore <= 55);
-
-            // Long Setup: EMA Bullish + SMA Bullish + MACD Bullish + SuperTrend Bullish + BTC confirms
-            if (emaBullish && smaBullish && macdBullish && superTrendBullish && btcAllowsLong)
+            // =========================================================================
+            // 🟢 PEŞƏKAR RETEST / BREAKOUT LONG
+            // =========================================================================
+            if ((isUptrend && (isPullbackZone || buyerRejection) && rsiAllowsLong && btcConfirmsLong) ||
+                (breakoutLong && indicators.SuperTrendVote == IndicatorVote.Bullish && indicators.MacdHist > 0 && btcConfirmsLong))
             {
                 direction = SignalDirection.Buy;
-                determinedType = "GÜCLÜ LONG (ALIŞ) 🟢";
-                confidence = Math.Clamp((int)indicators.ConfluenceScore, 78, 96);
-                if (confidence < 80) confidence = 80;
+                determinedType = breakoutLong ? "PEŞƏKAR BREAKOUT LONG 🟢" : "PEŞƏKAR RETEST LONG 🟢";
+                confidence = (int)Math.Clamp(Math.Round(indicators.ConfluenceScore), 50, 96);
             }
-            // Short Setup: EMA Bearish + SMA Bearish + MACD Bearish + SuperTrend Bearish + BTC confirms
-            else if (emaBearish && smaBearish && macdBearish && superTrendBearish && btcAllowsShort)
+            // =========================================================================
+            // 🔴 PEŞƏKAR RETEST / BREAKDOWN SHORT
+            // =========================================================================
+            else if ((isDowntrend && (isPullbackZone || sellerRejection) && rsiAllowsShort && btcConfirmsShort) ||
+                     (breakoutShort && indicators.SuperTrendVote == IndicatorVote.Bearish && indicators.MacdHist < 0 && btcConfirmsShort))
             {
                 direction = SignalDirection.Sell;
-                determinedType = "GÜCLÜ SHORT (SATIŞ) 🔴";
-                confidence = Math.Clamp((int)(100m - indicators.ConfluenceScore), 78, 96);
-                if (confidence < 80) confidence = 80;
+                determinedType = breakoutShort ? "PEŞƏKAR BREAKDOWN SHORT 🔴" : "PEŞƏKAR RETEST SHORT 🔴";
+                confidence = (int)Math.Clamp(Math.Round(100m - indicators.ConfluenceScore), 50, 96);
             }
-            // Secondary High-Confluence confirmation
-            else if (indicators.ConfluenceScore >= 75m && btcAllowsLong && indicators.MacdHist >= 0 && superTrendBullish)
+            // İkincili Yüksək Confluence Süzgəci:
+            else if (indicators.ConfluenceScore >= 72m && btcConfirmsLong && rsiAllowsLong)
             {
                 direction = SignalDirection.Buy;
-                determinedType = "GÜCLÜ LONG (ALIŞ) 🟢";
-                confidence = Math.Clamp((int)indicators.ConfluenceScore, 75, 92);
+                determinedType = "PEŞƏKAR TREND LONG 🟢";
+                confidence = (int)Math.Clamp(Math.Round(indicators.ConfluenceScore), 50, 95);
             }
-            else if (indicators.ConfluenceScore <= 25m && btcAllowsShort && indicators.MacdHist <= 0 && superTrendBearish)
+            else if (indicators.ConfluenceScore <= 28m && btcConfirmsShort && rsiAllowsShort)
             {
                 direction = SignalDirection.Sell;
-                determinedType = "GÜCLÜ SHORT (SATIŞ) 🔴";
-                confidence = Math.Clamp((int)(100m - indicators.ConfluenceScore), 75, 92);
+                determinedType = "PEŞƏKAR TREND SHORT 🔴";
+                confidence = (int)Math.Clamp(Math.Round(100m - indicators.ConfluenceScore), 50, 95);
             }
 
             decimal directionalConfluence = direction == SignalDirection.Sell 
@@ -298,23 +340,47 @@ namespace CryptoSense.Application.Services
                 BtcCompass = btcCompass
             };
 
-            // Entry range & TP/SL setup
-            newSignal.EntryLow = RoundToCoinPrecision(currentPrice, currentPrice * 0.9985m);
-            newSignal.EntryHigh = RoundToCoinPrecision(currentPrice, currentPrice * 1.0015m);
+            // Lokal Dəstək və Müqavimət Səviyyələri üzrə TP və SL Təyini
+            decimal localSupport = indicators.SupportLevel > 0 ? indicators.SupportLevel : (currentPrice - (atr * 1.2m));
+            decimal localResistance = indicators.ResistanceLevel > 0 ? indicators.ResistanceLevel : (currentPrice + (atr * 1.2m));
 
             if (direction == SignalDirection.Buy)
             {
-                newSignal.TakeProfit1 = RoundToCoinPrecision(currentPrice, currentPrice + (atr * 1.0m));
-                newSignal.TakeProfit2 = RoundToCoinPrecision(currentPrice, currentPrice + (atr * 1.8m));
-                newSignal.TakeProfit3 = RoundToCoinPrecision(currentPrice, currentPrice + (atr * 2.8m));
-                newSignal.StopLoss = RoundToCoinPrecision(currentPrice, currentPrice - (atr * 1.2m));
+                decimal lowBound = buyerRejection ? closedCandle.Low : (currentPrice * 0.9985m);
+                newSignal.EntryLow = RoundToCoinPrecision(currentPrice, lowBound);
+                newSignal.EntryHigh = RoundToCoinPrecision(currentPrice, currentPrice * 1.0010m);
+
+                // Stop-Loss: Lokal dəstəyin bir az altına
+                decimal slTarget = localSupport * 0.998m;
+                if (currentPrice - slTarget < (atr * 0.8m)) slTarget = currentPrice - (atr * 1.1m);
+                newSignal.StopLoss = RoundToCoinPrecision(currentPrice, slTarget);
+
+                decimal risk = currentPrice - newSignal.StopLoss;
+                if (risk <= 0) risk = currentPrice * 0.01m;
+
+                newSignal.TakeProfit1 = RoundToCoinPrecision(currentPrice, currentPrice + (risk * 1.2m));
+                decimal tp2Candidate = localResistance > currentPrice ? localResistance : currentPrice + (risk * 2.0m);
+                newSignal.TakeProfit2 = RoundToCoinPrecision(currentPrice, tp2Candidate);
+                newSignal.TakeProfit3 = RoundToCoinPrecision(currentPrice, currentPrice + (risk * 3.0m));
             }
-            else
+            else // SHORT
             {
-                newSignal.TakeProfit1 = RoundToCoinPrecision(currentPrice, currentPrice - (atr * 1.0m));
-                newSignal.TakeProfit2 = RoundToCoinPrecision(currentPrice, currentPrice - (atr * 1.8m));
-                newSignal.TakeProfit3 = RoundToCoinPrecision(currentPrice, currentPrice - (atr * 2.8m));
-                newSignal.StopLoss = RoundToCoinPrecision(currentPrice, currentPrice + (atr * 1.2m));
+                decimal highBound = sellerRejection ? closedCandle.High : (currentPrice * 1.0015m);
+                newSignal.EntryLow = RoundToCoinPrecision(currentPrice, currentPrice * 0.9990m);
+                newSignal.EntryHigh = RoundToCoinPrecision(currentPrice, highBound);
+
+                // Stop-Loss: Lokal müqavimətin bir az üstünə
+                decimal slTarget = localResistance * 1.002m;
+                if (slTarget - currentPrice < (atr * 0.8m)) slTarget = currentPrice + (atr * 1.1m);
+                newSignal.StopLoss = RoundToCoinPrecision(currentPrice, slTarget);
+
+                decimal risk = newSignal.StopLoss - currentPrice;
+                if (risk <= 0) risk = currentPrice * 0.01m;
+
+                newSignal.TakeProfit1 = RoundToCoinPrecision(currentPrice, currentPrice - (risk * 1.2m));
+                decimal tp2Candidate = localSupport < currentPrice ? localSupport : currentPrice - (risk * 2.0m);
+                newSignal.TakeProfit2 = RoundToCoinPrecision(currentPrice, tp2Candidate);
+                newSignal.TakeProfit3 = RoundToCoinPrecision(currentPrice, currentPrice - (risk * 3.0m));
             }
 
             _recentCandleSignals[candleKey] = newSignal;

@@ -78,12 +78,67 @@ namespace CryptoSense.Infrastructure.Telegram
 
         public static string FormatBtcCompass(BtcMarketCompass compass)
         {
-            return $"🧭 <b>Bitcoin Bazar Kompası</b>\n\n" +
-                   $"🕒 Tarix: <b>{compass.TimestampFormatted}</b>\n" +
-                   $"💵 Cari Qiymət: <b>${compass.Price.ToString(CultureInfo.InvariantCulture)}</b>\n" +
-                   $"📈 Trend İstiqaməti: <b>{compass.Trend}</b>\n" +
-                   $"🎯 Təhlil Gücü: <b>{compass.BullishScore}%</b>\n\n" +
-                   $"<i>{compass.Summary}</i>";
+            var sb = new StringBuilder();
+            sb.AppendLine("🧭 <b>Bitcoin Makro Bazar Kompası</b>");
+            sb.AppendLine($"🕒 <b>Canlı Vaxt:</b> <code>{compass.TimestampFormatted}</code>");
+            sb.AppendLine("-----------------------------------");
+            sb.AppendLine("💵 <b>CANLI QİYMƏT VƏ 24H STATİSTİKA:</b>");
+            sb.AppendLine($"• <b>Cari Qiymət:</b> <code>${compass.Price.ToString("N2", CultureInfo.InvariantCulture)}</code>");
+            var changeSign = compass.Change24h >= 0 ? "+" : "";
+            var changeIcon = compass.Change24h >= 0 ? "🟢" : "🔴";
+            sb.AppendLine($"• <b>24h Dəyişim:</b> <b>{changeSign}{compass.Change24h.ToString("F2", CultureInfo.InvariantCulture)}% {changeIcon}</b>");
+            if (compass.High24h > 0 && compass.Low24h > 0)
+            {
+                sb.AppendLine($"• <b>24h Maksimum:</b> <code>${compass.High24h.ToString("N2", CultureInfo.InvariantCulture)}</code>");
+                sb.AppendLine($"• <b>24h Minimum:</b> <code>${compass.Low24h.ToString("N2", CultureInfo.InvariantCulture)}</code>");
+            }
+            if (compass.VolumeQuote > 0)
+            {
+                var volBillions = compass.VolumeQuote / 1_000_000_000m;
+                sb.AppendLine($"• <b>24h Həcm:</b> <code>${volBillions.ToString("F2", CultureInfo.InvariantCulture)} Milyard USDT</code>");
+            }
+            sb.AppendLine("-----------------------------------");
+            sb.AppendLine("📊 <b>QOBAL BAZAR DOMİNANTLIĞI:</b>");
+            if (compass.BtcDominance > 0)
+            {
+                sb.AppendLine($"• <b>Bitcoin Dominantlığı (BTC.D):</b> <b>{compass.BtcDominance.ToString("F2", CultureInfo.InvariantCulture)}%</b>");
+                sb.AppendLine($"• <b>Tether Dominantlığı (USDT.D):</b> <b>{compass.UsdtDominance.ToString("F2", CultureInfo.InvariantCulture)}%</b>");
+                var altImpact = compass.BtcDominance >= 58.0m 
+                    ? "⚠️ <i>BTC.D yüksəkdir — Altcoinlərdə ehtiyatlı olun.</i>"
+                    : "✅ <i>BTC.D stabildir — Altcoinlərdə ticarət üçün əlverişlidir.</i>";
+                sb.AppendLine($"• <b>Altcoinlərə Təsiri:</b> {altImpact}");
+            }
+            else
+            {
+                sb.AppendLine("• <b>Dominantlıq:</b> <i>Canlı API-dən yenilənir...</i>");
+            }
+            sb.AppendLine("-----------------------------------");
+            sb.AppendLine("📈 <b>CANLI TEXNİKİ DƏRƏCƏLƏR:</b>");
+            if (compass.Ema20 > 0 && compass.Ema50 > 0)
+            {
+                var emaRel = compass.Ema20 > compass.Ema50 ? "EMA20 > EMA50 (Yüksəliş) 🟢" : "EMA20 < EMA50 (Eniş) 🔴";
+                sb.AppendLine($"• <b>EMA Strukturu:</b> {emaRel}");
+                sb.AppendLine($"  <code>EMA20: ${compass.Ema20.ToString("N2", CultureInfo.InvariantCulture)} | EMA50: ${compass.Ema50.ToString("N2", CultureInfo.InvariantCulture)}</code>");
+            }
+            if (compass.Rsi15m > 0)
+            {
+                var rsiStatus = compass.Rsi15m > 70 ? "Aşırı Alış ⚠️" : (compass.Rsi15m < 30 ? "Aşırı Satış ⚠️" : "Sağlam Balans ✅");
+                sb.AppendLine($"• <b>RSI (14):</b> <b>{compass.Rsi15m.ToString("F1", CultureInfo.InvariantCulture)}</b> ({rsiStatus})");
+            }
+            if (compass.MacdHist != 0)
+            {
+                var macdSign = compass.MacdHist > 0 ? "+" : "";
+                var macdDesc = compass.MacdHist > 0 ? "Alıcı Təzyiqi 🟢" : "Satıcı Təzyiqi 🔴";
+                sb.AppendLine($"• <b>MACD Histogram:</b> <code>{macdSign}{compass.MacdHist.ToString("F2", CultureInfo.InvariantCulture)}</code> ({macdDesc})");
+            }
+            if (compass.SupportLevel > 0 && compass.ResistanceLevel > 0)
+            {
+                sb.AppendLine($"• <b>Lokal Səviyyələr:</b> Dəstək <code>${compass.SupportLevel.ToString("N2", CultureInfo.InvariantCulture)}</code> | Müqavimət <code>${compass.ResistanceLevel.ToString("N2", CultureInfo.InvariantCulture)}</code>");
+            }
+            sb.AppendLine("-----------------------------------");
+            sb.AppendLine($"📌 <b>Ümumi Trend İstiqaməti:</b> <b>{compass.Trend}</b>");
+
+            return sb.ToString();
         }
 
         public static string FormatNewsSentiment(NewsSentimentSummary newsSummary)
@@ -141,17 +196,23 @@ namespace CryptoSense.Infrastructure.Telegram
         public static string FormatCoinPerformanceBreakdown(List<CryptoSense.Application.DTOs.CoinPerformanceBreakdownDto> breakdown, List<string> monitoredCoins)
         {
             var sb = new StringBuilder();
-            sb.AppendLine("📈 <b>Bütün İstifadəçilər Üzrə Dərin Coin Win-Rate Statistikası</b>");
-            sb.AppendLine("<i>(Bütün əməliyyat aparılan coinlərin canlı qlobal nəticələri)</i>");
+            sb.AppendLine("📈 <b>Coinlər Üzrə Qlobal Win-Rate və Dərin Statistika</b>");
+            sb.AppendLine("<i>(Canlı verilənlər bazasındakı bütün tamamlanmış və açıq əməliyyatlar)</i>");
             sb.AppendLine("-----------------------------------");
 
             var tradedCoins = breakdown.Where(c => c.TotalTrades > 0).ToList();
-            var untradedCoins = breakdown.Where(c => c.TotalTrades == 0).Select(c => c.CleanSymbol).ToList();
+            int totalActive = breakdown.Sum(c => c.ActiveTrades);
 
             if (tradedCoins.Count == 0)
             {
-                sb.AppendLine("ℹ️ <i>Hal-hazırda tamamlanmış əməliyyat nəticəsi yoxdur. Şamlar bitdikcə və hədəflərə çatdıqca bütün nəticələr burada avtomatik yenilənəcək.</i>");
+                sb.AppendLine("ℹ️ <b>Tamamlanmış Əməliyyatlar:</b> 0 ədəd");
+                sb.AppendLine("<i>Hal-hazırda sistem 50 coin üzrə canlı skan edir. Şamlar bağlandıqca və TP/SL hədəfləri vurduqca qələbə faizləri burada canlı toplanacaq.</i>");
                 sb.AppendLine();
+                if (totalActive > 0)
+                {
+                    sb.AppendLine($"🟡 <b>Hal-hazırda bazarda izlənən açıq əməliyyatlar:</b> <b>{totalActive} ədəd</b>");
+                    sb.AppendLine();
+                }
             }
             else
             {
@@ -159,16 +220,20 @@ namespace CryptoSense.Infrastructure.Telegram
                 int totalAllSuccess = tradedCoins.Sum(c => c.SuccessTrades);
                 int totalAllFailed = tradedCoins.Sum(c => c.FailedTrades);
                 decimal globalWinRate = totalAllTrades > 0 ? Math.Round(((decimal)totalAllSuccess / totalAllTrades) * 100, 1) : 0;
+                decimal globalPnL = Math.Round(tradedCoins.Sum(c => c.TotalNetProfitPercent), 2);
 
-                sb.AppendLine($"📊 <b>Ümumi Sistem Performansı:</b> {totalAllTrades} əməliyyat | Win-Rate: <b>{globalWinRate.ToString("F1", CultureInfo.InvariantCulture)}%</b>");
-                sb.AppendLine($"✅ Uğurlu: <b>{totalAllSuccess}</b> | ❌ Uğursuz: <b>{totalAllFailed}</b>");
+                sb.AppendLine($"📊 <b>Ümumi Əməliyyatlar:</b> {totalAllTrades} ədəd | Win-Rate: <b>{globalWinRate.ToString("F1", CultureInfo.InvariantCulture)}%</b>");
+                sb.AppendLine($"✅ Uğurlu (TP): <b>{totalAllSuccess}</b> | ❌ Uğursuz (SL): <b>{totalAllFailed}</b>");
+                if (totalActive > 0) sb.AppendLine($"🟡 Açıq İzlənən: <b>{totalActive} ədəd</b>");
+                sb.AppendLine($"📈 <b>Xalis Nəticə (PnL):</b> <b>{(globalPnL >= 0 ? "+" : "")}{globalPnL.ToString("F2", CultureInfo.InvariantCulture)}%</b>");
                 sb.AppendLine("-----------------------------------");
 
                 foreach (var coin in tradedCoins.OrderByDescending(c => c.TotalTrades).ThenByDescending(c => c.OverallWinRate))
                 {
                     var cleanSym = coin.CleanSymbol;
                     var icon = coin.OverallWinRate >= 70 ? "🟢" : (coin.OverallWinRate >= 50 ? "🟡" : "🔴");
-                    sb.AppendLine($"🪙 <b>{cleanSym}: {coin.OverallWinRate.ToString("F1", CultureInfo.InvariantCulture)}%</b> {icon} ({coin.TotalTrades} əməliyyat: {coin.SuccessTrades} Uğurlu, {coin.FailedTrades} Uğursuz)");
+                    var activeNote = coin.ActiveTrades > 0 ? $" | 🟡 {coin.ActiveTrades} Açıq" : "";
+                    sb.AppendLine($"🪙 <b>{cleanSym}: {coin.OverallWinRate.ToString("F1", CultureInfo.InvariantCulture)}%</b> {icon} ({coin.TotalTrades} əməliyyat: {coin.SuccessTrades} TP, {coin.FailedTrades} SL{activeNote})");
 
                     var sortedTfs = coin.TimeframeStats.OrderBy(t => t.Key switch
                     {
@@ -190,20 +255,12 @@ namespace CryptoSense.Infrastructure.Telegram
                 }
             }
 
-            if (untradedCoins.Count > 0)
-            {
-                sb.AppendLine("-----------------------------------");
-                sb.AppendLine($"⏳ <b>Hələ əməliyyat gözləyən digər coinlər ({untradedCoins.Count} ədəd):</b>");
-                sb.AppendLine($"<code>{string.Join(", ", untradedCoins)}</code>");
-                sb.AppendLine();
-            }
-
-            var cleanMonitored = monitoredCoins.Select(c => c.Replace("USDT", "")).Distinct();
+            var cleanMonitored = monitoredCoins.Select(c => c.Replace("USDT", "")).Distinct().ToList();
             sb.AppendLine("-----------------------------------");
-            sb.AppendLine($"🌐 <b>Sistemin Canlı İzlədiyi Bütün Coinlər ({cleanMonitored.Count()} ədəd):</b>");
+            sb.AppendLine($"🌐 <b>Canlı İzlənilən Coinlər ({cleanMonitored.Count} ədəd):</b>");
             sb.AppendLine($"<code>{string.Join(", ", cleanMonitored)}</code>");
             sb.AppendLine();
-            sb.AppendLine("💡 <i>Bu statistika bütün istifadəçilərə göndərilən və bazarda baş verən bütün siqnalları real vaxtda əks etdirir.</i>");
+            sb.AppendLine("💡 <i>Nəticələr hər bir şam tamamlandıqca avtomatik olaraq SQLite bazasında qeyd olunur.</i>");
 
             return sb.ToString();
         }

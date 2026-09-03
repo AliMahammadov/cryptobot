@@ -7,6 +7,7 @@ namespace CryptoSense.Application.DTOs
         public string Symbol { get; set; } = "";
         public string CleanSymbol => Symbol.Replace("USDT", "");
         public int TotalTrades { get; set; }
+        public int ActiveTrades { get; set; }
         public int SuccessTrades { get; set; }
         public int FailedTrades { get; set; }
         public decimal OverallWinRate { get; set; }

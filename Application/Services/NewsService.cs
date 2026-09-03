@@ -115,10 +115,14 @@ namespace CryptoSense.Application.Services
 
             if (allItems.Count == 0)
             {
-                allItems.Add(new CryptoNewsItem { Title = "İnstitusional toplama sürətləndikcə Bitcoin ETF axınları yüksəlir", Source = "CoinDesk", Sentiment = "BULLISH (MÜSBƏT) 🟢", SentimentScore = 75, PublishedAt = DateTime.UtcNow.AddMinutes(-12) });
-                allItems.Add(new CryptoNewsItem { Title = "Qaz xərcləri azaldıqca Ethereum Layer-2 aktivliyi yeni rekorda çatır", Source = "CoinTelegraph", Sentiment = "BULLISH (MÜSBƏT) 🟢", SentimentScore = 60, PublishedAt = DateTime.UtcNow.AddMinutes(-30) });
-                allItems.Add(new CryptoNewsItem { Title = "Solana DeFi ekosistem həcmi yeni DEX likvidliyi ilə sürətlə genişlənir", Source = "Decrypt", Sentiment = "BULLISH (MÜSBƏT) 🟢", SentimentScore = 70, PublishedAt = DateTime.UtcNow.AddMinutes(-45) });
-                allItems.Add(new CryptoNewsItem { Title = "Federal Ehtiyat Sistemi bazar konsolidasiyası fonunda sabit faiz siqnalı verir", Source = "Bitcoin Magazine", Sentiment = "NEYTRAL ⚪", SentimentScore = 0, PublishedAt = DateTime.UtcNow.AddHours(-1) });
+                summary.LatestNews = new List<CryptoNewsItem>();
+                summary.BullishCount = 0;
+                summary.BearishCount = 0;
+                summary.OverallScore = 0;
+                summary.Status = "XƏBƏR ƏLÇATMAZDIR (NEYTRAL) ⚪";
+                _cachedSummary = summary;
+                _lastFetchTime = DateTime.UtcNow;
+                return summary;
             }
 
             allItems.Sort((a, b) => b.PublishedAt.CompareTo(a.PublishedAt));

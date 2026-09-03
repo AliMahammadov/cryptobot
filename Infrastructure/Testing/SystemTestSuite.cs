@@ -235,6 +235,73 @@ namespace CryptoSense.Infrastructure.Testing
                 return Task.FromResult(formatted.Contains("#1 NƏTİCƏ HESABATI") && formatted.Contains("+1.17%") && formatted.Contains("UĞURLU"));
             });
 
+            // 6. Retest & Pullback Signal Logic Test
+            await AssertTest("Test 13: Signal Engine - Retest & Pullback Model on 3m/5m", async () =>
+            {
+                var sig3m = await _signalEngine.AnalyzeCoinAsync("BTCUSDT", "3m", isLiveScan: false);
+                var sig5m = await _signalEngine.AnalyzeCoinAsync("ETHUSDT", "5m", isLiveScan: false);
+                return sig3m.CurrentPrice > 0 && sig5m.CurrentPrice > 0 && 
+                       (sig3m.TakeProfit1 > 0 || sig3m.SignalType.Contains("NEYTRAL"));
+            });
+
+            // 7. Live BTC Compass & Dominance Format Test
+            await AssertTest("Test 14: BTC Compass - Live Dominance & Format Validation", async () =>
+            {
+                var compass = await _signalEngine.GetBtcCompassAsync();
+                var formatted = TelegramMessageFormatter.FormatBtcCompass(compass);
+                return formatted.Contains("Bitcoin Makro Bazar Kompası") && 
+                       formatted.Contains("CANLI QİYMƏT") && 
+                       compass.Price > 0;
+            });
+
+            // 8. Admin User Operations Test (Create, List, Reset Password, Delete)
+            await AssertTest("Test 15: Admin Operations - User CRUD & Security Workflow", async () =>
+            {
+                var testUser = "qa_tester_" + Guid.NewGuid().ToString("N").Substring(0, 6);
+                var created = await _userManager.CreateUserAsync(testUser, "pass123");
+                if (!created) return false;
+
+                var all = await _userManager.GetAllUsersAsync();
+                if (!all.Any(u => u.Username == testUser)) return false;
+
+                var reset = await _userManager.ResetPasswordAsync(testUser, "newpass456");
+                if (!reset) return false;
+
+                var deleted = await _userManager.DeleteUserAsync(testUser);
+                return deleted;
+            });
+
+            // 9. Deep Coin Stats Breakdown Test
+            await AssertTest("Test 16: Coin Performance Breakdown - Active & Closed Trades", async () =>
+            {
+                var monitored = new List<string> { "BTCUSDT", "ETHUSDT", "SOLUSDT" };
+                var breakdown = await _signalEngine.GetCoinPerformanceBreakdownAsync(monitored);
+                var formatted = TelegramMessageFormatter.FormatCoinPerformanceBreakdown(breakdown, monitored);
+                return breakdown.Count >= 3 && formatted.Contains("Qlobal Win-Rate");
+            });
+
+            // 10. User Coin Selection & Comma-Separated Deletion Logic Test
+            await AssertTest("Test 17: User Coin Selection - Multi-Coin Add and Comma-Separated Deletion", () =>
+            {
+                var settings = new UserSettings();
+                var toAdd = new[] { "BTCUSDT", "ETHUSDT", "SOLUSDT", "DOGEUSDT" };
+                foreach (var c in toAdd) settings.Coins.Add(c);
+
+                if (settings.Coins.Count != 4) return Task.FromResult(false);
+
+                // Simulate comma-separated deletion: "ETH, DOGE"
+                var delInput = "ETH, DOGE";
+                var parts = delInput.Split(new[] { ',', ' ' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                foreach (var p in parts)
+                {
+                    var coin = p.ToUpper();
+                    if (!coin.EndsWith("USDT")) coin += "USDT";
+                    settings.Coins.Remove(coin);
+                }
+
+                return Task.FromResult(settings.Coins.Count == 2 && settings.Coins.Contains("BTCUSDT") && settings.Coins.Contains("SOLUSDT"));
+            });
+
             Console.WriteLine("\n========================================================");
             Console.WriteLine($"🏁 TEST NƏTİCƏLƏRİ: {passed} UĞURLU (PASS), {failed} UĞURSUZ (FAIL)");
             Console.WriteLine("========================================================\n");

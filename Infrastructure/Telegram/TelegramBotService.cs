@@ -371,30 +371,37 @@ namespace CryptoSense.Infrastructure.Telegram
         private async Task ScanUserCoinsInstantlyAsync(UserSettings userSettings, string chatId, string timeframe)
         {
             if (userSettings.Coins.Count == 0) return;
-            var scanTf = (timeframe == "Hamısı" || timeframe == "Hamisi") ? "3m" : timeframe;
+            var tfsToScan = (timeframe == "Hamısı" || timeframe == "Hamisi") 
+                ? new[] { "1m", "3m", "5m", "15m", "1h", "4h" } 
+                : new[] { timeframe };
+
             using var scope = _serviceProvider.CreateScope();
             var signalEngine = scope.ServiceProvider.GetRequiredService<ISignalEngine>();
 
-            await SendMessageAsync($"⏳ <i>Seçilmiş coinləriniz ({scanTf}) dərhal skan edilir...</i>", chatId);
+            var tfDisplay = (timeframe == "Hamısı" || timeframe == "Hamisi") ? "Bütün Zamanlar (1m, 3m, 5m, 15m, 1h, 4h)" : timeframe;
+            await SendMessageAsync($"⏳ <i>Seçilmiş coinləriniz ({tfDisplay}) dərhal skan edilir...</i>", chatId);
             int signalsFound = 0;
-            foreach (var sym in userSettings.Coins)
+            foreach (var tf in tfsToScan)
             {
-                try
+                foreach (var sym in userSettings.Coins)
                 {
-                    var sig = await signalEngine.AnalyzeCoinAsync(sym, scanTf, isLiveScan: false);
-                    if (sig.Confidence >= 78 && (sig.SignalType.Contains("LONG") || sig.SignalType.Contains("SHORT")))
+                    try
                     {
-                        await SendSignalAlertAsync(sig, chatId);
-                        signalsFound++;
-                        await Task.Delay(200);
+                        var sig = await signalEngine.AnalyzeCoinAsync(sym, tf, isLiveScan: false);
+                        if (sig.Confidence >= 78 && (sig.SignalType.Contains("LONG") || sig.SignalType.Contains("SHORT")))
+                        {
+                            await SendSignalAlertAsync(sig, chatId);
+                            signalsFound++;
+                            await Task.Delay(200);
+                        }
                     }
+                    catch { }
                 }
-                catch { }
             }
 
             if (signalsFound == 0)
             {
-                await SendMessageAsync($"ℹ️ <i>Hal-hazırda seçdiyiniz coinlərdə {scanTf} şamında 78%+ Confluence siqnalı yoxdur. Bazar canlı izlənilir, ilk güclü fürsət yaranan kimi dərhal bildiriş alacaqsınız!</i>", chatId);
+                await SendMessageAsync($"ℹ️ <i>Hal-hazırda seçdiyiniz coinlərdə {tfDisplay} üzrə 78%+ Confluence siqnalı yoxdur. Bazar canlı izlənilir, ilk güclü fürsət yaranan kimi dərhal bildiriş alacaqsınız!</i>", chatId);
             }
         }
 
@@ -784,26 +791,46 @@ namespace CryptoSense.Infrastructure.Telegram
             if (_userStates.TryGetValue(chatId, out var coinDelState) && coinDelState == "USER_WAITING_DELETE_COIN")
             {
                 _userStates.TryRemove(chatId, out _);
-                var coinToDel = text.Trim().ToUpper();
-                if (!coinToDel.EndsWith("USDT")) coinToDel += "USDT";
+                var parts = text.Split(new[] { ',', ' ', ';', '\n', '\t' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                var removedCoins = new List<string>();
+                var notFoundCoins = new List<string>();
 
-                if (userSettings.Coins.Contains(coinToDel))
+                foreach (var p in parts)
                 {
-                    userSettings.Coins.Remove(coinToDel);
+                    var coinToDel = p.ToUpper();
+                    if (!coinToDel.EndsWith("USDT")) coinToDel += "USDT";
+
+                    if (userSettings.Coins.Contains(coinToDel))
+                    {
+                        userSettings.Coins.Remove(coinToDel);
+                        removedCoins.Add(coinToDel.Replace("USDT", ""));
+                    }
+                    else
+                    {
+                        notFoundCoins.Add(p.ToUpper().Replace("USDT", ""));
+                    }
+                }
+
+                if (removedCoins.Count > 0)
+                {
                     userSettings.LastResumeTime = DateTime.UtcNow;
                     SaveSettings();
-                    var cleanDel = coinToDel.Replace("USDT", "");
-                    var cleanList = string.Join(", ", userSettings.Coins.Select(c => c.Replace("USDT", "")));
-                    var succMsg = $"✅ <b>'{cleanDel}' coini siyahınızdan silindi!</b>\n\n" +
-                                  $"Cari siyahınız ({userSettings.Coins.Count}/10 ədəd):\n" +
-                                  $"<code>{(string.IsNullOrEmpty(cleanList) ? "Siyahı boşdur" : cleanList)}</code>";
-                    await SendMessageAsync(succMsg, chatId, TelegramKeyboards.BuildUserKeyboard(userSettings, isAdmin));
                 }
-                else
+
+                var cleanList = string.Join(", ", userSettings.Coins.Select(c => c.Replace("USDT", "")));
+                var sb = new StringBuilder();
+                if (removedCoins.Count > 0)
                 {
-                    var cleanDel = coinToDel.Replace("USDT", "");
-                    await SendMessageAsync($"⚠️ <b>'{cleanDel}' coini siyahınızda tapılmadı!</b>", chatId, TelegramKeyboards.BuildUserKeyboard(userSettings, isAdmin));
+                    sb.AppendLine($"✅ <b>Silinən coinlər ({removedCoins.Count} ədəd):</b> <code>{string.Join(", ", removedCoins)}</code>");
                 }
+                if (notFoundCoins.Count > 0)
+                {
+                    sb.AppendLine($"⚠️ <b>Siyahıda tapılmayanlar:</b> <code>{string.Join(", ", notFoundCoins)}</code>");
+                }
+                sb.AppendLine();
+                sb.AppendLine($"Cari siyahınız ({userSettings.Coins.Count}/10 ədəd):\n<code>{(string.IsNullOrEmpty(cleanList) ? "Siyahı boşdur" : cleanList)}</code>");
+
+                await SendMessageAsync(sb.ToString(), chatId, TelegramKeyboards.BuildUserKeyboard(userSettings, isAdmin));
                 return;
             }
 
@@ -856,26 +883,32 @@ namespace CryptoSense.Infrastructure.Telegram
                 userSettings.LastResumeTime = DateTime.UtcNow;
                 SaveSettings();
 
-                var scanTf = targetTf == "Hamısı" ? "3m" : targetTf;
-                var coinsToScan = userSettings.Coins.Count > 0 
-                    ? userSettings.Coins 
+                var allCoins = _config.SelectedCoins != null && _config.SelectedCoins.Count > 0 
+                    ? _config.SelectedCoins 
                     : new List<string> { "BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT", "DOGEUSDT", "SUIUSDT", "PEPEUSDT", "AVAXUSDT" };
 
-                var cleanCoins = string.Join(", ", coinsToScan.Select(c => c.Replace("USDT", "")));
-                await SendMessageAsync($"⏳ <b>{scanTf} üzrə bazar skan edilir...</b>\nİzlənən coinlər: <code>{cleanCoins}</code>", chatId);
+                var tfsToScan = targetTf == "Hamısı" 
+                    ? new[] { "1m", "3m", "5m", "15m", "1h", "4h" } 
+                    : new[] { targetTf };
+
+                var tfDisplay = targetTf == "Hamısı" ? "Bütün Zamanlar (1m, 3m, 5m, 15m, 1h, 4h)" : targetTf;
+                await SendMessageAsync($"🌐 <b>50 coin üzrə canlı izləmə və analiz başladıldı.</b>\n<i>Aktiv Zaman: {tfDisplay} | 78%+ Confluence siqnalları axtarılır...</i>", chatId);
 
                 var foundSignals = new List<FuturesSignal>();
-                foreach (var sym in coinsToScan)
+                foreach (var tf in tfsToScan)
                 {
-                    try
+                    foreach (var sym in allCoins)
                     {
-                        var sig = await signalEngine.AnalyzeCoinAsync(sym, scanTf, isLiveScan: false);
-                        if (sig.Confidence >= 78 && (sig.SignalType.Contains("LONG") || sig.SignalType.Contains("SHORT")))
+                        try
                         {
-                            foundSignals.Add(sig);
+                            var sig = await signalEngine.AnalyzeCoinAsync(sym, tf, isLiveScan: false);
+                            if (sig.Confidence >= 78 && (sig.SignalType.Contains("LONG") || sig.SignalType.Contains("SHORT")))
+                            {
+                                foundSignals.Add(sig);
+                            }
                         }
+                        catch { }
                     }
-                    catch { }
                 }
 
                 if (foundSignals.Count > 0)
@@ -888,8 +921,8 @@ namespace CryptoSense.Infrastructure.Telegram
                 }
                 else
                 {
-                    var noSigMsg = $"⚡ <b>Bazar Skan Nəticəsi ({scanTf}):</b>\n\n" +
-                                   $"ℹ️ <i>Hal-hazırda {scanTf} zaman kəsiyində 78%+ Confluence tələbinə cavab verən risk-təsdiqli siqnal aşkarlanmadı.</i>\n\n" +
+                    var noSigMsg = $"⚡ <b>Bazar Skan Nəticəsi ({tfDisplay}):</b>\n\n" +
+                                   $"ℹ️ <i>Hal-hazırda {tfDisplay} üzrə 78%+ Confluence tələbinə cavab verən risk-təsdiqli siqnal aşkarlanmadı.</i>\n\n" +
                                    $"🟢 <b>Sistem canlı izləmədədir.</b> Şərtlər ödənildikdə yeni şam yaranan kimi siqnal dərhal sizə göndəriləcək.";
                     await SendMessageAsync(noSigMsg, chatId, TelegramKeyboards.BuildUserKeyboard(userSettings, isAdmin));
                 }
@@ -1117,8 +1150,8 @@ namespace CryptoSense.Infrastructure.Telegram
                 var prompt = "🗑 <b>Coin Silmək</b>\n\n" +
                              $"Cari siyahınız ({userSettings.Coins.Count}/10 ədəd):\n" +
                              $"<code>{(string.IsNullOrEmpty(cleanList) ? "Siyahı boşdur" : cleanList)}</code>\n\n" +
-                             "Siyahıdan silmək istədiyiniz coinin <b>Adını</b> yazın:\n" +
-                             "📌 <b>Məsələn:</b> <code>SOL</code> və ya <code>DOGE</code>";
+                             "Siyahıdan silmək istədiyiniz coinlərin <b>Adını</b> yazın (vergüllə bir neçəsini eyni anda silə bilərsiniz):\n" +
+                             "📌 <b>Məsələn:</b> <code>SOL, DOGE, PEPE</code>";
                 await SendMessageAsync(prompt, chatId, TelegramKeyboards.BuildUserKeyboard(userSettings, isAdmin));
             }
             else if (text.Contains("Coin Seçimi") || text.Contains("Coin Secimi") || text == "/setcoins")
