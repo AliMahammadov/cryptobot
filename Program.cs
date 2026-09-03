@@ -27,7 +27,8 @@ using Microsoft.Extensions.Options;
 
 var builder = WebApplication.CreateBuilder(args);
 
-builder.WebHost.UseUrls("http://0.0.0.0:5083");
+var port = Environment.GetEnvironmentVariable("PORT") ?? "5083";
+builder.WebHost.UseUrls($"http://0.0.0.0:{port}");
 
 // 1. Configuration
 builder.Services.Configure<AppConfig>(builder.Configuration.GetSection("AppConfig"));
