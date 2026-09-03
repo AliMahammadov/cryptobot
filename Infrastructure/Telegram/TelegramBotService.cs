@@ -405,26 +405,40 @@ namespace CryptoSense.Infrastructure.Telegram
 
             var tfDisplay = (timeframe == "Hamısı" || timeframe == "Hamisi") ? "Bütün Zamanlar (1m, 3m, 5m, 15m, 1h, 4h)" : timeframe;
             await SendMessageAsync($"⏳ <i>Seçilmiş coinləriniz ({tfDisplay}) dərhal skan edilir...</i>", chatId);
-            int signalsFound = 0;
+            var pairs = new List<(string sym, string tf)>();
             foreach (var tf in tfsToScan)
             {
                 foreach (var sym in userSettings.Coins)
                 {
-                    try
-                    {
-                        var sig = await signalEngine.AnalyzeCoinAsync(sym, tf, isLiveScan: false);
-                        if (sig.Confidence >= 78 && (sig.SignalType.Contains("LONG") || sig.SignalType.Contains("SHORT")))
-                        {
-                            await SendSignalAlertAsync(sig, chatId);
-                            signalsFound++;
-                            await Task.Delay(200);
-                        }
-                    }
-                    catch { }
+                    pairs.Add((sym, tf));
                 }
             }
 
-            if (signalsFound == 0)
+            var matchingSignals = new System.Collections.Concurrent.ConcurrentBag<FuturesSignal>();
+            await Parallel.ForEachAsync(pairs, new ParallelOptions { MaxDegreeOfParallelism = 10 }, async (pair, ct) =>
+            {
+                try
+                {
+                    using var innerScope = _serviceProvider.CreateScope();
+                    var engine = innerScope.ServiceProvider.GetRequiredService<ISignalEngine>();
+                    var sig = await engine.AnalyzeCoinAsync(pair.sym, pair.tf, isLiveScan: false);
+                    if (sig.Confidence >= 78 && (sig.SignalType.Contains("LONG") || sig.SignalType.Contains("SHORT")))
+                    {
+                        matchingSignals.Add(sig);
+                    }
+                }
+                catch { }
+            });
+
+            if (!matchingSignals.IsEmpty)
+            {
+                foreach (var sig in matchingSignals.OrderByDescending(s => s.Confidence))
+                {
+                    await SendSignalAlertAsync(sig, chatId);
+                    await Task.Delay(200);
+                }
+            }
+            else
             {
                 await SendMessageAsync($"ℹ️ <i>Hal-hazırda seçdiyiniz coinlərdə {tfDisplay} üzrə 78%+ Confluence siqnalı yoxdur. Bazar canlı izlənilir, ilk güclü fürsət yaranan kimi dərhal bildiriş alacaqsınız!</i>", chatId);
             }
@@ -974,26 +988,34 @@ namespace CryptoSense.Infrastructure.Telegram
                 var tfDisplay = targetTf == "Hamısı" ? "Bütün Zamanlar (1m, 3m, 5m, 15m, 1h, 4h)" : targetTf;
                 await SendMessageAsync($"🌐 <b>Bütün Bazar (50 Coin) üzrə canlı izləmə və analiz başladıldı! 🟢</b>\n<i>Aktiv Zaman: {tfDisplay} | 75%+ Confluence siqnalları axtarılır...</i>", chatId, TelegramKeyboards.BuildUserKeyboard(userSettings, isAdmin));
 
-                var foundSignals = new List<FuturesSignal>();
+                var pairs = new List<(string sym, string tf)>();
                 foreach (var tf in tfsToScan)
                 {
                     foreach (var sym in allCoins)
                     {
-                        try
-                        {
-                            var sig = await signalEngine.AnalyzeCoinAsync(sym, tf, isLiveScan: false);
-                            if (sig.Confidence >= 75 && (sig.SignalType.Contains("LONG") || sig.SignalType.Contains("SHORT")))
-                            {
-                                foundSignals.Add(sig);
-                            }
-                        }
-                        catch { }
+                        pairs.Add((sym, tf));
                     }
                 }
 
-                if (foundSignals.Count > 0)
+                var foundSignals = new System.Collections.Concurrent.ConcurrentBag<FuturesSignal>();
+                await Parallel.ForEachAsync(pairs, new ParallelOptions { MaxDegreeOfParallelism = 12 }, async (pair, ct) =>
                 {
-                    foreach (var sig in foundSignals)
+                    try
+                    {
+                        using var innerScope = _serviceProvider.CreateScope();
+                        var engine = innerScope.ServiceProvider.GetRequiredService<ISignalEngine>();
+                        var sig = await engine.AnalyzeCoinAsync(pair.sym, pair.tf, isLiveScan: false);
+                        if (sig.Confidence >= 75 && (sig.SignalType.Contains("LONG") || sig.SignalType.Contains("SHORT")))
+                        {
+                            foundSignals.Add(sig);
+                        }
+                    }
+                    catch { }
+                });
+
+                if (!foundSignals.IsEmpty)
+                {
+                    foreach (var sig in foundSignals.OrderByDescending(s => s.Confidence))
                     {
                         await SendSignalAlertAsync(sig, chatId);
                         await Task.Delay(250);

@@ -16,8 +16,9 @@ namespace CryptoSense.Application.Services
     public class NewsService : INewsService
     {
         private readonly HttpClient _httpClient;
-        private NewsSentimentSummary? _cachedSummary;
-        private DateTime _lastFetchTime = DateTime.MinValue;
+        private static NewsSentimentSummary? _cachedSummary;
+        private static DateTime _lastFetchTime = DateTime.MinValue;
+        private static readonly System.Threading.SemaphoreSlim _newsLock = new(1, 1);
         private static bool _rateLimited = false;
         private static DateTime _rateLimitResetTime = DateTime.MinValue;
         private static readonly ConcurrentDictionary<string, string> _translationCache = new();
@@ -63,6 +64,14 @@ namespace CryptoSense.Application.Services
             {
                 return _cachedSummary;
             }
+
+            await _newsLock.WaitAsync();
+            try
+            {
+                if (_cachedSummary != null && DateTime.UtcNow - _lastFetchTime < TimeSpan.FromMinutes(2))
+                {
+                    return _cachedSummary;
+                }
 
             var summary = new NewsSentimentSummary();
             var allItems = new List<CryptoNewsItem>();
@@ -142,6 +151,11 @@ namespace CryptoSense.Application.Services
             _lastFetchTime = DateTime.UtcNow;
 
             return summary;
+            }
+            finally
+            {
+                _newsLock.Release();
+            }
         }
 
         private async Task<string> TranslateToAzAsync(string englishText)
