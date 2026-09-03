@@ -125,7 +125,9 @@ namespace CryptoSense.Infrastructure.Telegram
 
         public static UserSettings GetSettings(string chatId)
         {
-            return UserPreferences.GetOrAdd(chatId, _ => new UserSettings());
+            var settings = UserPreferences.GetOrAdd(chatId, _ => new UserSettings());
+            settings.Coins.RemoveAll(c => !System.Text.RegularExpressions.Regex.IsMatch(c, @"^[A-Z0-9]+USDT$") || c.Contains("⚡") || c.Contains("SIQNALLAR") || c.Contains("BÜTÜN") || c.Contains("BUTUN"));
+            return settings;
         }
 
         public async Task<bool> SendMessageAsync(string message, string targetChatId, object? replyMarkup = null)
@@ -517,11 +519,13 @@ namespace CryptoSense.Infrastructure.Telegram
                                           text.Contains("23031999Am");
 
             bool isMenuButtonClick = text.StartsWith("🧭") || text.StartsWith("⚡") || text.StartsWith("⭐") || 
-                                     text.StartsWith("📊") || text.StartsWith("⚙️") || text.StartsWith("🗑") || 
-                                     text.StartsWith("⏱") || text.StartsWith("🧹") || text.StartsWith("🛑") || 
-                                     text.StartsWith("▶️") || text.StartsWith("📰") || text.StartsWith("⬅️") || 
-                                     text.StartsWith("👥") || text.StartsWith("➕") || text.StartsWith("🔑") ||
-                                     text.StartsWith("👑") || text.StartsWith("/");
+                                     text.StartsWith("📊") || text.StartsWith("📈") || text.StartsWith("⚙️") || 
+                                     text.StartsWith("🗑") || text.StartsWith("⏱") || text.StartsWith("🌟") || 
+                                     text.StartsWith("🧹") || text.StartsWith("🛑") || text.StartsWith("▶️") || 
+                                     text.StartsWith("📰") || text.StartsWith("⬅️") || text.StartsWith("👥") || 
+                                     text.StartsWith("➕") || text.StartsWith("🔑") || text.StartsWith("👑") || 
+                                     text.Contains("Siqnallar") || text.Contains("Menyu") || text.Contains("Statistika") ||
+                                     text.StartsWith("/");
 
             bool hasActiveState = _userStates.ContainsKey(chatId);
 
@@ -810,8 +814,14 @@ namespace CryptoSense.Infrastructure.Telegram
             // 6. AUTHENTICATED REGULAR & ADMIN USER ACTIONS
             // =========================================================================
 
+            // If user clicked any menu button, cancel waiting states immediately!
+            if (isMenuButtonClick)
+            {
+                _userStates.TryRemove(chatId, out _);
+            }
+
             // STATE: DELETING A SPECIFIC COIN
-            if (_userStates.TryGetValue(chatId, out var coinDelState) && coinDelState == "USER_WAITING_DELETE_COIN")
+            if (!isMenuButtonClick && _userStates.TryGetValue(chatId, out var coinDelState) && coinDelState == "USER_WAITING_DELETE_COIN")
             {
                 _userStates.TryRemove(chatId, out _);
                 var parts = text.Split(new[] { ',', ' ', ';', '\n', '\t' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
@@ -833,6 +843,8 @@ namespace CryptoSense.Infrastructure.Telegram
                         notFoundCoins.Add(p.ToUpper().Replace("USDT", ""));
                     }
                 }
+
+                userSettings.Coins.RemoveAll(c => !System.Text.RegularExpressions.Regex.IsMatch(c, @"^[A-Z0-9]+USDT$") || c.Contains("⚡") || c.Contains("SIQNALLAR") || c.Contains("BÜTÜN") || c.Contains("BUTUN"));
 
                 if (removedCoins.Count > 0)
                 {
@@ -858,31 +870,43 @@ namespace CryptoSense.Infrastructure.Telegram
             }
 
             // STATE: ADDING COINS (MAX 10)
-            if (_userStates.TryGetValue(chatId, out var coinAddState) && coinAddState == "WAITING_COIN_INPUT")
+            if (!isMenuButtonClick && _userStates.TryGetValue(chatId, out var coinAddState) && coinAddState == "WAITING_COIN_INPUT")
             {
                 _userStates.TryRemove(chatId, out _);
                 var parts = text.Split(new[] { ',', ' ', ';', '\n' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-                if (parts.Length > 0 && !text.StartsWith("/"))
+                var added = new List<string>();
+                foreach (var p in parts)
                 {
-                    foreach (var p in parts)
+                    var clean = p.Trim().ToUpper();
+                    if (clean.Length < 2 || clean.Length > 10) continue;
+                    if (!System.Text.RegularExpressions.Regex.IsMatch(clean, @"^[A-Z0-9]+$")) continue;
+                    if (!clean.EndsWith("USDT")) clean += "USDT";
+                    if (!userSettings.Coins.Contains(clean))
                     {
-                        var clean = p.ToUpper();
-                        if (!clean.EndsWith("USDT")) clean += "USDT";
-                        if (!userSettings.Coins.Contains(clean))
+                        if (userSettings.Coins.Count < 10)
                         {
-                            if (userSettings.Coins.Count < 10)
-                            {
-                                userSettings.Coins.Add(clean);
-                            }
+                            userSettings.Coins.Add(clean);
+                            added.Add(clean.Replace("USDT", ""));
                         }
                     }
+                }
 
+                // Sanitize any corruptions
+                userSettings.Coins.RemoveAll(c => !System.Text.RegularExpressions.Regex.IsMatch(c, @"^[A-Z0-9]+USDT$") || c.Contains("⚡") || c.Contains("SIQNALLAR") || c.Contains("BÜTÜN") || c.Contains("BUTUN"));
+
+                if (added.Count > 0)
+                {
                     userSettings.LastResumeTime = DateTime.UtcNow;
                     SaveSettings();
                     var cleanList = string.Join(", ", userSettings.Coins.Select(c => c.Replace("USDT", "")));
                     var conf = $"✅ <b>Seçilmiş coinləriniz yeniləndi ({userSettings.Coins.Count}/10 ədəd):</b>\n\n" +
                                $"<code>{cleanList}</code>";
                     await SendMessageAsync(conf, chatId, TelegramKeyboards.BuildUserKeyboard(userSettings, isAdmin));
+                    return;
+                }
+                else
+                {
+                    await SendMessageAsync("⚠️ <b>Düzgün coin adı daxil edilmədi.</b>\n📌 <b>Məsələn:</b> <code>SOL, BTC, ETH, DOGE</code>", chatId, TelegramKeyboards.BuildUserKeyboard(userSettings, isAdmin));
                     return;
                 }
             }
@@ -1161,12 +1185,10 @@ namespace CryptoSense.Infrastructure.Telegram
             {
                 if (userSettings.Coins.Count == 0)
                 {
-                    var emptyMsg = "⭐ <b>Mənim Coinlərimlə Ticarət Rejimi (0/10 ədəd)</b>\n\n" +
-                                   "⚠️ Hal-hazırda ticarət üçün heç bir coin seçməmisiniz.\n\n" +
-                                   "Zəhmət olmasa əvvəlcə <b>⚙️ Coin Seçimi</b> düyməsinə vurub ticarət aparmaq istədiyiniz coinləri əlavə edin.\n\n" +
-                                   "📌 <b>Məsələn:</b> <code>SOL, BTC, ETH, DOGE</code> (Maksimum 10 ədəd)";
-                    await SendMessageAsync(emptyMsg, chatId, TelegramKeyboards.BuildUserKeyboard(userSettings, isAdmin));
-                    return;
+                    userSettings.Coins.Add("BTCUSDT");
+                    userSettings.Coins.Add("ETHUSDT");
+                    userSettings.Coins.Add("SOLUSDT");
+                    SaveSettings();
                 }
 
                 var cleanList = string.Join(", ", userSettings.Coins.Select(c => c.Replace("USDT", "")));
