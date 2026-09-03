@@ -15,6 +15,6 @@ namespace CryptoSense.Domain.Interfaces
         Task<int> GetMaxSignalNumberAsync();
         Task AddAsync(FuturesSignal signal);
         Task UpdateAsync(FuturesSignal signal);
-        Task<PerformanceStats> GetPerformanceStatsAsync();
+        Task<PerformanceStats> GetPerformanceStatsAsync(string? specificTimeframe = null, List<string>? userCoins = null);
     }
 }

@@ -312,9 +312,9 @@ namespace CryptoSense.Application.Services
             return await _unitOfWork.Signals.GetRecentSignalsAsync(count);
         }
 
-        public async Task<PerformanceStats> GetPerformanceStatsAsync()
+        public async Task<PerformanceStats> GetPerformanceStatsAsync(string? specificTimeframe = null, List<string>? userCoins = null)
         {
-            return await _unitOfWork.Signals.GetPerformanceStatsAsync();
+            return await _unitOfWork.Signals.GetPerformanceStatsAsync(specificTimeframe, userCoins);
         }
     }
 }

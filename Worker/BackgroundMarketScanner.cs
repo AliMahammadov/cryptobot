@@ -146,25 +146,13 @@ namespace CryptoSense.Worker
                                         var pct = Math.Round(((currentPrice - sig.EntryPrice) / sig.EntryPrice) * 100, 2);
                                         sig.ResultPercent = pct;
 
-                                        if (pct > 0.05m)
-                                        {
-                                            sig.Status = SignalStatus.Success;
-                                            sig.OutcomeStatus = $"{sig.Timeframe} Vaxtı Tamamlandı (MÜSBƏT) ✅";
-                                        }
-                                        else if (pct < -0.05m)
-                                        {
-                                            sig.Status = SignalStatus.Failed;
-                                            sig.OutcomeStatus = $"{sig.Timeframe} Vaxtı Tamamlandı (UĞURSUZ) ❌";
-                                        }
-                                        else
-                                        {
-                                            sig.Status = SignalStatus.Neutral;
-                                            sig.OutcomeStatus = $"{sig.Timeframe} Vaxtı Tamamlandı (NEYTRAL) ⚪";
-                                        }
+                                        // In strict strategy, if candle timeframe ends without reaching any TP target, the signal failed
+                                        sig.Status = SignalStatus.Failed;
+                                        sig.OutcomeStatus = $"{sig.Timeframe} Müddəti Bitdi (Hədəfə Çatmadı) ❌";
 
                                         await unitOfWork.Signals.UpdateAsync(sig);
                                         await unitOfWork.SaveChangesAsync(stoppingToken);
-                                        await _telegramService.SendOutcomeAlertAsync(sig, $"{sig.Timeframe} Vaxtı Tamamlandı", currentPrice, pct);
+                                        await _telegramService.SendOutcomeAlertAsync(sig, $"{sig.Timeframe} Müddəti Bitdi", currentPrice, pct);
                                     }
                                 }
                                 else // SHORT
@@ -240,25 +228,13 @@ namespace CryptoSense.Worker
                                         var pct = Math.Round(((sig.EntryPrice - currentPrice) / sig.EntryPrice) * 100, 2);
                                         sig.ResultPercent = pct;
 
-                                        if (pct > 0.05m)
-                                        {
-                                            sig.Status = SignalStatus.Success;
-                                            sig.OutcomeStatus = $"{sig.Timeframe} Vaxtı Tamamlandı (MÜSBƏT) ✅";
-                                        }
-                                        else if (pct < -0.05m)
-                                        {
-                                            sig.Status = SignalStatus.Failed;
-                                            sig.OutcomeStatus = $"{sig.Timeframe} Vaxtı Tamamlandı (UĞURSUZ) ❌";
-                                        }
-                                        else
-                                        {
-                                            sig.Status = SignalStatus.Neutral;
-                                            sig.OutcomeStatus = $"{sig.Timeframe} Vaxtı Tamamlandı (NEYTRAL) ⚪";
-                                        }
+                                        // In strict strategy, if candle timeframe ends without reaching any TP target, the signal failed
+                                        sig.Status = SignalStatus.Failed;
+                                        sig.OutcomeStatus = $"{sig.Timeframe} Müddəti Bitdi (Hədəfə Çatmadı) ❌";
 
                                         await unitOfWork.Signals.UpdateAsync(sig);
                                         await unitOfWork.SaveChangesAsync(stoppingToken);
-                                        await _telegramService.SendOutcomeAlertAsync(sig, $"{sig.Timeframe} Vaxtı Tamamlandı", currentPrice, pct);
+                                        await _telegramService.SendOutcomeAlertAsync(sig, $"{sig.Timeframe} Müddəti Bitdi", currentPrice, pct);
                                     }
                                 }
                             }

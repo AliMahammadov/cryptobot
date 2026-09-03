@@ -691,7 +691,7 @@ namespace CryptoSense.Infrastructure.Telegram
             }
             else if (text.Contains("Statistika") || text == "/stats")
             {
-                var stats = await signalEngine.GetPerformanceStatsAsync();
+                var stats = await signalEngine.GetPerformanceStatsAsync(userSettings.Timeframe, userSettings.Coins);
                 var msg = TelegramMessageFormatter.FormatPerformanceStats(stats);
                 await SendMessageAsync(msg, chatId, TelegramKeyboards.BuildUserKeyboard(userSettings, isAdmin));
             }

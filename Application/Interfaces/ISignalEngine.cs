@@ -10,6 +10,6 @@ namespace CryptoSense.Application.Interfaces
         Task<FuturesSignal> AnalyzeCoinAsync(string symbol, string timeframe = "15m", bool isLiveScan = false);
         Task<List<FuturesSignal>> GetTrackedActiveSignalsAsync();
         Task<List<FuturesSignal>> GetSignalHistoryAsync(int count = 25);
-        Task<PerformanceStats> GetPerformanceStatsAsync();
+        Task<PerformanceStats> GetPerformanceStatsAsync(string? specificTimeframe = null, List<string>? userCoins = null);
     }
 }

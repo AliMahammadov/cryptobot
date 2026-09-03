@@ -64,11 +64,22 @@ namespace CryptoSense.Infrastructure.Persistence.Repositories
             return Task.CompletedTask;
         }
 
-        public async Task<PerformanceStats> GetPerformanceStatsAsync()
+        public async Task<PerformanceStats> GetPerformanceStatsAsync(string? specificTimeframe = null, List<string>? userCoins = null)
         {
-            var all = await _context.Signals
-                .Where(s => s.SignalType.Contains("LONG") || s.SignalType.Contains("SHORT"))
-                .ToListAsync();
+            var query = _context.Signals
+                .Where(s => s.SignalType.Contains("LONG") || s.SignalType.Contains("SHORT"));
+
+            if (!string.IsNullOrEmpty(specificTimeframe) && specificTimeframe != "Hamısı" && specificTimeframe != "Hamisi")
+            {
+                query = query.Where(s => s.Timeframe == specificTimeframe);
+            }
+
+            if (userCoins != null && userCoins.Count > 0)
+            {
+                query = query.Where(s => userCoins.Contains(s.Symbol));
+            }
+
+            var all = await query.ToListAsync();
             var closed = all.Where(s => s.Status != SignalStatus.Open || s.IsClosed).ToList();
 
             var stats = new PerformanceStats
@@ -76,8 +87,8 @@ namespace CryptoSense.Infrastructure.Persistence.Repositories
                 TotalSignals = all.Count,
                 OpenSignals = all.Count(s => s.Status == SignalStatus.Open && !s.IsClosed),
                 SuccessSignals = closed.Count(s => s.Status == SignalStatus.Success),
-                FailedSignals = closed.Count(s => s.Status == SignalStatus.Failed),
-                NeutralSignals = closed.Count(s => s.Status == SignalStatus.Neutral)
+                FailedSignals = closed.Count(s => s.Status == SignalStatus.Failed || s.Status == SignalStatus.Neutral),
+                NeutralSignals = 0
             };
 
             int decisiveTrades = stats.SuccessSignals + stats.FailedSignals;

@@ -22,7 +22,6 @@ namespace CryptoSense.Infrastructure.Telegram
             sb.AppendLine($"#{userSigNum} {statusIcon} <b>SİQNAL</b>");
             sb.AppendLine();
             sb.AppendLine($"🪙 <b>Coin:</b> {cleanSymbol} Futures ({signal.Timeframe})");
-            sb.AppendLine($"⏱ <b>Zaman Çərçivəsi:</b> {signal.Timeframe}");
             sb.AppendLine($"🕒 <b>Verilmə Tarixi:</b> {signal.TimestampFormatted}");
             sb.AppendLine($"🎯 <b>Confluence Razılaşma Balı:</b> <b>{signal.ConfluenceScore.ToString("F1", CultureInfo.InvariantCulture)}%</b> (İndiqatorların razılığı)");
             sb.AppendLine($"💵 <b>Cari Giriş Qiyməti:</b> ${signal.CurrentPrice.ToString(CultureInfo.InvariantCulture)}");
@@ -39,24 +38,18 @@ namespace CryptoSense.Infrastructure.Telegram
 
         public static string FormatOutcomeAlert(FuturesSignal signal, int userSigNum, string outcomeType, decimal hitPrice, decimal profitPct)
         {
-            bool isWin;
-            if (outcomeType.Contains("Stop Loss") || outcomeType.Contains("SL") || outcomeType.Contains("Mənfi") || outcomeType.Contains("Menfi"))
+            bool isWin = outcomeType.Contains("Hədəf") || outcomeType.Contains("TP") || outcomeType.Contains("Uğurlu") || outcomeType.Contains("Ugurlu");
+            
+            if (outcomeType.Contains("Stop Loss") || outcomeType.Contains("SL") || outcomeType.Contains("Bitdi"))
             {
                 isWin = false;
-                if (profitPct > 0) profitPct = -Math.Abs(profitPct);
-            }
-            else if (outcomeType.Contains("Hədəf") || outcomeType.Contains("TP") || outcomeType.Contains("Müsbət") || outcomeType.Contains("Musbet"))
-            {
-                isWin = true;
-                if (profitPct < 0) profitPct = Math.Abs(profitPct);
-            }
-            else
-            {
-                isWin = profitPct > 0.05m;
             }
 
-            var icon = isWin ? "🎯" : (Math.Abs(profitPct) <= 0.05m ? "⚪" : "⛔");
-            var statusText = isWin ? $"{outcomeType} (UĞURLU) ✅" : (Math.Abs(profitPct) <= 0.05m ? $"{outcomeType} (NEYTRAL) ⚪" : $"{outcomeType} (UĞURSUZ) ❌");
+            if (isWin && profitPct < 0) profitPct = Math.Abs(profitPct);
+            if (!isWin && profitPct > 0) profitPct = -Math.Abs(profitPct);
+
+            var icon = isWin ? "🎯" : "⛔";
+            var statusText = isWin ? $"{outcomeType} (UĞURLU) ✅" : $"{outcomeType} (UĞURSUZ) ❌";
             var cleanSymbol = signal.Symbol.Replace("USDT", "");
             var directionStr = (signal.Direction == SignalDirection.Buy || signal.SignalType.Contains("LONG")) ? "LONG" : "SHORT";
 
@@ -103,19 +96,17 @@ namespace CryptoSense.Infrastructure.Telegram
         public static string FormatPerformanceStats(PerformanceStats stats)
         {
             var sb = new StringBuilder();
-            sb.AppendLine("📊 <b>Sistemin Real Statistik Performansı (Şəffaf İzləmə):</b>");
+            sb.AppendLine("📊 <b>Canlı Statistik Performans:</b>");
             sb.AppendLine("-----------------------------------");
-            sb.AppendLine($"📌 <b>Ümumi Siqnallar:</b> {stats.TotalSignals} ədəd");
+            sb.AppendLine($"📌 <b>Ümumi Analizlər:</b> {stats.TotalSignals} ədəd");
             sb.AppendLine($"🟡 <b>Açıq İzlənən:</b> {stats.OpenSignals} ədəd");
-            sb.AppendLine($"✅ <b>Uğurlu (TP/Müsbət):</b> {stats.SuccessSignals} ədəd");
-            sb.AppendLine($"❌ <b>Uğursuz (SL/Mənfi):</b> {stats.FailedSignals} ədəd");
-            sb.AppendLine($"⚪ <b>Neytral:</b> {stats.NeutralSignals} ədəd");
+            sb.AppendLine($"✅ <b>Uğurlu (Hədəfə Çatan):</b> {stats.SuccessSignals} ədəd");
+            sb.AppendLine($"❌ <b>Uğursuz:</b> {stats.FailedSignals} ədəd");
             sb.AppendLine("-----------------------------------");
             sb.AppendLine($"🎯 <b>Real Qələbə Faizi (Win Rate):</b> <b>{stats.WinRatePercent.ToString("F1", CultureInfo.InvariantCulture)}%</b>");
-            sb.AppendLine($"📈 <b>Ümumi Xalis PnL:</b> <b>{(stats.TotalNetProfitPercent >= 0 ? "+" : "")}{stats.TotalNetProfitPercent.ToString("F2", CultureInfo.InvariantCulture)}%</b>");
+            sb.AppendLine($"📈 <b>Xalis Nəticə (PnL):</b> <b>{(stats.TotalNetProfitPercent >= 0 ? "+" : "")}{stats.TotalNetProfitPercent.ToString("F2", CultureInfo.InvariantCulture)}%</b>");
             sb.AppendLine($"📊 <b>Orta Əməliyyat Gəliri:</b> {(stats.AvgProfitPerTradePercent >= 0 ? "+" : "")}{stats.AvgProfitPerTradePercent.ToString("F2", CultureInfo.InvariantCulture)}%");
             sb.AppendLine("-----------------------------------");
-            sb.AppendLine("<i>Qeyd: Bütün nəticələr (uğurlu və uğursuz) verilənlər bazasında dəqiq və şəffaf şəkildə qeyd olunur.</i>");
             return sb.ToString();
         }
 

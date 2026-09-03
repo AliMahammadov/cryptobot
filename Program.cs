@@ -34,6 +34,17 @@ builder.Services.Configure<AppConfig>(builder.Configuration.GetSection("AppConfi
 
 // 2. Persistence Layer (SQLite with EF Core)
 var connectionString = builder.Configuration.GetConnectionString("DefaultConnection") ?? "Data Source=cryptosense.db";
+
+// If running in Docker with /app/data mounted or data folder exists, ensure db persists in data/
+if (Directory.Exists("/app/data"))
+{
+    connectionString = "Data Source=/app/data/cryptosense.db";
+}
+else if (Directory.Exists("data"))
+{
+    connectionString = "Data Source=data/cryptosense.db";
+}
+
 builder.Services.AddDbContext<AppDbContext>(options =>
     options.UseSqlite(connectionString));
 
