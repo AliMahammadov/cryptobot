@@ -16,14 +16,12 @@ namespace CryptoSense.Infrastructure.Telegram
             var isLong = signal.Direction == SignalDirection.Buy || signal.SignalType.Contains("LONG");
             var cleanSymbol = signal.Symbol.Replace("USDT", "");
             var statusIcon = isLong ? "🟢" : "🔴";
-            var directionText = isLong ? "AL (LONG)" : "SAT (SHORT)";
             var sentimentText = signal.NewsSentimentImpact.Contains("BULLISH") || signal.NewsSentimentImpact.Contains("MUSBET") || signal.NewsSentimentImpact.Contains("MÜSBƏT") ? "Müsbət 🟢" : (signal.NewsSentimentImpact.Contains("BEARISH") || signal.NewsSentimentImpact.Contains("MENFI") || signal.NewsSentimentImpact.Contains("MƏNFİ") ? "Mənfi 🔴" : "Neytral ⚪");
 
             var sb = new StringBuilder();
             sb.AppendLine($"#{userSigNum} {statusIcon} <b>SİQNAL</b>");
             sb.AppendLine();
-            sb.AppendLine($"🪙 <b>Cütlük:</b> {cleanSymbol} Futures ({signal.Timeframe})");
-            sb.AppendLine($"🧭 <b>İstiqamət:</b> <b>{directionText}</b>");
+            sb.AppendLine($"🪙 <b>Coin:</b> {cleanSymbol} Futures ({signal.Timeframe})");
             sb.AppendLine($"⏱ <b>Zaman Çərçivəsi:</b> {signal.Timeframe}");
             sb.AppendLine($"🕒 <b>Verilmə Tarixi:</b> {signal.TimestampFormatted}");
             sb.AppendLine($"🎯 <b>Confluence Razılaşma Balı:</b> <b>{signal.ConfluenceScore.ToString("F1", CultureInfo.InvariantCulture)}%</b> (İndiqatorların razılığı)");
@@ -36,13 +34,15 @@ namespace CryptoSense.Infrastructure.Telegram
             sb.AppendLine($"🌟 <b>Hədəf 3 (TP3):</b> ${signal.TakeProfit3.ToString(CultureInfo.InvariantCulture)}");
             sb.AppendLine($"⛔ <b>Stop Loss (SL):</b> ${signal.StopLoss.ToString(CultureInfo.InvariantCulture)}");
             sb.AppendLine("-----------------------------------");
-            sb.AppendLine("📊 <b>Texniki Əsaslandırma:</b>");
-            foreach (var r in signal.AnalysisReasons)
+            if (signal.AnalysisReasons != null && signal.AnalysisReasons.Count > 0)
             {
-                sb.AppendLine($"- {r}");
+                sb.AppendLine("📊 <b>Texniki Əsaslandırma:</b>");
+                foreach (var r in signal.AnalysisReasons)
+                {
+                    sb.AppendLine($"- {r}");
+                }
+                sb.AppendLine("-----------------------------------");
             }
-            sb.AppendLine("-----------------------------------");
-            sb.AppendLine("⚠️ <i>Bu maliyyə məsləhəti deyil. Confluence balı indiqatorların razılığıdır, uğur zəmanəti deyil. Risk idarəetməsinə riayət edin.</i>");
             return sb.ToString();
         }
 

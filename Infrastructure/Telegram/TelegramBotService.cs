@@ -345,7 +345,7 @@ namespace CryptoSense.Infrastructure.Telegram
                         settings.Username = user.Username;
 
                         var onboardingMsg = $"✅ <b>Giriş Təsdiqləndi! Xoş Gəldiniz, {user.Username}!</b>\n\n" +
-                                            $"🚀 <b>KriptoBot v2 Kvantitativ Ticarət Sistemi AKTİVDİR 🟢</b>\n\n" +
+                                            $"🚀 <b>Kripto Signals Bot AKTİVDİR 🟢</b>\n\n" +
                                             $"Aktiv Zaman Çərçivəsi: <b>{settings.Timeframe}</b>\n\n" +
                                             $"Yalnız seçdiyiniz <b>{settings.Timeframe}</b> zamanı üzrə 24/7 siqnallar və nəticələr göndəriləcək.\n\n" +
                                             $"<i>Çıxış etmək üçün: <code>/logout</code></i>";
@@ -360,9 +360,8 @@ namespace CryptoSense.Infrastructure.Telegram
                     var failMsg = "❌ <b>Giriş Uğursuz Oldu!</b>\n\n" +
                                   "İstifadəçi adı və ya parol yalnışdır.\n" +
                                   "Zəhmət olmasa məlumatlarınızı yoxlayıb yenidən daxil edin:\n\n" +
-                                  "📌 <b>Format:</b> <code>[İstifadəçiAdı] [Parol]</code>\n" +
                                   "💡 <b>Nümunə:</b> <code>Murad 123456</code>\n\n" +
-                                  "<i>Hesabınız yoxdursa, Super Admin (<a href=\"https://t.me/Ali_Mahammadov\">@Ali_Mahammadov</a>) ilə əlaqə saxlayın.</i>";
+                                  "<i>Hesabınız yoxdursa, Admin (<a href=\"https://t.me/Ali_Mahammadov\">@Ali_Mahammadov</a>) ilə əlaqə saxlayın.</i>";
 
                     await SendMessageAsync(failMsg, chatId, new { remove_keyboard = true });
                     return;
@@ -374,15 +373,13 @@ namespace CryptoSense.Infrastructure.Telegram
             // =========================================================================
             if (currentUser == null)
             {
-                var welcomeAndAuth = "👋 <b>Salam! KriptoBot Xidmətinə xoş gəlmisiniz.</b>\n\n" +
+                var welcomeAndAuth = "👋 <b>Salam! Kripto Signals Bot Xidmətinə xoş gəlmisiniz.</b>\n\n" +
                                      "⚠️ <b>Sistemdən istifadə etmək üçün daxil olmalısınız!</b>\n\n" +
                                      "Sistemə daxil olmaq üçün <b>İstifadəçi Adınızı</b> və <b>Parolunuzu</b> bir sətirdə, aralarında boşluq qoyaraq yazın:\n\n" +
-                                     "📌 <b>Düzgün Format:</b>\n" +
-                                     "<code>[İstifadəçiAdı] [Parol]</code>\n\n" +
                                      "💡 <b>Nümunə:</b>\n" +
                                      "<code>Murad 123456</code>\n\n" +
                                      "-----------------------------------\n" +
-                                     "Hesabınız yoxdur? Qeydiyyat və giriş icazəsi üçün <b>Super Admin</b> ilə əlaqə saxlayın:\n" +
+                                     "Hesabınız yoxdur? Qeydiyyat və giriş icazəsi üçün <b>Admin</b> ilə əlaqə saxlayın:\n" +
                                      "👉 <a href=\"https://t.me/Ali_Mahammadov\">@Ali_Mahammadov</a>";
                 
                 await SendMessageAsync(welcomeAndAuth, chatId, new { remove_keyboard = true });
