@@ -34,15 +34,6 @@ namespace CryptoSense.Infrastructure.Telegram
             sb.AppendLine($"🌟 <b>Hədəf 3 (TP3):</b> ${signal.TakeProfit3.ToString(CultureInfo.InvariantCulture)}");
             sb.AppendLine($"⛔ <b>Stop Loss (SL):</b> ${signal.StopLoss.ToString(CultureInfo.InvariantCulture)}");
             sb.AppendLine("-----------------------------------");
-            if (signal.AnalysisReasons != null && signal.AnalysisReasons.Count > 0)
-            {
-                sb.AppendLine("📊 <b>Texniki Əsaslandırma:</b>");
-                foreach (var r in signal.AnalysisReasons)
-                {
-                    sb.AppendLine($"- {r}");
-                }
-                sb.AppendLine("-----------------------------------");
-            }
             return sb.ToString();
         }
 
