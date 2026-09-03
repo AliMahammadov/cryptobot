@@ -83,35 +83,32 @@ namespace CryptoSense.Application.Services
                 }
 
                 var btcKlines = await _marketData.GetKlinesAsync("BTCUSDT", "15m", 60);
+                if (btcKlines.Count == 0)
+                {
+                    btcKlines = await _marketData.GetKlinesAsync("BTCUSDT", "3m", 60);
+                }
+                if (btcKlines.Count == 0)
+                {
+                    btcKlines = await _marketData.GetKlinesAsync("BTCUSDT", "1m", 60);
+                }
+
                 var compass = new BtcMarketCompass
                 {
                     TimestampFormatted = CryptoSense.Domain.Common.TimeHelper.NowFormatted
                 };
 
-                if (btcKlines.Count == 0) return _cachedBtcCompass ?? compass;
-
-                var currentPrice = btcKlines.Last().Close;
-                compass.Price = currentPrice;
-
-                // Live 24h Ticker & Dominance
+                // 1. Live 24h Ticker & Dominance (always ensures live price even if klines lag)
                 try
                 {
                     var tickers = await _marketData.GetTopFuturesTickersAsync(100);
                     var btcTicker = tickers.FirstOrDefault(t => t.Symbol == "BTCUSDT");
                     if (btcTicker != null)
                     {
+                        compass.Price = btcTicker.Price;
                         compass.Change24h = btcTicker.PriceChangePercent;
                         compass.High24h = btcTicker.High24h;
                         compass.Low24h = btcTicker.Low24h;
                         compass.VolumeQuote = btcTicker.VolumeQuote;
-                    }
-                    else
-                    {
-                        var openPrice = btcKlines.First().Open;
-                        compass.Change24h = openPrice > 0 ? Math.Round(((currentPrice - openPrice) / openPrice) * 100, 2) : 0;
-                        compass.High24h = btcKlines.Max(k => k.High);
-                        compass.Low24h = btcKlines.Min(k => k.Low);
-                        compass.VolumeQuote = btcKlines.Sum(k => k.Volume * k.Close);
                     }
 
                     var macro = await _marketData.GetMacroMarketOverviewAsync();
@@ -121,44 +118,64 @@ namespace CryptoSense.Application.Services
                 }
                 catch { }
 
-                var indicators = _indicatorEngine.CalculateIndicators(btcKlines);
-                compass.Rsi15m = indicators.Rsi;
-                compass.EmaStructure = indicators.EmaTrend;
-                compass.Ema20 = indicators.Ema20;
-                compass.Ema50 = indicators.Ema50;
-                compass.MacdHist = indicators.MacdHist;
-                compass.SuperTrend = indicators.SuperTrend;
-                compass.SupportLevel = indicators.SupportLevel;
-                compass.ResistanceLevel = indicators.ResistanceLevel;
-
-                int score = 50;
-                if (indicators.Ema20 > indicators.Ema50) score += 20;
-                else score -= 20;
-                if (indicators.MacdHist > 0) score += 15;
-                else score -= 15;
-                if (indicators.Rsi >= 50 && indicators.Rsi <= 68) score += 15;
-                else if (indicators.Rsi < 48) score -= 15;
-
-                compass.BullishScore = Math.Clamp(score, 5, 95);
-                if (compass.BullishScore >= 60)
+                if (btcKlines.Count > 0)
                 {
-                    compass.Trend = "YÜKSƏLİŞ (BULLISH) 🟢";
-                    compass.Summary = "Bitcoin 15m/1h strukturu güclüdür və dinamik dəstək səviyyəsi üzərindədir. Long əməliyyatlarına üstünlük verilir.";
-                }
-                else if (compass.BullishScore <= 40)
-                {
-                    compass.Trend = "ENİŞ (BEARISH) 🔴";
-                    compass.Summary = "Bitcoin satış təzyiqi altındadır və EMA xətlərinin altındadır. Short əməliyyatlarına üstünlük verilir.";
-                }
-                else
-                {
-                    compass.Trend = "NEYTRAL (YAN HƏRƏKƏT) ⚪";
-                    compass.Summary = "Bitcoin yan hərəkətdədir (konsolidasiya). Qısa scalping və dəqiq Stop-Loss tövsiyə olunur.";
+                    var currentPrice = btcKlines.Last().Close;
+                    if (compass.Price == 0) compass.Price = currentPrice;
+
+                    if (compass.Change24h == 0)
+                    {
+                        var openPrice = btcKlines.First().Open;
+                        compass.Change24h = openPrice > 0 ? Math.Round(((currentPrice - openPrice) / openPrice) * 100, 2) : 0;
+                        compass.High24h = btcKlines.Max(k => k.High);
+                        compass.Low24h = btcKlines.Min(k => k.Low);
+                        compass.VolumeQuote = btcKlines.Sum(k => k.Volume * k.Close);
+                    }
+
+                    var indicators = _indicatorEngine.CalculateIndicators(btcKlines);
+                    compass.Rsi15m = indicators.Rsi;
+                    compass.EmaStructure = indicators.EmaTrend;
+                    compass.Ema20 = indicators.Ema20;
+                    compass.Ema50 = indicators.Ema50;
+                    compass.MacdHist = indicators.MacdHist;
+                    compass.SuperTrend = indicators.SuperTrend;
+                    compass.SupportLevel = indicators.SupportLevel;
+                    compass.ResistanceLevel = indicators.ResistanceLevel;
+
+                    int score = 50;
+                    if (indicators.Ema20 > indicators.Ema50) score += 20;
+                    else score -= 20;
+                    if (indicators.MacdHist > 0) score += 15;
+                    else score -= 15;
+                    if (indicators.Rsi >= 50 && indicators.Rsi <= 68) score += 15;
+                    else if (indicators.Rsi < 48) score -= 15;
+
+                    compass.BullishScore = Math.Clamp(score, 5, 95);
+                    if (compass.BullishScore >= 60)
+                    {
+                        compass.Trend = "YÜKSƏLİŞ (BULLISH) 🟢";
+                        compass.Summary = "Bitcoin 15m/1h strukturu güclüdür və dinamik dəstək səviyyəsi üzərindədir. Long əməliyyatlarına üstünlük verilir.";
+                    }
+                    else if (compass.BullishScore <= 40)
+                    {
+                        compass.Trend = "ENİŞ (BEARISH) 🔴";
+                        compass.Summary = "Bitcoin satış təzyiqi altındadır və EMA xətlərinin altındadır. Short əməliyyatlarına üstünlük verilir.";
+                    }
+                    else
+                    {
+                        compass.Trend = "NEYTRAL (YAN HƏRƏKƏT) ⚪";
+                        compass.Summary = "Bitcoin yan hərəkətdədir (konsolidasiya). Qısa scalping və dəqiq Stop-Loss tövsiyə olunur.";
+                    }
                 }
 
-                _cachedBtcCompass = compass;
-                _btcCompassCacheTime = DateTime.UtcNow;
-                return compass;
+                if (compass.Price > 0)
+                {
+                    _cachedBtcCompass = compass;
+                    _btcCompassCacheTime = DateTime.UtcNow;
+                    return compass;
+                }
+
+                return _cachedBtcCompass ?? compass;
             }
             finally
             {
