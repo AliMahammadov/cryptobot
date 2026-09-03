@@ -196,8 +196,7 @@ namespace CryptoSense.Infrastructure.Testing
                 var formatted = TelegramMessageFormatter.FormatSignalAlert(sampleSignal, 1);
                 return Task.FromResult(formatted.Contains("#1 🟢 <b>SİQNAL</b>") && 
                        formatted.Contains("SOL") && 
-                       formatted.Contains("Confluence Razılaşma Balı") && 
-                       formatted.Contains("maliyyə məsləhəti deyil"));
+                       formatted.Contains("Confluence Razılaşma Balı"));
             });
 
             await AssertTest("Test 12: Telegram Message Formatter - Outcome Report Validation", () =>

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Net.Http;
 using System.Text;
@@ -27,6 +28,43 @@ namespace CryptoSense.Infrastructure.Telegram
         public static string? SuperAdminChatId = null;
         public static ConcurrentDictionary<string, UserSettings> UserPreferences { get; } = new();
         private static readonly ConcurrentDictionary<string, string> _userStates = new();
+        private static readonly string SettingsFilePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "user_preferences.json");
+
+        static TelegramBotService()
+        {
+            LoadSettings();
+        }
+
+        private static void LoadSettings()
+        {
+            try
+            {
+                if (File.Exists(SettingsFilePath))
+                {
+                    var json = File.ReadAllText(SettingsFilePath);
+                    var loaded = JsonSerializer.Deserialize<Dictionary<string, UserSettings>>(json);
+                    if (loaded != null)
+                    {
+                        foreach (var kvp in loaded)
+                        {
+                            UserPreferences[kvp.Key] = kvp.Value;
+                        }
+                    }
+                }
+            }
+            catch { }
+        }
+
+        public static void SaveSettings()
+        {
+            try
+            {
+                var dict = new Dictionary<string, UserSettings>(UserPreferences);
+                var json = JsonSerializer.Serialize(dict, new JsonSerializerOptions { WriteIndented = true });
+                File.WriteAllText(SettingsFilePath, json);
+            }
+            catch { }
+        }
 
         public TelegramBotService(HttpClient httpClient, IOptions<AppConfig> config, IServiceProvider serviceProvider)
         {
@@ -177,12 +215,17 @@ namespace CryptoSense.Infrastructure.Telegram
 
                 var settings = GetSettings(chatId);
 
-                bool receivedThisSignal = signal.UserSignalNumbers.ContainsKey(chatId);
-                if (!receivedThisSignal)
-                {
-                    // User never received this signal (e.g. signal occurred before user started or while paused)
-                    continue;
-                }
+                // User preferences check:
+                if (!settings.IsActive) continue;
+
+                // Check coin filter
+                if (settings.Coins.Count > 0 && !settings.Coins.Contains(signal.Symbol)) continue;
+
+                // Check timeframe filter
+                if (settings.Timeframe != "Hamısı" && settings.Timeframe != "Hamisi" && settings.Timeframe != signal.Timeframe) continue;
+
+                // Check if signal occurred before user resumed
+                if (signal.GeneratedAt < settings.LastResumeTime.AddSeconds(-5)) continue;
 
                 signal.UserSignalNumbers.TryGetValue(chatId, out var userSigNum);
                 if (userSigNum == 0) userSigNum = signal.SignalNumber;
@@ -331,13 +374,21 @@ namespace CryptoSense.Infrastructure.Telegram
                         SuperAdminChatId = chatId;
                         settings.Username = "Ali (Super Admin)";
 
-                        var welcomeAdmin = "👑 <b>Super Admin Paneli və Canlı Ticarət Sistemi AKTİVDİR 🟢</b>\n\n" +
-                                           "👤 Rol: <b>Super Admin</b>\n" +
-                                           "Aktiv Zaman Çərçivəsi: <b>3m</b>\n\n" +
-                                           "Həm istifadəçiləri idarə edə (<b>👑 Admin Paneli</b> düyməsi ilə), həm də canlı siqnalları və kompası izləyə bilərsiniz.\n\n" +
-                                           "<i>Çıxış üçün: <code>/logout</code></i>";
+                        var welcomeAdmin = $"👑 <b>Giriş Təsdiqləndi! Xoş Gəldiniz, Super Admin ({user.Username})!</b>\n\n" +
+                                           $"🚀 <b>Kripto Signals Bot Xidməti AKTİVDİR 🟢</b>\n\n" +
+                                           $"📖 <b>Sistemdən Necə İstifadə Etməli?</b>\n" +
+                                           $"• <b>⏱ Zaman Çərçivəsi:</b> Siqnalları almaq istədiyiniz şam müddətini (məs. 3m, 5m, 15m) seçin.\n" +
+                                           $"• <b>⚙️ Coin Seçimi:</b> Yalnız xüsusi coinləri (maks. 10 ədəd) izləmək üçün adlarını daxil edin.\n" +
+                                           $"• <b>⚡ Bütün Siqnallar:</b> İstədiyiniz zaman kəsiyində bazarı dərhal canlı skan edin.\n" +
+                                           $"• <b>🧭 Bitcoin Kompası:</b> Bazarın ümumi trendini və qüvvəsini izləyin.\n" +
+                                           $"• <b>📊 Statistika:</b> Seçdiyiniz coinlər və zaman üzrə real dinamik performansınızı görün.\n" +
+                                           $"• <b>🛑 Dayandır / 🧹 Sıfırla:</b> Bildiriş axınını idarə edin və ya köhnə izləmələri dayandırın.\n" +
+                                           $"• <b>👑 Admin Paneli:</b> İstifadəçi yaratmaq, silmək və parolları dəyişmək üçün.\n\n" +
+                                           $"<i>Sistem 24/7 rejimdə canlı bazar qiymətlərini analiz edir və yüksək dəqiqlikli fürsətləri sizə göndərir.</i>\n\n" +
+                                           $"<i>Çıxış etmək üçün: <code>/logout</code></i>";
 
                         await SendMessageAsync(welcomeAdmin, chatId, TelegramKeyboards.BuildUserKeyboard(settings, isAdmin: true));
+                        SaveSettings();
                         return;
                     }
                     else
@@ -547,6 +598,7 @@ namespace CryptoSense.Infrastructure.Telegram
                 {
                     userSettings.Coins.Remove(coinToDel);
                     userSettings.LastResumeTime = DateTime.UtcNow;
+                    SaveSettings();
                     var cleanDel = coinToDel.Replace("USDT", "");
                     var cleanList = string.Join(", ", userSettings.Coins.Select(c => c.Replace("USDT", "")));
                     var succMsg = $"✅ <b>'{cleanDel}' coini siyahınızdan silindi!</b>\n\n" +
@@ -583,6 +635,7 @@ namespace CryptoSense.Infrastructure.Telegram
                     }
 
                     userSettings.LastResumeTime = DateTime.UtcNow;
+                    SaveSettings();
                     var cleanList = string.Join(", ", userSettings.Coins.Select(c => c.Replace("USDT", "")));
                     var conf = $"✅ <b>Seçilmiş coinləriniz yeniləndi ({userSettings.Coins.Count}/10 ədəd):</b>\n\n" +
                                $"<code>{cleanList}</code>";
@@ -591,7 +644,6 @@ namespace CryptoSense.Infrastructure.Telegram
                 }
             }
 
-            // SUBMENU ACTION: SCAN SPECIFIC TIMEFRAME
             if (text == "⏱ 3 Dəqiqə (3m) Siqnalları" ||
                 text == "⏱ 5 Dəqiqə (5m) Siqnalları" ||
                 text == "⏱ 15 Dəqiqə (15m) Siqnalları" ||
@@ -599,8 +651,6 @@ namespace CryptoSense.Infrastructure.Telegram
                 text == "⏱ 4 Saat (4h) Siqnalları" ||
                 text == "🌟 Bütün Zamanlar (Hamısı) Siqnalları")
             {
-                var sampleCoins = new[] { "SOLUSDT", "BTCUSDT", "ETHUSDT", "DOGEUSDT", "XRPUSDT", "BNBUSDT", "SUIUSDT", "PEPEUSDT", "AVAXUSDT" };
-
                 string targetTf = "Hamısı";
                 if (text.Contains("15m") || text.Contains("15 Dəqiqə") || text.Contains("15 deqiqe")) targetTf = "15m";
                 else if (text.Contains("3m") || text.Contains("3 Dəqiqə") || text.Contains("3 deqiqe")) targetTf = "3m";
@@ -611,11 +661,45 @@ namespace CryptoSense.Infrastructure.Telegram
 
                 userSettings.Timeframe = targetTf;
                 userSettings.LastResumeTime = DateTime.UtcNow;
+                SaveSettings();
 
-                var confirmMsg = $"✅ <b>Zaman Çərçivəsi Təyin Edildi:</b> <code>{targetTf}</code>\n\n" +
-                                 $"ℹ️ <i>Hal-hazırda ({targetTf} üzrə) tələblərə cavab verən (>=70% win-rate) aktiv siqnal yoxdur.</i>\n\n" +
-                                 $"🟢 <b>Sistem canlı rejimdə bazarı 24/7 analiz edir.</b> Yalnız bu andan etibarən yaranacaq yeni təsdiqlənmiş şam formalaşan kimi siqnal dərhal sizə göndəriləcək.";
-                await SendMessageAsync(confirmMsg, chatId, TelegramKeyboards.BuildUserKeyboard(userSettings, isAdmin));
+                var scanTf = targetTf == "Hamısı" ? "3m" : targetTf;
+                var coinsToScan = userSettings.Coins.Count > 0 
+                    ? userSettings.Coins 
+                    : new List<string> { "BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT", "DOGEUSDT", "SUIUSDT", "PEPEUSDT", "AVAXUSDT" };
+
+                var cleanCoins = string.Join(", ", coinsToScan.Select(c => c.Replace("USDT", "")));
+                await SendMessageAsync($"⏳ <b>{scanTf} üzrə bazar skan edilir...</b>\nİzlənən coinlər: <code>{cleanCoins}</code>", chatId);
+
+                var foundSignals = new List<FuturesSignal>();
+                foreach (var sym in coinsToScan)
+                {
+                    try
+                    {
+                        var sig = await signalEngine.AnalyzeCoinAsync(sym, scanTf, isLiveScan: false);
+                        if (sig.Confidence >= 78 && (sig.SignalType.Contains("LONG") || sig.SignalType.Contains("SHORT")))
+                        {
+                            foundSignals.Add(sig);
+                        }
+                    }
+                    catch { }
+                }
+
+                if (foundSignals.Count > 0)
+                {
+                    foreach (var sig in foundSignals)
+                    {
+                        await SendSignalAlertAsync(sig, chatId);
+                        await Task.Delay(250);
+                    }
+                }
+                else
+                {
+                    var noSigMsg = $"⚡ <b>Bazar Skan Nəticəsi ({scanTf}):</b>\n\n" +
+                                   $"ℹ️ <i>Hal-hazırda {scanTf} zaman kəsiyində 78%+ Confluence tələbinə cavab verən risk-təsdiqli siqnal aşkarlanmadı.</i>\n\n" +
+                                   $"🟢 <b>Sistem canlı izləmədədir.</b> Şərtlər ödənildikdə yeni şam yaranan kimi siqnal dərhal sizə göndəriləcək.";
+                    await SendMessageAsync(noSigMsg, chatId, TelegramKeyboards.BuildUserKeyboard(userSettings, isAdmin));
+                }
                 return;
             }
 
@@ -624,6 +708,7 @@ namespace CryptoSense.Infrastructure.Telegram
             {
                 userSettings.Timeframe = "3m";
                 userSettings.LastResumeTime = DateTime.UtcNow;
+                SaveSettings();
                 await SendMessageAsync($"✅ <b>Zaman Çərçivəsi Təyin Edildi:</b> <code>3m</code>\n<i>Artıq yalnız 3m siqnalları alacaqsınız.</i>", chatId, TelegramKeyboards.BuildUserKeyboard(userSettings, isAdmin));
                 return;
             }
@@ -631,6 +716,7 @@ namespace CryptoSense.Infrastructure.Telegram
             {
                 userSettings.Timeframe = "5m";
                 userSettings.LastResumeTime = DateTime.UtcNow;
+                SaveSettings();
                 await SendMessageAsync($"✅ <b>Zaman Çərçivəsi Təyin Edildi:</b> <code>5m</code>\n<i>Artıq yalnız 5m siqnalları alacaqsınız.</i>", chatId, TelegramKeyboards.BuildUserKeyboard(userSettings, isAdmin));
                 return;
             }
@@ -638,6 +724,7 @@ namespace CryptoSense.Infrastructure.Telegram
             {
                 userSettings.Timeframe = "15m";
                 userSettings.LastResumeTime = DateTime.UtcNow;
+                SaveSettings();
                 await SendMessageAsync($"✅ <b>Zaman Çərçivəsi Təyin Edildi:</b> <code>15m</code>\n<i>Artıq yalnız 15m siqnalları alacaqsınız.</i>", chatId, TelegramKeyboards.BuildUserKeyboard(userSettings, isAdmin));
                 return;
             }
@@ -645,6 +732,7 @@ namespace CryptoSense.Infrastructure.Telegram
             {
                 userSettings.Timeframe = "1h";
                 userSettings.LastResumeTime = DateTime.UtcNow;
+                SaveSettings();
                 await SendMessageAsync($"✅ <b>Zaman Çərçivəsi Təyin Edildi:</b> <code>1h</code>\n<i>Artıq yalnız 1h siqnalları alacaqsınız.</i>", chatId, TelegramKeyboards.BuildUserKeyboard(userSettings, isAdmin));
                 return;
             }
@@ -652,6 +740,7 @@ namespace CryptoSense.Infrastructure.Telegram
             {
                 userSettings.Timeframe = "4h";
                 userSettings.LastResumeTime = DateTime.UtcNow;
+                SaveSettings();
                 await SendMessageAsync($"✅ <b>Zaman Çərçivəsi Təyin Edildi:</b> <code>4h</code>\n<i>Artıq yalnız 4h siqnalları alacaqsınız.</i>", chatId, TelegramKeyboards.BuildUserKeyboard(userSettings, isAdmin));
                 return;
             }
@@ -659,6 +748,7 @@ namespace CryptoSense.Infrastructure.Telegram
             {
                 userSettings.Timeframe = "Hamısı";
                 userSettings.LastResumeTime = DateTime.UtcNow;
+                SaveSettings();
                 await SendMessageAsync($"✅ <b>Zaman Çərçivəsi Təyin Edildi:</b> <code>Hamısı</code>", chatId, TelegramKeyboards.BuildUserKeyboard(userSettings, isAdmin));
                 return;
             }
@@ -681,6 +771,7 @@ namespace CryptoSense.Infrastructure.Telegram
             else if (text.Contains("Dayandır") || text.Contains("Dayandir") || text == "/stop")
             {
                 userSettings.IsActive = false;
+                SaveSettings();
                 await SendMessageAsync(
                     "🛑 <b>Yeni Siqnal Bildirişləri Dayandırıldı.</b>\n\n" +
                     "<i>Sizə yeni siqnallar göndərilməyəcək.</i>\n" +
@@ -693,6 +784,7 @@ namespace CryptoSense.Infrastructure.Telegram
             {
                 userSettings.IsActive = true;
                 userSettings.LastResumeTime = DateTime.UtcNow;
+                SaveSettings();
                 await SendMessageAsync(
                     "▶️ <b>Bildirişlər Aktivləşdirildi! 🟢</b>\n\n" +
                     "Aktiv Zaman Kəsiyi: <b>" + userSettings.Timeframe + "</b>\n\n" +
@@ -704,6 +796,7 @@ namespace CryptoSense.Infrastructure.Telegram
             {
                 userSettings.IsActive = false;
                 userSettings.LastResumeTime = DateTime.UtcNow;
+                SaveSettings();
                 await SendMessageAsync(
                     "🧹 <b>Siqnal İzləmələri Sıfırlandı və Dayandırıldı!</b>\n\n" +
                     "<i>Profiliniz üçün keçmiş siqnal qeydləri təmizləndi və yeni siqnal axını dayandırıldı.</i>\n" +

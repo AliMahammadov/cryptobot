@@ -21,6 +21,7 @@ namespace CryptoSense.Worker
         private readonly IServiceProvider _serviceProvider;
         private readonly AppConfig _config;
         private readonly Dictionary<string, DateTime> _lastAlertSent = new();
+        private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, DateTime> _activeCandleLocks = new();
 
         public BackgroundMarketScanner(
             ITelegramBotService telegramService,
@@ -237,6 +238,11 @@ namespace CryptoSense.Worker
                                         await _telegramService.SendOutcomeAlertAsync(sig, $"{sig.Timeframe} Müddəti Bitdi", currentPrice, pct);
                                     }
                                 }
+
+                                if (sig.IsClosed)
+                                {
+                                    _activeCandleLocks.TryRemove($"{sig.Symbol}_{sig.Timeframe}", out _);
+                                }
                             }
                         }
 
@@ -288,7 +294,13 @@ namespace CryptoSense.Worker
                                 if (stoppingToken.IsCancellationRequested) break;
 
                                 // Anti-Spam / Active Candle Lock:
-                                // If this coin already has an active, unclosed signal on this timeframe, wait until it finishes/expires!
+                                // If this coin has an active candle lock on this timeframe, wait until it expires!
+                                var lockKey = $"{sym}_{tf}";
+                                if (_activeCandleLocks.TryGetValue(lockKey, out var expiry) && DateTime.UtcNow < expiry)
+                                {
+                                    continue;
+                                }
+
                                 bool hasActiveUnclosedSignal = activeSignals.Any(s => s.Symbol == sym && s.Timeframe == tf && !s.IsClosed && s.Status == SignalStatus.Open);
                                 if (hasActiveUnclosedSignal)
                                 {
@@ -305,6 +317,19 @@ namespace CryptoSense.Worker
                                         {
                                             _lastAlertSent[alertKey] = DateTime.UtcNow;
                                             signal.SignalAlertSent = true;
+
+                                            var duration = signal.Timeframe switch
+                                            {
+                                                "1m" => TimeSpan.FromMinutes(1),
+                                                "3m" => TimeSpan.FromMinutes(3),
+                                                "5m" => TimeSpan.FromMinutes(5),
+                                                "15m" => TimeSpan.FromMinutes(15),
+                                                "1h" => TimeSpan.FromHours(1),
+                                                "4h" => TimeSpan.FromHours(4),
+                                                _ => TimeSpan.FromMinutes(15)
+                                            };
+                                            _activeCandleLocks[lockKey] = DateTime.UtcNow.Add(duration);
+                                            activeSignals.Add(signal);
 
                                             var dbSig = await unitOfWork.Signals.GetByIdAsync(signal.Id);
                                             if (dbSig != null)
