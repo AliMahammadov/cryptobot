@@ -38,18 +38,20 @@ namespace CryptoSense.Infrastructure.Telegram
 
         public static string FormatOutcomeAlert(FuturesSignal signal, int userSigNum, string outcomeType, decimal hitPrice, decimal profitPct)
         {
-            bool isWin = outcomeType.Contains("Hədəf") || outcomeType.Contains("TP") || outcomeType.Contains("Uğurlu") || outcomeType.Contains("Ugurlu");
+            bool isWin = outcomeType.Contains("Hədəf") || outcomeType.Contains("TP") || outcomeType.Contains("Uğurlu") || outcomeType.Contains("Ugurlu") || outcomeType.Contains("Breakeven") || outcomeType.Contains("Qorundu");
             
             if (outcomeType.Contains("Stop Loss") || outcomeType.Contains("SL") || outcomeType.Contains("Bitdi"))
             {
-                isWin = false;
+                if (!outcomeType.Contains("Breakeven") && !outcomeType.Contains("Qorundu"))
+                {
+                    isWin = false;
+                }
             }
 
             if (isWin && profitPct < 0) profitPct = Math.Abs(profitPct);
             if (!isWin && profitPct > 0) profitPct = -Math.Abs(profitPct);
 
             var icon = isWin ? "🎯" : "⛔";
-            var statusText = isWin ? $"{outcomeType} (UĞURLU) ✅" : $"{outcomeType} (UĞURSUZ) ❌";
             var cleanSymbol = signal.Symbol.Replace("USDT", "");
             var directionStr = (signal.Direction == SignalDirection.Buy || signal.SignalType.Contains("LONG")) ? "LONG" : "SHORT";
 
@@ -63,16 +65,41 @@ namespace CryptoSense.Infrastructure.Telegram
             }
             else
             {
+                var statusText = isWin ? $"{outcomeType} (UĞURLU) ✅" : $"{outcomeType} (UĞURSUZ) ❌";
                 sb.AppendLine($"{icon} <b>#{userSigNum} NƏTİCƏ HESABATI:</b>");
                 sb.AppendLine($"<b>{statusText}</b>");
             }
+
             sb.AppendLine();
             sb.AppendLine($"🪙 <b>Cütlük:</b> {cleanSymbol} Futures ({directionStr} - {signal.Timeframe})");
             sb.AppendLine($"📍 <b>İlkin Giriş Qiyməti:</b> ${signal.EntryPrice.ToString(CultureInfo.InvariantCulture)}");
-            sb.AppendLine($"💵 <b>Bağlanış Qiyməti:</b> ${hitPrice.ToString(CultureInfo.InvariantCulture)}");
+            sb.AppendLine($"💵 <b>Bağlanış / Cari Qiymət:</b> ${hitPrice.ToString(CultureInfo.InvariantCulture)}");
             sb.AppendLine($"📈 <b>Xalis Nəticə (PnL):</b> <b>{(profitPct >= 0 ? "+" : "")}{profitPct.ToString("F2", CultureInfo.InvariantCulture)}%</b>");
             sb.AppendLine($"🕒 <b>Siqnal Vaxtı:</b> {signal.TimestampFormatted}");
-            sb.AppendLine($"🕒 <b>Bağlanma Vaxtı:</b> {CryptoSense.Domain.Common.TimeHelper.NowFormatted}");
+            sb.AppendLine($"🕒 <b>Yenilənmə Vaxtı:</b> {CryptoSense.Domain.Common.TimeHelper.NowFormatted}");
+
+            if (outcomeType.Contains("TP1") || outcomeType.Contains("Hədəf 1"))
+            {
+                sb.AppendLine();
+                sb.AppendLine("🛡️ <b>RISK MENECMENT VƏ DAVAM:</b>");
+                sb.AppendLine($"• Stop Loss səviyyəsi <b>GİRİŞ QİYMƏTİNƏ (${signal.EntryPrice.ToString(CultureInfo.InvariantCulture)})</b> çəkildi!");
+                sb.AppendLine("• Əməliyyat artıq <b>0 risklidir</b> (Kapital tam qorunur).");
+                sb.AppendLine($"• Mövqe açıq saxlanılır, <b>Hədəf 2 (TP2: ${signal.TakeProfit2.ToString(CultureInfo.InvariantCulture)})</b> gözlənilir.");
+            }
+            else if (outcomeType.Contains("TP2") || outcomeType.Contains("Hədəf 2"))
+            {
+                sb.AppendLine();
+                sb.AppendLine("🛡️ <b>RISK MENECMENT VƏ DAVAM:</b>");
+                sb.AppendLine($"• Stop Loss səviyyəsi <b>TP1 (${signal.TakeProfit1.ToString(CultureInfo.InvariantCulture)})</b> səviyyəsinə çəkildi!");
+                sb.AppendLine("• Əldə edilmiş qazanc zəmanət altına alındı.");
+                sb.AppendLine($"• Mövqe açıq saxlanılır, <b>Hədəf 3 (TP3: ${signal.TakeProfit3.ToString(CultureInfo.InvariantCulture)})</b> gözlənilir.");
+            }
+            else if (outcomeType.Contains("Breakeven") || outcomeType.Contains("Qorundu"))
+            {
+                sb.AppendLine();
+                sb.AppendLine("🛡️ <b>QEYD:</b> Qiymət giriş nöqtəsinə qayıtdı və mövqe <b>0 zərərlə / qorunmuş qazancla</b> bağlandı.");
+            }
+
             return sb.ToString();
         }
 

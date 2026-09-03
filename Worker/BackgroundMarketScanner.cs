@@ -107,21 +107,19 @@ namespace CryptoSense.Worker
                     }
                 }
 
-                var duration = sig.Timeframe switch
+                var maxHoldDuration = sig.Timeframe switch
                 {
-                    "1m" => TimeSpan.FromMinutes(1),
-                    "3m" => TimeSpan.FromMinutes(3),
-                    "5m" => TimeSpan.FromMinutes(5),
-                    "15m" => TimeSpan.FromMinutes(15),
-                    "1h" => TimeSpan.FromHours(1),
-                    "4h" => TimeSpan.FromHours(4),
-                    _ => TimeSpan.FromMinutes(15)
+                    "1m" or "3m" or "5m" => TimeSpan.FromHours(4),
+                    "15m" => TimeSpan.FromHours(12),
+                    "1h" => TimeSpan.FromHours(24),
+                    "4h" => TimeSpan.FromHours(48),
+                    _ => TimeSpan.FromHours(12)
                 };
 
                 var elapsed = DateTime.UtcNow - sig.GeneratedAt;
-                bool isExpired = elapsed >= duration || (sig.ExpiryTimeUtc != default && DateTime.UtcNow >= sig.ExpiryTimeUtc);
+                bool isMaxTimeReached = elapsed >= maxHoldDuration || (sig.ExpiryTimeUtc != default && DateTime.UtcNow >= sig.ExpiryTimeUtc);
 
-                if (currentPrice == 0 && isExpired)
+                if (currentPrice == 0 && isMaxTimeReached)
                 {
                     try
                     {
@@ -155,51 +153,61 @@ namespace CryptoSense.Worker
                             await _telegramService.SendOutcomeAlertAsync(sig, "Hədəf 3 (TP3)", currentPrice, sig.ResultPercent.Value);
                         }
                         // Long TP2 Hit
-                        else if (currentPrice >= sig.TakeProfit2 && !sig.OutcomeAlertSent)
+                        else if (currentPrice >= sig.TakeProfit2 && !sig.Tp2Notified)
                         {
                             sig.Tp2Notified = true;
-                            sig.OutcomeAlertSent = true;
-                            sig.IsClosed = true;
-                            sig.Status = SignalStatus.Success;
-                            sig.OutcomeStatus = "Hədəf 2 (TP2) (UĞURLU) ✅";
-                            sig.ClosePrice = currentPrice;
-                            sig.ClosedAt = DateTime.UtcNow;
-                            sig.ResultPercent = Math.Round(((currentPrice - sig.EntryPrice) / sig.EntryPrice) * 100, 2);
+                            sig.StopLoss = sig.TakeProfit1; // Trailing stop moved to TP1 to lock profits
+                            var profitPct = Math.Round(((currentPrice - sig.EntryPrice) / sig.EntryPrice) * 100, 2);
+                            sig.ProfitPercentAchieved = profitPct;
                             await unitOfWork.Signals.UpdateAsync(sig);
                             await unitOfWork.SaveChangesAsync(stoppingToken);
-                            await _telegramService.SendOutcomeAlertAsync(sig, "Hədəf 2 (TP2)", currentPrice, sig.ResultPercent.Value);
+                            await _telegramService.SendOutcomeAlertAsync(sig, "Hədəf 2 (TP2)", currentPrice, profitPct);
                         }
                         // Long TP1 Hit
-                        else if (currentPrice >= sig.TakeProfit1 && !sig.OutcomeAlertSent)
+                        else if (currentPrice >= sig.TakeProfit1 && !sig.Tp1Notified)
                         {
                             sig.Tp1Notified = true;
-                            sig.OutcomeAlertSent = true;
-                            sig.IsClosed = true;
-                            sig.Status = SignalStatus.Success;
-                            sig.OutcomeStatus = "Hədəf 1 (TP1) (UĞURLU) ✅";
-                            sig.ClosePrice = currentPrice;
-                            sig.ClosedAt = DateTime.UtcNow;
-                            sig.ResultPercent = Math.Round(((currentPrice - sig.EntryPrice) / sig.EntryPrice) * 100, 2);
+                            sig.StopLoss = sig.EntryPrice; // Breakeven risk-free stop loss
+                            var profitPct = Math.Round(((currentPrice - sig.EntryPrice) / sig.EntryPrice) * 100, 2);
+                            sig.ProfitPercentAchieved = profitPct;
                             await unitOfWork.Signals.UpdateAsync(sig);
                             await unitOfWork.SaveChangesAsync(stoppingToken);
-                            await _telegramService.SendOutcomeAlertAsync(sig, "Hədəf 1 (TP1)", currentPrice, sig.ResultPercent.Value);
+                            await _telegramService.SendOutcomeAlertAsync(sig, "Hədəf 1 (TP1)", currentPrice, profitPct);
                         }
-                        // Long Stop Loss Hit
+                        // Long Stop Loss or Breakeven Hit
                         else if (currentPrice <= sig.StopLoss && !sig.OutcomeAlertSent)
                         {
                             sig.OutcomeAlertSent = true;
                             sig.IsClosed = true;
-                            sig.Status = SignalStatus.Failed;
-                            sig.OutcomeStatus = "Stop Loss (SL) (UĞURSUZ) ❌";
                             sig.ClosePrice = currentPrice;
                             sig.ClosedAt = DateTime.UtcNow;
-                            sig.ResultPercent = Math.Round(((currentPrice - sig.EntryPrice) / sig.EntryPrice) * 100, 2);
-                            await unitOfWork.Signals.UpdateAsync(sig);
-                            await unitOfWork.SaveChangesAsync(stoppingToken);
-                            await _telegramService.SendOutcomeAlertAsync(sig, "Stop Loss (SL)", currentPrice, sig.ResultPercent.Value);
+
+                            if (sig.Tp1Notified)
+                            {
+                                // Breakeven exit: Stop loss was raised to EntryPrice or TP1
+                                sig.Status = SignalStatus.Success;
+                                var pnl = sig.Tp2Notified
+                                    ? Math.Round(((sig.TakeProfit1 - sig.EntryPrice) / sig.EntryPrice) * 100, 2)
+                                    : 0.0m;
+                                sig.ResultPercent = pnl;
+                                sig.OutcomeStatus = "Giriş Qiymətində Bağlandı (Breakeven - Qorundu) ✅";
+                                await unitOfWork.Signals.UpdateAsync(sig);
+                                await unitOfWork.SaveChangesAsync(stoppingToken);
+                                await _telegramService.SendOutcomeAlertAsync(sig, "Breakeven", currentPrice, pnl);
+                            }
+                            else
+                            {
+                                // Genuine Stop Loss exit
+                                sig.Status = SignalStatus.Failed;
+                                sig.OutcomeStatus = "Stop Loss (SL) (UĞURSUZ) ❌";
+                                sig.ResultPercent = Math.Round(((currentPrice - sig.EntryPrice) / sig.EntryPrice) * 100, 2);
+                                await unitOfWork.Signals.UpdateAsync(sig);
+                                await unitOfWork.SaveChangesAsync(stoppingToken);
+                                await _telegramService.SendOutcomeAlertAsync(sig, "Stop Loss (SL)", currentPrice, sig.ResultPercent.Value);
+                            }
                         }
-                        // Long Candle Expiration
-                        else if (isExpired && !sig.OutcomeAlertSent)
+                        // Long Safety Timeout
+                        else if (isMaxTimeReached && !sig.OutcomeAlertSent)
                         {
                             sig.OutcomeAlertSent = true;
                             sig.IsClosed = true;
@@ -208,10 +216,18 @@ namespace CryptoSense.Worker
                             var pct = Math.Round(((currentPrice - sig.EntryPrice) / sig.EntryPrice) * 100, 2);
                             sig.ResultPercent = pct;
 
-                            sig.Status = pct > 0 ? SignalStatus.Success : SignalStatus.Failed;
-                            sig.OutcomeStatus = pct > 0
-                                ? $"{sig.Timeframe} Müddəti Bitdi (Qazancla Bağlandı: +{pct}%) ✅"
-                                : $"{sig.Timeframe} Müddəti Bitdi (Hədəfə Çatmadı) ❌";
+                            if (sig.Tp1Notified)
+                            {
+                                sig.Status = SignalStatus.Success;
+                                sig.OutcomeStatus = $"{sig.Timeframe} Müddəti Tamamlandı (Qazancla Qorundu: +{pct}%) ✅";
+                            }
+                            else
+                            {
+                                sig.Status = pct > 0 ? SignalStatus.Success : SignalStatus.Failed;
+                                sig.OutcomeStatus = pct > 0
+                                    ? $"{sig.Timeframe} Müddəti Tamamlandı (Qazancla Bağlandı: +{pct}%) ✅"
+                                    : $"{sig.Timeframe} Müddəti Tamamlandı (Hədəfə Çatmadı) ❌";
+                            }
 
                             await unitOfWork.Signals.UpdateAsync(sig);
                             await unitOfWork.SaveChangesAsync(stoppingToken);
@@ -236,52 +252,62 @@ namespace CryptoSense.Worker
                             await _telegramService.SendOutcomeAlertAsync(sig, "Hədəf 3 (TP3)", currentPrice, sig.ResultPercent.Value);
                         }
                         // Short TP2 Hit
-                        else if (currentPrice <= sig.TakeProfit2 && !sig.OutcomeAlertSent)
+                        else if (currentPrice <= sig.TakeProfit2 && !sig.Tp2Notified)
                         {
                             sig.Tp2Notified = true;
-                            sig.OutcomeAlertSent = true;
-                            sig.IsClosed = true;
-                            sig.Status = SignalStatus.Success;
-                            sig.OutcomeStatus = "Hədəf 2 (TP2) (UĞURLU) ✅";
-                            sig.ClosePrice = currentPrice;
-                            sig.ClosedAt = DateTime.UtcNow;
-                            sig.ResultPercent = Math.Round(((sig.EntryPrice - currentPrice) / sig.EntryPrice) * 100, 2);
+                            sig.StopLoss = sig.TakeProfit1; // Trailing stop to TP1
+                            var profitPct = Math.Round(((sig.EntryPrice - currentPrice) / sig.EntryPrice) * 100, 2);
+                            sig.ProfitPercentAchieved = profitPct;
                             await unitOfWork.Signals.UpdateAsync(sig);
                             await unitOfWork.SaveChangesAsync(stoppingToken);
-                            await _telegramService.SendOutcomeAlertAsync(sig, "Hədəf 2 (TP2)", currentPrice, sig.ResultPercent.Value);
+                            await _telegramService.SendOutcomeAlertAsync(sig, "Hədəf 2 (TP2)", currentPrice, profitPct);
                         }
                         // Short TP1 Hit
-                        else if (currentPrice <= sig.TakeProfit1 && !sig.OutcomeAlertSent)
+                        else if (currentPrice <= sig.TakeProfit1 && !sig.Tp1Notified)
                         {
                             sig.Tp1Notified = true;
-                            sig.OutcomeAlertSent = true;
-                            sig.IsClosed = true;
-                            sig.Status = SignalStatus.Success;
-                            sig.OutcomeStatus = "Hədəf 1 (TP1) (UĞURLU) ✅";
-                            sig.ClosePrice = currentPrice;
-                            sig.ClosedAt = DateTime.UtcNow;
-                            sig.ResultPercent = Math.Round(((sig.EntryPrice - currentPrice) / sig.EntryPrice) * 100, 2);
+                            sig.StopLoss = sig.EntryPrice; // Breakeven risk-free stop loss
+                            var profitPct = Math.Round(((sig.EntryPrice - currentPrice) / sig.EntryPrice) * 100, 2);
+                            sig.ProfitPercentAchieved = profitPct;
                             await unitOfWork.Signals.UpdateAsync(sig);
                             await unitOfWork.SaveChangesAsync(stoppingToken);
-                            await _telegramService.SendOutcomeAlertAsync(sig, "Hədəf 1 (TP1)", currentPrice, sig.ResultPercent.Value);
+                            await _telegramService.SendOutcomeAlertAsync(sig, "Hədəf 1 (TP1)", currentPrice, profitPct);
                         }
-                        // Short Stop Loss Hit
+                        // Short Stop Loss or Breakeven Hit
                         else if (currentPrice >= sig.StopLoss && !sig.OutcomeAlertSent)
                         {
                             sig.OutcomeAlertSent = true;
                             sig.IsClosed = true;
-                            sig.Status = SignalStatus.Failed;
-                            sig.OutcomeStatus = "Stop Loss (SL) (UĞURSUZ) ❌";
                             sig.ClosePrice = currentPrice;
                             sig.ClosedAt = DateTime.UtcNow;
-                            var pct = Math.Round(((currentPrice - sig.EntryPrice) / sig.EntryPrice) * 100, 2);
-                            sig.ResultPercent = -Math.Abs(pct);
-                            await unitOfWork.Signals.UpdateAsync(sig);
-                            await unitOfWork.SaveChangesAsync(stoppingToken);
-                            await _telegramService.SendOutcomeAlertAsync(sig, "Stop Loss (SL)", currentPrice, sig.ResultPercent.Value);
+
+                            if (sig.Tp1Notified)
+                            {
+                                // Breakeven exit: Stop loss was lowered to EntryPrice or TP1
+                                sig.Status = SignalStatus.Success;
+                                var pnl = sig.Tp2Notified
+                                    ? Math.Round(((sig.EntryPrice - sig.TakeProfit1) / sig.EntryPrice) * 100, 2)
+                                    : 0.0m;
+                                sig.ResultPercent = pnl;
+                                sig.OutcomeStatus = "Giriş Qiymətində Bağlandı (Breakeven - Qorundu) ✅";
+                                await unitOfWork.Signals.UpdateAsync(sig);
+                                await unitOfWork.SaveChangesAsync(stoppingToken);
+                                await _telegramService.SendOutcomeAlertAsync(sig, "Breakeven", currentPrice, pnl);
+                            }
+                            else
+                            {
+                                // Genuine Stop Loss exit
+                                sig.Status = SignalStatus.Failed;
+                                sig.OutcomeStatus = "Stop Loss (SL) (UĞURSUZ) ❌";
+                                var pct = Math.Round(((currentPrice - sig.EntryPrice) / sig.EntryPrice) * 100, 2);
+                                sig.ResultPercent = -Math.Abs(pct);
+                                await unitOfWork.Signals.UpdateAsync(sig);
+                                await unitOfWork.SaveChangesAsync(stoppingToken);
+                                await _telegramService.SendOutcomeAlertAsync(sig, "Stop Loss (SL)", currentPrice, sig.ResultPercent.Value);
+                            }
                         }
-                        // Short Candle Expiration
-                        else if (isExpired && !sig.OutcomeAlertSent)
+                        // Short Safety Timeout
+                        else if (isMaxTimeReached && !sig.OutcomeAlertSent)
                         {
                             sig.OutcomeAlertSent = true;
                             sig.IsClosed = true;
@@ -290,10 +316,18 @@ namespace CryptoSense.Worker
                             var pct = Math.Round(((sig.EntryPrice - currentPrice) / sig.EntryPrice) * 100, 2);
                             sig.ResultPercent = pct;
 
-                            sig.Status = pct > 0 ? SignalStatus.Success : SignalStatus.Failed;
-                            sig.OutcomeStatus = pct > 0
-                                ? $"{sig.Timeframe} Müddəti Bitdi (Qazancla Bağlandı: +{pct}%) ✅"
-                                : $"{sig.Timeframe} Müddəti Bitdi (Hədəfə Çatmadı) ❌";
+                            if (sig.Tp1Notified)
+                            {
+                                sig.Status = SignalStatus.Success;
+                                sig.OutcomeStatus = $"{sig.Timeframe} Müddəti Tamamlandı (Qazancla Qorundu: +{pct}%) ✅";
+                            }
+                            else
+                            {
+                                sig.Status = pct > 0 ? SignalStatus.Success : SignalStatus.Failed;
+                                sig.OutcomeStatus = pct > 0
+                                    ? $"{sig.Timeframe} Müddəti Tamamlandı (Qazancla Bağlandı: +{pct}%) ✅"
+                                    : $"{sig.Timeframe} Müddəti Tamamlandı (Hədəfə Çatmadı) ❌";
+                            }
 
                             await unitOfWork.Signals.UpdateAsync(sig);
                             await unitOfWork.SaveChangesAsync(stoppingToken);
