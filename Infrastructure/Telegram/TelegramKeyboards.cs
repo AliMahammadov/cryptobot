@@ -15,11 +15,10 @@ namespace CryptoSense.Infrastructure.Telegram
                     keyboard = new[]
                     {
                         new[] { new { text = "👑 Admin Paneli" }, new { text = "🧭 Bitcoin Kompası" } },
-                        new[] { new { text = "⚡ Bütün Siqnallar" }, new { text = "⭐ Mənim Coinlərim" } },
-                        new[] { new { text = "📊 Statistika" }, new { text = "📰 Bazar Xəbərləri" } },
+                        new[] { new { text = "⭐ Mənim Coinlərim" }, new { text = "⚡ Bütün Siqnallar" } },
                         new[] { new { text = "⚙️ Coin Seçimi" }, new { text = "🗑 Coin Sil" } },
-                        new[] { new { text = "⏱ Zaman Çərçivəsi" }, new { text = "🧹 Siqnalları Sıfırla" } },
-                        new[] { new { text = toggleBtn } }
+                        new[] { new { text = "📊 Statistika" }, new { text = "📰 Bazar Xəbərləri" } },
+                        new[] { new { text = toggleBtn }, new { text = "🧹 Siqnalları Sıfırla" } }
                     },
                     resize_keyboard = true,
                     one_time_keyboard = false
@@ -30,11 +29,11 @@ namespace CryptoSense.Infrastructure.Telegram
             {
                 keyboard = new[]
                 {
-                    new[] { new { text = "🧭 Bitcoin Kompası" }, new { text = "⚡ Bütün Siqnallar" } },
-                    new[] { new { text = "⭐ Mənim Coinlərim" }, new { text = "📊 Statistika" } },
+                    new[] { new { text = "⭐ Mənim Coinlərim" }, new { text = "🧭 Bitcoin Kompası" } },
                     new[] { new { text = "⚙️ Coin Seçimi" }, new { text = "🗑 Coin Sil" } },
-                    new[] { new { text = "⏱ Zaman Çərçivəsi" }, new { text = "🧹 Siqnalları Sıfırla" } },
-                    new[] { new { text = toggleBtn }, new { text = "📰 Bazar Xəbərləri" } }
+                    new[] { new { text = "⚡ Bütün Siqnallar" }, new { text = "📊 Statistika" } },
+                    new[] { new { text = toggleBtn }, new { text = "🧹 Siqnalları Sıfırla" } },
+                    new[] { new { text = "📰 Bazar Xəbərləri" } }
                 },
                 resize_keyboard = true,
                 one_time_keyboard = false
@@ -79,9 +78,10 @@ namespace CryptoSense.Infrastructure.Telegram
             {
                 keyboard = new[]
                 {
-                    new[] { new { text = "⏱ 3 Dəqiqə (3m)" }, new { text = "⏱ 5 Dəqiqə (5m)" } },
-                    new[] { new { text = "⏱ 15 Dəqiqə (15m)" }, new { text = "⏱ 1 Saat (1h)" } },
-                    new[] { new { text = "⏱ 4 Saat (4h)" }, new { text = "🌟 Bütün Zamanlar (Hamısı)" } },
+                    new[] { new { text = "⏱ 1 Dəqiqə (1m)" }, new { text = "⏱ 3 Dəqiqə (3m)" } },
+                    new[] { new { text = "⏱ 5 Dəqiqə (5m)" }, new { text = "⏱ 15 Dəqiqə (15m)" } },
+                    new[] { new { text = "⏱ 1 Saat (1h)" }, new { text = "⏱ 4 Saat (4h)" } },
+                    new[] { new { text = "🌟 Bütün Zamanlar (Hamısı)" } },
                     new[] { new { text = "⬅️ Əsas Menyu" } }
                 },
                 resize_keyboard = true,

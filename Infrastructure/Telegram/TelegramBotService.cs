@@ -368,6 +368,36 @@ namespace CryptoSense.Infrastructure.Telegram
             await SendMessageAsync(msg, SuperAdminChatId);
         }
 
+        private async Task ScanUserCoinsInstantlyAsync(UserSettings userSettings, string chatId, string timeframe)
+        {
+            if (userSettings.Coins.Count == 0) return;
+            var scanTf = (timeframe == "Hamısı" || timeframe == "Hamisi") ? "3m" : timeframe;
+            using var scope = _serviceProvider.CreateScope();
+            var signalEngine = scope.ServiceProvider.GetRequiredService<ISignalEngine>();
+
+            await SendMessageAsync($"⏳ <i>Seçilmiş coinləriniz ({scanTf}) dərhal skan edilir...</i>", chatId);
+            int signalsFound = 0;
+            foreach (var sym in userSettings.Coins)
+            {
+                try
+                {
+                    var sig = await signalEngine.AnalyzeCoinAsync(sym, scanTf, isLiveScan: false);
+                    if (sig.Confidence >= 78 && (sig.SignalType.Contains("LONG") || sig.SignalType.Contains("SHORT")))
+                    {
+                        await SendSignalAlertAsync(sig, chatId);
+                        signalsFound++;
+                        await Task.Delay(200);
+                    }
+                }
+                catch { }
+            }
+
+            if (signalsFound == 0)
+            {
+                await SendMessageAsync($"ℹ️ <i>Hal-hazırda seçdiyiniz coinlərdə {scanTf} şamında 78%+ Confluence siqnalı yoxdur. Bazar canlı izlənilir, ilk güclü fürsət yaranan kimi dərhal bildiriş alacaqsınız!</i>", chatId);
+            }
+        }
+
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
             if (string.IsNullOrWhiteSpace(_config.TelegramBotToken)) return;
@@ -867,52 +897,109 @@ namespace CryptoSense.Infrastructure.Telegram
             }
 
             // DIRECT TIMEFRAME PREFERENCE SELECTION
-            if (text == "⏱ 3 Dəqiqə (3m)" || text == "3m")
+            if (text == "⏱ 1 Dəqiqə (1m)" || text == "1m")
             {
-                userSettings.Timeframe = "3m";
+                userSettings.Timeframe = "1m";
+                userSettings.IsActive = true;
                 userSettings.LastResumeTime = DateTime.UtcNow;
                 SaveSettings();
-                await SendMessageAsync($"✅ <b>Zaman Çərçivəsi Təyin Edildi:</b> <code>3m</code>\n<i>Artıq yalnız 3m siqnalları alacaqsınız.</i>", chatId, TelegramKeyboards.BuildUserKeyboard(userSettings, isAdmin));
+                var cleanList = userSettings.Coins.Count > 0 ? string.Join(", ", userSettings.Coins.Select(c => c.Replace("USDT", ""))) : "Bütün bazar";
+                await SendMessageAsync($"🚀 <b>Ticarət Sistemi Başladı! 🟢</b>\n\n" +
+                                       $"⏱ Zaman Çərçivəsi: <code>1m</code>\n" +
+                                       $"🪙 Ticarət Aparılan Coinlər ({userSettings.Coins.Count} ədəd):\n<code>{cleanList}</code>\n\n" +
+                                       $"✅ <b>Sistem artıq YALNIZ VƏ YALNIZ seçdiyiniz bu coinlər üzrə 1m şamlarında canlı skan və ticarət siqnallarına başladı!</b>\n" +
+                                       $"<i>Kənar coindən siqnal gəlməyəcək.</i>", chatId, TelegramKeyboards.BuildUserKeyboard(userSettings, isAdmin));
+                await ScanUserCoinsInstantlyAsync(userSettings, chatId, "1m");
+                return;
+            }
+            else if (text == "⏱ 3 Dəqiqə (3m)" || text == "3m")
+            {
+                userSettings.Timeframe = "3m";
+                userSettings.IsActive = true;
+                userSettings.LastResumeTime = DateTime.UtcNow;
+                SaveSettings();
+                var cleanList = userSettings.Coins.Count > 0 ? string.Join(", ", userSettings.Coins.Select(c => c.Replace("USDT", ""))) : "Bütün bazar";
+                await SendMessageAsync($"🚀 <b>Ticarət Sistemi Başladı! 🟢</b>\n\n" +
+                                       $"⏱ Zaman Çərçivəsi: <code>3m</code>\n" +
+                                       $"🪙 Ticarət Aparılan Coinlər ({userSettings.Coins.Count} ədəd):\n<code>{cleanList}</code>\n\n" +
+                                       $"✅ <b>Sistem artıq YALNIZ VƏ YALNIZ seçdiyiniz bu coinlər üzrə 3m şamlarında canlı skan və ticarət siqnallarına başladı!</b>\n" +
+                                       $"<i>Kənar coindən siqnal gəlməyəcək.</i>", chatId, TelegramKeyboards.BuildUserKeyboard(userSettings, isAdmin));
+                await ScanUserCoinsInstantlyAsync(userSettings, chatId, "3m");
                 return;
             }
             else if (text == "⏱ 5 Dəqiqə (5m)" || text == "5m")
             {
                 userSettings.Timeframe = "5m";
+                userSettings.IsActive = true;
                 userSettings.LastResumeTime = DateTime.UtcNow;
                 SaveSettings();
-                await SendMessageAsync($"✅ <b>Zaman Çərçivəsi Təyin Edildi:</b> <code>5m</code>\n<i>Artıq yalnız 5m siqnalları alacaqsınız.</i>", chatId, TelegramKeyboards.BuildUserKeyboard(userSettings, isAdmin));
+                var cleanList = userSettings.Coins.Count > 0 ? string.Join(", ", userSettings.Coins.Select(c => c.Replace("USDT", ""))) : "Bütün bazar";
+                await SendMessageAsync($"🚀 <b>Ticarət Sistemi Başladı! 🟢</b>\n\n" +
+                                       $"⏱ Zaman Çərçivəsi: <code>5m</code>\n" +
+                                       $"🪙 Ticarət Aparılan Coinlər ({userSettings.Coins.Count} ədəd):\n<code>{cleanList}</code>\n\n" +
+                                       $"✅ <b>Sistem artıq YALNIZ VƏ YALNIZ seçdiyiniz bu coinlər üzrə 5m şamlarında canlı skan və ticarət siqnallarına başladı!</b>\n" +
+                                       $"<i>Kənar coindən siqnal gəlməyəcək.</i>", chatId, TelegramKeyboards.BuildUserKeyboard(userSettings, isAdmin));
+                await ScanUserCoinsInstantlyAsync(userSettings, chatId, "5m");
                 return;
             }
             else if (text == "⏱ 15 Dəqiqə (15m)" || text == "15m")
             {
                 userSettings.Timeframe = "15m";
+                userSettings.IsActive = true;
                 userSettings.LastResumeTime = DateTime.UtcNow;
                 SaveSettings();
-                await SendMessageAsync($"✅ <b>Zaman Çərçivəsi Təyin Edildi:</b> <code>15m</code>\n<i>Artıq yalnız 15m siqnalları alacaqsınız.</i>", chatId, TelegramKeyboards.BuildUserKeyboard(userSettings, isAdmin));
+                var cleanList = userSettings.Coins.Count > 0 ? string.Join(", ", userSettings.Coins.Select(c => c.Replace("USDT", ""))) : "Bütün bazar";
+                await SendMessageAsync($"🚀 <b>Ticarət Sistemi Başladı! 🟢</b>\n\n" +
+                                       $"⏱ Zaman Çərçivəsi: <code>15m</code>\n" +
+                                       $"🪙 Ticarət Aparılan Coinlər ({userSettings.Coins.Count} ədəd):\n<code>{cleanList}</code>\n\n" +
+                                       $"✅ <b>Sistem artıq YALNIZ VƏ YALNIZ seçdiyiniz bu coinlər üzrə 15m şamlarında canlı skan və ticarət siqnallarına başladı!</b>\n" +
+                                       $"<i>Kənar coindən siqnal gəlməyəcək.</i>", chatId, TelegramKeyboards.BuildUserKeyboard(userSettings, isAdmin));
+                await ScanUserCoinsInstantlyAsync(userSettings, chatId, "15m");
                 return;
             }
             else if (text == "⏱ 1 Saat (1h)" || text == "1h")
             {
                 userSettings.Timeframe = "1h";
+                userSettings.IsActive = true;
                 userSettings.LastResumeTime = DateTime.UtcNow;
                 SaveSettings();
-                await SendMessageAsync($"✅ <b>Zaman Çərçivəsi Təyin Edildi:</b> <code>1h</code>\n<i>Artıq yalnız 1h siqnalları alacaqsınız.</i>", chatId, TelegramKeyboards.BuildUserKeyboard(userSettings, isAdmin));
+                var cleanList = userSettings.Coins.Count > 0 ? string.Join(", ", userSettings.Coins.Select(c => c.Replace("USDT", ""))) : "Bütün bazar";
+                await SendMessageAsync($"🚀 <b>Ticarət Sistemi Başladı! 🟢</b>\n\n" +
+                                       $"⏱ Zaman Çərçivəsi: <code>1h</code>\n" +
+                                       $"🪙 Ticarət Aparılan Coinlər ({userSettings.Coins.Count} ədəd):\n<code>{cleanList}</code>\n\n" +
+                                       $"✅ <b>Sistem artıq YALNIZ VƏ YALNIZ seçdiyiniz bu coinlər üzrə 1h şamlarında canlı skan və ticarət siqnallarına başladı!</b>\n" +
+                                       $"<i>Kənar coindən siqnal gəlməyəcək.</i>", chatId, TelegramKeyboards.BuildUserKeyboard(userSettings, isAdmin));
+                await ScanUserCoinsInstantlyAsync(userSettings, chatId, "1h");
                 return;
             }
             else if (text == "⏱ 4 Saat (4h)" || text == "4h")
             {
                 userSettings.Timeframe = "4h";
+                userSettings.IsActive = true;
                 userSettings.LastResumeTime = DateTime.UtcNow;
                 SaveSettings();
-                await SendMessageAsync($"✅ <b>Zaman Çərçivəsi Təyin Edildi:</b> <code>4h</code>\n<i>Artıq yalnız 4h siqnalları alacaqsınız.</i>", chatId, TelegramKeyboards.BuildUserKeyboard(userSettings, isAdmin));
+                var cleanList = userSettings.Coins.Count > 0 ? string.Join(", ", userSettings.Coins.Select(c => c.Replace("USDT", ""))) : "Bütün bazar";
+                await SendMessageAsync($"🚀 <b>Ticarət Sistemi Başladı! 🟢</b>\n\n" +
+                                       $"⏱ Zaman Çərçivəsi: <code>4h</code>\n" +
+                                       $"🪙 Ticarət Aparılan Coinlər ({userSettings.Coins.Count} ədəd):\n<code>{cleanList}</code>\n\n" +
+                                       $"✅ <b>Sistem artıq YALNIZ VƏ YALNIZ seçdiyiniz bu coinlər üzrə 4h şamlarında canlı skan və ticarət siqnallarına başladı!</b>\n" +
+                                       $"<i>Kənar coindən siqnal gəlməyəcək.</i>", chatId, TelegramKeyboards.BuildUserKeyboard(userSettings, isAdmin));
+                await ScanUserCoinsInstantlyAsync(userSettings, chatId, "4h");
                 return;
             }
             else if (text == "🌟 Bütün Zamanlar (Hamısı)" || text == "Hamisi" || text == "Hamısı")
             {
                 userSettings.Timeframe = "Hamısı";
+                userSettings.IsActive = true;
                 userSettings.LastResumeTime = DateTime.UtcNow;
                 SaveSettings();
-                await SendMessageAsync($"✅ <b>Zaman Çərçivəsi Təyin Edildi:</b> <code>Hamısı</code>", chatId, TelegramKeyboards.BuildUserKeyboard(userSettings, isAdmin));
+                var cleanList = userSettings.Coins.Count > 0 ? string.Join(", ", userSettings.Coins.Select(c => c.Replace("USDT", ""))) : "Bütün bazar";
+                await SendMessageAsync($"🚀 <b>Ticarət Sistemi Başladı! 🟢</b>\n\n" +
+                                       $"⏱ Zaman Çərçivəsi: <code>Bütün Zamanlar (Hamısı)</code>\n" +
+                                       $"🪙 Ticarət Aparılan Coinlər ({userSettings.Coins.Count} ədəd):\n<code>{cleanList}</code>\n\n" +
+                                       $"✅ <b>Sistem artıq YALNIZ VƏ YALNIZ seçdiyiniz bu coinlər üzrə bütün şamlarda canlı skan və ticarət siqnallarına başladı!</b>\n" +
+                                       $"<i>Kənar coindən siqnal gəlməyəcək.</i>", chatId, TelegramKeyboards.BuildUserKeyboard(userSettings, isAdmin));
+                await ScanUserCoinsInstantlyAsync(userSettings, chatId, "3m");
                 return;
             }
             else if (text.Contains("Geri") || text.Contains("Əsas Menyu") || text == "/menu")
@@ -1004,47 +1091,24 @@ namespace CryptoSense.Infrastructure.Telegram
             {
                 if (userSettings.Coins.Count == 0)
                 {
-                    var emptyMsg = "⭐ <b>Sizin Seçilmiş Coinləriniz (0/10 ədəd)</b>\n\n" +
-                                   "Hal-hazırda siyahınız <b>boşdur</b>.\n\n" +
-                                   "İzləmək istədiyiniz coinləri əlavə etmək üçün <b>⚙️ Coin Seçimi</b> düyməsinə vurun və coinlərin adını yazın (Maksimum 10 ədəd).\n\n" +
-                                   "📌 <b>Məsələn:</b> <code>SOL, BTC, ETH, DOGE</code>";
+                    var emptyMsg = "⭐ <b>Mənim Coinlərimlə Ticarət Rejimi (0/10 ədəd)</b>\n\n" +
+                                   "⚠️ Hal-hazırda ticarət üçün heç bir coin seçməmisiniz.\n\n" +
+                                   "Zəhmət olmasa əvvəlcə <b>⚙️ Coin Seçimi</b> düyməsinə vurub ticarət aparmaq istədiyiniz coinləri əlavə edin.\n\n" +
+                                   "📌 <b>Məsələn:</b> <code>SOL, BTC, ETH, DOGE</code> (Maksimum 10 ədəd)";
                     await SendMessageAsync(emptyMsg, chatId, TelegramKeyboards.BuildUserKeyboard(userSettings, isAdmin));
                     return;
                 }
 
-                var tf = (userSettings.Timeframe == "Hamısı" || userSettings.Timeframe == "Hamisi") ? "3m" : userSettings.Timeframe;
-                await SendMessageAsync($"⏳ Seçdiyiniz {userSettings.Coins.Count} coin üzrə ({tf}) analizi aparılır...", chatId);
+                var cleanList = string.Join(", ", userSettings.Coins.Select(c => c.Replace("USDT", "")));
+                var prompt = "⭐ <b>Mənim Coinlərimlə Ticarət Sistemi</b>\n\n" +
+                             $"🎯 <b>Ticarət Üçün Seçilmiş Coinləriniz ({userSettings.Coins.Count} ədəd):</b>\n" +
+                             $"<code>{cleanList}</code>\n\n" +
+                             $"Cari rejim: <b>{(userSettings.IsActive ? "AKTİV 🟢" : "DAYANDIRILIB 🔴")}</b> | Cari Zaman: <b>{userSettings.Timeframe}</b>\n\n" +
+                             "⏱ <b>Hansı zaman çərçivəsində ticarət/siqnal axınına başlamaq istəyirsiniz?</b>\n" +
+                             "<i>Aşağıdakı zaman kəsiklərindən birini seçin:</i>";
 
-                var sb = new StringBuilder();
-                sb.AppendLine("⭐ <b>Mənim Coinlərim - Canlı Kvantitativ Analiz</b>");
-                sb.AppendLine($"Cəmi: <b>{userSettings.Coins.Count}/10 ədəd</b> | Aktiv Zaman: <b>{userSettings.Timeframe}</b>");
-                sb.AppendLine("-----------------------------------");
-
-                foreach (var sym in userSettings.Coins)
-                {
-                    var sig = await signalEngine.AnalyzeCoinAsync(sym, tf);
-                    var cleanSym = sym.Replace("USDT", "");
-                    var trendIcon = sig.SignalType.Contains("LONG") ? "🟢 YÜKSƏLİŞ" : (sig.SignalType.Contains("SHORT") ? "🔴 ENİŞ" : "⚪ NEYTRAL");
-                    sb.AppendLine($"• <b>{cleanSym}</b> (${sig.CurrentPrice}) — {trendIcon} (Confluence: {sig.ConfluenceScore}%)");
-
-                    if (sig.Confidence >= 78 && (sig.SignalType.Contains("LONG") || sig.SignalType.Contains("SHORT")))
-                    {
-                        await SendSignalAlertAsync(sig, chatId);
-                        await Task.Delay(200);
-                    }
-                }
-                sb.AppendLine("-----------------------------------");
-                sb.AppendLine("Yeni coin əlavə etmək üçün: <b>⚙️ Coin Seçimi</b>");
-                sb.AppendLine("Coini siyahıdan silmək üçün: <b>🗑 Coin Sil</b>");
-
-                await SendMessageAsync(sb.ToString(), chatId, TelegramKeyboards.BuildUserKeyboard(userSettings, isAdmin));
-            }
-            else if (text.Contains("Zaman Çərçivəsi") || text.Contains("Zaman") || text == "/tf")
-            {
-                var tfPanelMsg = "⏱ <b>Zaman Çərçivəsi Paneli</b>\n\n" +
-                                 "Hal-hazırda təyin edilmiş: <b>" + userSettings.Timeframe + "</b>\n\n" +
-                                 "Seçmək istədiyiniz yeni zamanı aşağıdakı paneldən seçin:";
-                await SendMessageAsync(tfPanelMsg, chatId, TelegramKeyboards.BuildTimeframeKeyboard());
+                await SendMessageAsync(prompt, chatId, TelegramKeyboards.BuildTimeframeKeyboard());
+                return;
             }
             else if (text.Contains("Coin Sil") || text == "/delcoin")
             {
