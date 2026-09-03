@@ -836,7 +836,10 @@ namespace CryptoSense.Infrastructure.Telegram
 
                 foreach (var p in parts)
                 {
-                    var coinToDel = p.ToUpper();
+                    var clean = p.Trim().ToUpper();
+                    if (clean.Length < 2 || clean.Length > 10) continue;
+                    if (!System.Text.RegularExpressions.Regex.IsMatch(clean, @"^[A-Z0-9]+$")) continue;
+                    var coinToDel = clean;
                     if (!coinToDel.EndsWith("USDT")) coinToDel += "USDT";
 
                     if (userSettings.Coins.Contains(coinToDel))
@@ -846,7 +849,7 @@ namespace CryptoSense.Infrastructure.Telegram
                     }
                     else
                     {
-                        notFoundCoins.Add(p.ToUpper().Replace("USDT", ""));
+                        notFoundCoins.Add(clean.Replace("USDT", ""));
                     }
                 }
 

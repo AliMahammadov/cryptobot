@@ -177,6 +177,7 @@ namespace CryptoSense.Application.Services
                     (telegramUserId.HasValue && u.TelegramUserId == telegramUserId.Value))
                 {
                     u.TelegramChatId = "";
+                    u.TelegramUserId = null;
                     await _unitOfWork.Users.UpdateAsync(u);
                 }
             }
