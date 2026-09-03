@@ -16,10 +16,10 @@ namespace CryptoSense.Infrastructure.Telegram
                     {
                         new[] { new { text = "👑 Admin Paneli" }, new { text = "🧭 Bitcoin Kompası" } },
                         new[] { new { text = "⚡ Bütün Siqnallar" }, new { text = "⭐ Mənim Coinlərim" } },
-                        new[] { new { text = "📊 Statistika" }, new { text = "📈 Dərin Coin Statistikası" } },
+                        new[] { new { text = "📊 Statistika" }, new { text = "📰 Bazar Xəbərləri" } },
                         new[] { new { text = "⚙️ Coin Seçimi" }, new { text = "🗑 Coin Sil" } },
                         new[] { new { text = "⏱ Zaman Çərçivəsi" }, new { text = "🧹 Siqnalları Sıfırla" } },
-                        new[] { new { text = toggleBtn }, new { text = "📰 Bazar Xəbərləri" } }
+                        new[] { new { text = toggleBtn } }
                     },
                     resize_keyboard = true,
                     one_time_keyboard = false
@@ -32,10 +32,9 @@ namespace CryptoSense.Infrastructure.Telegram
                 {
                     new[] { new { text = "🧭 Bitcoin Kompası" }, new { text = "⚡ Bütün Siqnallar" } },
                     new[] { new { text = "⭐ Mənim Coinlərim" }, new { text = "📊 Statistika" } },
-                    new[] { new { text = "📈 Dərin Coin Statistikası" }, new { text = "📰 Bazar Xəbərləri" } },
                     new[] { new { text = "⚙️ Coin Seçimi" }, new { text = "🗑 Coin Sil" } },
                     new[] { new { text = "⏱ Zaman Çərçivəsi" }, new { text = "🧹 Siqnalları Sıfırla" } },
-                    new[] { new { text = toggleBtn } }
+                    new[] { new { text = toggleBtn }, new { text = "📰 Bazar Xəbərləri" } }
                 },
                 resize_keyboard = true,
                 one_time_keyboard = false

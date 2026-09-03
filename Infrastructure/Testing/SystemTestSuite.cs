@@ -97,6 +97,27 @@ namespace CryptoSense.Infrastructure.Testing
                 return Task.FromResult(indicators.ConfluenceScore >= 0 && indicators.ConfluenceScore <= 100 && indicators.TrendScore >= 0);
             });
 
+            await AssertTest("Test 2b: Indicator Engine - Bearish Trend & SuperTrend Detection", () =>
+            {
+                var klines = new List<Kline>();
+                var baseTime = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() - (50 * 60 * 1000);
+                for (int i = 0; i < 50; i++)
+                {
+                    decimal price = 50000m - (i * 150m);
+                    klines.Add(new Kline
+                    {
+                        OpenTime = baseTime + (i * 60 * 1000),
+                        Open = price + 50,
+                        High = price + 80,
+                        Low = price - 100,
+                        Close = price,
+                        Volume = 1000 + (i * 20)
+                    });
+                }
+                var indicators = _indicatorEngine.CalculateIndicators(klines);
+                return Task.FromResult(indicators.SuperTrendVote == IndicatorVote.Bearish && indicators.EmaVote == IndicatorVote.Bearish);
+            });
+
             // 2. User Manager & Auth Tests
             await AssertTest("Test 3: Authentication - SuperAdmin Login ('Ali' / '23031999Am')", async () =>
             {

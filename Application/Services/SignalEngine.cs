@@ -22,6 +22,11 @@ namespace CryptoSense.Application.Services
         private static bool _initializedNumber = false;
         private static readonly object _lock = new();
 
+        private static BtcMarketCompass? _cachedBtcCompass;
+        private static DateTime _btcCompassCacheTime = DateTime.MinValue;
+        private static readonly SemaphoreSlim _btcCompassLock = new(1, 1);
+        private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, FuturesSignal> _recentCandleSignals = new();
+
         public SignalEngine(
             IMarketDataProvider marketData,
             IIndicatorEngine indicatorEngine,
@@ -64,49 +69,69 @@ namespace CryptoSense.Application.Services
 
         public async Task<BtcMarketCompass> GetBtcCompassAsync()
         {
-            var btcKlines = await _marketData.GetKlinesAsync("BTCUSDT", "15m", 60);
-            var compass = new BtcMarketCompass
+            if (_cachedBtcCompass != null && (DateTime.UtcNow - _btcCompassCacheTime).TotalSeconds < 25)
             {
-                TimestampFormatted = CryptoSense.Domain.Common.TimeHelper.NowFormatted
-            };
-
-            if (btcKlines.Count == 0) return compass;
-
-            var currentPrice = btcKlines.Last().Close;
-            var openPrice = btcKlines.First().Open;
-            compass.Price = currentPrice;
-            compass.Change24h = openPrice > 0 ? Math.Round(((currentPrice - openPrice) / openPrice) * 100, 2) : 0;
-
-            var indicators = _indicatorEngine.CalculateIndicators(btcKlines);
-            compass.Rsi15m = indicators.Rsi;
-            compass.EmaStructure = indicators.EmaTrend;
-
-            int score = 50;
-            if (indicators.EmaTrend.Contains("Bullish") || indicators.EmaTrend.Contains("Müsbət")) score += 20;
-            if (indicators.EmaTrend.Contains("Bearish") || indicators.EmaTrend.Contains("Mənfi")) score -= 20;
-            if (indicators.MacdHist > 0) score += 15;
-            else score -= 15;
-            if (indicators.Rsi >= 50 && indicators.Rsi <= 68) score += 15;
-            else if (indicators.Rsi < 48) score -= 15;
-
-            compass.BullishScore = Math.Clamp(score, 5, 95);
-            if (compass.BullishScore >= 60)
-            {
-                compass.Trend = "YÜKSƏLİŞ (BULLISH) 🟢";
-                compass.Summary = "Bitcoin 15m/1h strukturu güclüdür və dinamik dəstək səviyyəsi üzərindədir. Long əməliyyatlarına üstünlük verilir.";
-            }
-            else if (compass.BullishScore <= 40)
-            {
-                compass.Trend = "ENİŞ (BEARISH) 🔴";
-                compass.Summary = "Bitcoin satış təzyiqi altındadır və EMA xətlərinin altındadır. Short əməliyyatlarına üstünlük verilir.";
-            }
-            else
-            {
-                compass.Trend = "NEYTRAL (YAN HƏRƏKƏT) ⚪";
-                compass.Summary = "Bitcoin yan hərəkətdədir (konsolidasiya). Qısa scalping və dəqiq Stop-Loss tövsiyə olunur.";
+                return _cachedBtcCompass;
             }
 
-            return compass;
+            await _btcCompassLock.WaitAsync();
+            try
+            {
+                if (_cachedBtcCompass != null && (DateTime.UtcNow - _btcCompassCacheTime).TotalSeconds < 25)
+                {
+                    return _cachedBtcCompass;
+                }
+
+                var btcKlines = await _marketData.GetKlinesAsync("BTCUSDT", "15m", 60);
+                var compass = new BtcMarketCompass
+                {
+                    TimestampFormatted = CryptoSense.Domain.Common.TimeHelper.NowFormatted
+                };
+
+                if (btcKlines.Count == 0) return _cachedBtcCompass ?? compass;
+
+                var currentPrice = btcKlines.Last().Close;
+                var openPrice = btcKlines.First().Open;
+                compass.Price = currentPrice;
+                compass.Change24h = openPrice > 0 ? Math.Round(((currentPrice - openPrice) / openPrice) * 100, 2) : 0;
+
+                var indicators = _indicatorEngine.CalculateIndicators(btcKlines);
+                compass.Rsi15m = indicators.Rsi;
+                compass.EmaStructure = indicators.EmaTrend;
+
+                int score = 50;
+                if (indicators.EmaTrend.Contains("Bullish") || indicators.EmaTrend.Contains("Müsbət")) score += 20;
+                if (indicators.EmaTrend.Contains("Bearish") || indicators.EmaTrend.Contains("Mənfi")) score -= 20;
+                if (indicators.MacdHist > 0) score += 15;
+                else score -= 15;
+                if (indicators.Rsi >= 50 && indicators.Rsi <= 68) score += 15;
+                else if (indicators.Rsi < 48) score -= 15;
+
+                compass.BullishScore = Math.Clamp(score, 5, 95);
+                if (compass.BullishScore >= 60)
+                {
+                    compass.Trend = "YÜKSƏLİŞ (BULLISH) 🟢";
+                    compass.Summary = "Bitcoin 15m/1h strukturu güclüdür və dinamik dəstək səviyyəsi üzərindədir. Long əməliyyatlarına üstünlük verilir.";
+                }
+                else if (compass.BullishScore <= 40)
+                {
+                    compass.Trend = "ENİŞ (BEARISH) 🔴";
+                    compass.Summary = "Bitcoin satış təzyiqi altındadır və EMA xətlərinin altındadır. Short əməliyyatlarına üstünlük verilir.";
+                }
+                else
+                {
+                    compass.Trend = "NEYTRAL (YAN HƏRƏKƏT) ⚪";
+                    compass.Summary = "Bitcoin yan hərəkətdədir (konsolidasiya). Qısa scalping və dəqiq Stop-Loss tövsiyə olunur.";
+                }
+
+                _cachedBtcCompass = compass;
+                _btcCompassCacheTime = DateTime.UtcNow;
+                return compass;
+            }
+            finally
+            {
+                _btcCompassLock.Release();
+            }
         }
 
         public async Task<FuturesSignal> AnalyzeCoinAsync(string symbol, string timeframe = "15m", bool isLiveScan = false)
@@ -125,6 +150,22 @@ namespace CryptoSense.Application.Services
             var sourceCandleTime = closedCandle.Time;
             var currentPrice = klines.Last().Close;
 
+            var candleKey = $"{symbol}_{timeframe}_{sourceCandleTime:yyyyMMddHHmmss}";
+
+            // Check if existing signal for this candle already created (Physical Dedup)
+            var existingSignal = await _unitOfWork.Signals.GetExistingCandleSignalAsync(symbol, timeframe, sourceCandleTime);
+            if (existingSignal != null)
+            {
+                existingSignal.CurrentPrice = currentPrice;
+                return existingSignal;
+            }
+
+            if (_recentCandleSignals.TryGetValue(candleKey, out var cachedSig))
+            {
+                cachedSig.CurrentPrice = currentPrice;
+                return cachedSig;
+            }
+
             var btcCompass = await GetBtcCompassAsync();
             var macroOverview = await _marketData.GetMacroMarketOverviewAsync();
             var indicators = _indicatorEngine.CalculateIndicators(klines, btcCompass);
@@ -132,10 +173,11 @@ namespace CryptoSense.Application.Services
 
             var reasons = new List<string>();
 
-            // 1. Core Technical Indicators (EMA, MA, MACD)
+            // 1. Core Technical Indicators (EMA, MA, MACD, SuperTrend)
             reasons.Add($"EMA (20/50): ${indicators.Ema20} / ${indicators.Ema50} ({indicators.EmaTrend})");
             reasons.Add($"MA / SMA (20/50): ${indicators.Sma20} / ${indicators.Sma50} ({indicators.SmaTrend})");
             reasons.Add($"MACD (12,26,9): Hist={indicators.MacdHist:F4} ({indicators.MacdStatus})");
+            reasons.Add($"SuperTrend: ${indicators.SuperTrend} ({indicators.SuperTrendDirection})");
 
             // 2. Macro Dominance & BTC Compass
             reasons.Add($"Bitcoin Kompası: {btcCompass.Trend} ({btcCompass.BullishScore}%)");
@@ -149,23 +191,37 @@ namespace CryptoSense.Application.Services
             bool emaBullish = currentPrice > indicators.Ema20 && indicators.Ema20 >= indicators.Ema50;
             bool smaBullish = currentPrice > indicators.Sma20;
             bool macdBullish = indicators.MacdHist > 0 && indicators.Macd >= indicators.MacdSignal;
-            bool btcNotBearish = btcCompass.BullishScore >= 45;
+            bool superTrendBullish = indicators.SuperTrendVote == IndicatorVote.Bullish;
 
             bool emaBearish = currentPrice < indicators.Ema20 && indicators.Ema20 <= indicators.Ema50;
             bool smaBearish = currentPrice < indicators.Sma20;
             bool macdBearish = indicators.MacdHist < 0 && indicators.Macd <= indicators.MacdSignal;
-            bool btcNotBullish = btcCompass.BullishScore <= 55;
+            bool superTrendBearish = indicators.SuperTrendVote == IndicatorVote.Bearish;
 
-            // Long Setup: EMA Bullish + SMA Bullish + MACD Bullish + BTC not bearish
-            if (emaBullish && smaBullish && macdBullish && btcNotBearish)
+            bool isAltcoin = symbol != "BTCUSDT";
+            bool highBtcDominance = macroOverview.BtcDominance >= 56.0m;
+
+            // Altcoin / BTC logic:
+            // When BTC.D is high and rising, or BTC is weak, altcoins bleed -> Altcoin LONGs are blocked!
+            bool btcAllowsLong = isAltcoin 
+                ? (btcCompass.BullishScore >= 48 && !highBtcDominance)
+                : (btcCompass.BullishScore >= 45);
+
+            // Altcoin SHORTs are favored when BTC is weak or BTC dominance is high
+            bool btcAllowsShort = isAltcoin
+                ? (btcCompass.BullishScore <= 55 || highBtcDominance)
+                : (btcCompass.BullishScore <= 55);
+
+            // Long Setup: EMA Bullish + SMA Bullish + MACD Bullish + SuperTrend Bullish + BTC confirms
+            if (emaBullish && smaBullish && macdBullish && superTrendBullish && btcAllowsLong)
             {
                 direction = SignalDirection.Buy;
                 determinedType = "GÜCLÜ LONG (ALIŞ) 🟢";
                 confidence = Math.Clamp((int)indicators.ConfluenceScore, 78, 96);
                 if (confidence < 80) confidence = 80;
             }
-            // Short Setup: EMA Bearish + SMA Bearish + MACD Bearish + BTC not bullish
-            else if (emaBearish && smaBearish && macdBearish && btcNotBullish)
+            // Short Setup: EMA Bearish + SMA Bearish + MACD Bearish + SuperTrend Bearish + BTC confirms
+            else if (emaBearish && smaBearish && macdBearish && superTrendBearish && btcAllowsShort)
             {
                 direction = SignalDirection.Sell;
                 determinedType = "GÜCLÜ SHORT (SATIŞ) 🔴";
@@ -173,17 +229,17 @@ namespace CryptoSense.Application.Services
                 if (confidence < 80) confidence = 80;
             }
             // Secondary High-Confluence confirmation
-            else if (indicators.ConfluenceScore >= 80m && btcNotBearish && indicators.MacdHist >= 0)
+            else if (indicators.ConfluenceScore >= 75m && btcAllowsLong && indicators.MacdHist >= 0 && superTrendBullish)
             {
                 direction = SignalDirection.Buy;
                 determinedType = "GÜCLÜ LONG (ALIŞ) 🟢";
-                confidence = (int)indicators.ConfluenceScore;
+                confidence = Math.Clamp((int)indicators.ConfluenceScore, 75, 92);
             }
-            else if (indicators.ConfluenceScore <= 20m && btcNotBullish && indicators.MacdHist <= 0)
+            else if (indicators.ConfluenceScore <= 25m && btcAllowsShort && indicators.MacdHist <= 0 && superTrendBearish)
             {
                 direction = SignalDirection.Sell;
                 determinedType = "GÜCLÜ SHORT (SATIŞ) 🔴";
-                confidence = (int)(100m - indicators.ConfluenceScore);
+                confidence = Math.Clamp((int)(100m - indicators.ConfluenceScore), 75, 92);
             }
 
             decimal directionalConfluence = direction == SignalDirection.Sell 
@@ -205,7 +261,7 @@ namespace CryptoSense.Application.Services
             decimal minRisk = currentPrice * minTfMultiplier;
             if (atr < minRisk) atr = minRisk;
 
-            var durationMinutes = timeframe switch
+            int durationMinutes = timeframe switch
             {
                 "1m" => 1,
                 "3m" => 3,
@@ -216,26 +272,14 @@ namespace CryptoSense.Application.Services
                 _ => 15
             };
 
-            // Check if existing signal for this candle already created (Physical Dedup)
-            var existingSignal = await _unitOfWork.Signals.GetExistingCandleSignalAsync(symbol, timeframe, sourceCandleTime);
-
-            if (existingSignal != null)
-            {
-                existingSignal.CurrentPrice = currentPrice;
-                existingSignal.Indicators = indicators;
-                existingSignal.BtcCompass = btcCompass;
-                existingSignal.AnalysisReasons = reasons;
-                existingSignal.ConfluenceScore = directionalConfluence;
-                return existingSignal;
-            }
-
-            int sigNumber = Interlocked.Increment(ref _nextSignalNumber);
+            bool isTradeSignal = determinedType.Contains("LONG") || determinedType.Contains("SHORT");
+            int sigNumber = isTradeSignal ? Interlocked.Increment(ref _nextSignalNumber) : 0;
 
             var newSignal = new FuturesSignal
             {
                 SignalNumber = sigNumber,
                 Symbol = symbol,
-                Direction = direction,
+                Direction = isTradeSignal ? direction : SignalDirection.Buy,
                 SignalType = determinedType,
                 Timeframe = timeframe,
                 EntryPrice = currentPrice,
@@ -243,7 +287,7 @@ namespace CryptoSense.Application.Services
                 ConfluenceScore = directionalConfluence,
                 Confidence = confidence,
                 Status = SignalStatus.Open,
-                OutcomeStatus = "AKTİV 🟡",
+                OutcomeStatus = isTradeSignal ? "AKTİV 🟡" : "NEYTRAL ⚪",
                 SourceCandleOpenTimeUtc = sourceCandleTime,
                 GeneratedAt = DateTime.UtcNow,
                 ExpiryTimeUtc = DateTime.UtcNow.AddMinutes(durationMinutes),
@@ -272,6 +316,8 @@ namespace CryptoSense.Application.Services
                 newSignal.TakeProfit3 = RoundToCoinPrecision(currentPrice, currentPrice - (atr * 2.8m));
                 newSignal.StopLoss = RoundToCoinPrecision(currentPrice, currentPrice + (atr * 1.2m));
             }
+
+            _recentCandleSignals[candleKey] = newSignal;
 
             // Create indicator snapshots
             newSignal.IndicatorSnapshots = new List<SignalIndicatorSnapshot>

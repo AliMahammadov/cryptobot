@@ -278,10 +278,11 @@ namespace CryptoSense.Application.Services
                 if (klines[i].High < klines[i - 2].Low) res.HasBearishFvg = true;
             }
 
-            // 17. Core Confluence Scoring (User-specified EMA, MA, MACD architecture)
+            // 17. Core Confluence Scoring (User-specified EMA, MA, MACD & SuperTrend architecture)
             decimal emaScore = res.EmaVote == IndicatorVote.Bullish ? 1.0m : (res.EmaVote == IndicatorVote.Bearish ? -1.0m : 0.0m);
             decimal smaScore = res.SmaVote == IndicatorVote.Bullish ? 1.0m : (res.SmaVote == IndicatorVote.Bearish ? -1.0m : 0.0m);
-            res.TrendScore = Math.Round((emaScore * 0.50m) + (smaScore * 0.50m), 3);
+            decimal stScore = res.SuperTrendVote == IndicatorVote.Bullish ? 1.0m : (res.SuperTrendVote == IndicatorVote.Bearish ? -1.0m : 0.0m);
+            res.TrendScore = Math.Round((emaScore * 0.40m) + (smaScore * 0.35m) + (stScore * 0.25m), 3);
 
             decimal macdScore = res.MacdVote == IndicatorVote.Bullish ? 1.0m : (res.MacdVote == IndicatorVote.Bearish ? -1.0m : 0.0m);
             decimal rsiScore = res.RsiVote == IndicatorVote.Bullish ? 1.0m : (res.RsiVote == IndicatorVote.Bearish ? -1.0m : 0.0m);
@@ -294,7 +295,7 @@ namespace CryptoSense.Application.Services
             decimal volScore = res.VolumeVote == IndicatorVote.Bullish ? 1.0m : (res.VolumeVote == IndicatorVote.Bearish ? -1.0m : 0.0m);
             res.VolumeScore = Math.Round((obvScore * 0.50m) + (volScore * 0.50m), 3);
 
-            // 45% Trend (EMA + MA) + 40% Momentum (MACD) + 15% Volume & Volatility
+            // 45% Trend (EMA + MA + SuperTrend) + 40% Momentum (MACD + RSI) + 15% Volume & Volatility
             decimal rawScore = (res.TrendScore * 0.45m) + (res.MomentumScore * 0.40m) + (res.VolatilityScore * 0.05m) + (res.VolumeScore * 0.10m);
 
             decimal mtfFactor = 1.0m;
@@ -455,7 +456,7 @@ namespace CryptoSense.Application.Services
 
         public (decimal Adx, decimal PlusDi, decimal MinusDi) CalculateAdx(List<Kline> klines, int period = 14)
         {
-            if (klines.Count < period + 2) return (20, 20, 20);
+            if (klines.Count < period * 2) return (20, 20, 20);
 
             var trList = new List<decimal>();
             var plusDmList = new List<decimal>();
@@ -482,19 +483,41 @@ namespace CryptoSense.Application.Services
                 else minusDmList.Add(0);
             }
 
-            decimal atr = CalculateEma(trList, period);
-            if (atr == 0) return (20, 20, 20);
+            if (trList.Count < period) return (20, 20, 20);
 
-            decimal smoothedPlusDm = CalculateEma(plusDmList, period);
-            decimal smoothedMinusDm = CalculateEma(minusDmList, period);
+            decimal smoothTr = trList.Take(period).Sum();
+            decimal smoothPlusDm = plusDmList.Take(period).Sum();
+            decimal smoothMinusDm = minusDmList.Take(period).Sum();
 
-            decimal plusDi = (smoothedPlusDm / atr) * 100;
-            decimal minusDi = (smoothedMinusDm / atr) * 100;
+            var dxList = new List<decimal>();
+            decimal lastPlusDi = 20;
+            decimal lastMinusDi = 20;
 
-            decimal diSum = plusDi + minusDi;
-            decimal dx = diSum > 0 ? (Math.Abs(plusDi - minusDi) / diSum) * 100 : 0;
+            for (int i = period; i < trList.Count; i++)
+            {
+                smoothTr = smoothTr - (smoothTr / period) + trList[i];
+                smoothPlusDm = smoothPlusDm - (smoothPlusDm / period) + plusDmList[i];
+                smoothMinusDm = smoothMinusDm - (smoothMinusDm / period) + minusDmList[i];
 
-            return (Math.Round(dx, 2), Math.Round(plusDi, 2), Math.Round(minusDi, 2));
+                decimal plusDi = smoothTr > 0 ? (smoothPlusDm / smoothTr) * 100 : 0;
+                decimal minusDi = smoothTr > 0 ? (smoothMinusDm / smoothTr) * 100 : 0;
+                lastPlusDi = plusDi;
+                lastMinusDi = minusDi;
+
+                decimal diSum = plusDi + minusDi;
+                decimal dx = diSum > 0 ? (Math.Abs(plusDi - minusDi) / diSum) * 100 : 0;
+                dxList.Add(dx);
+            }
+
+            if (dxList.Count < period) return (Math.Round(dxList.LastOrDefault(), 2), Math.Round(lastPlusDi, 2), Math.Round(lastMinusDi, 2));
+
+            decimal adx = dxList.Take(period).Average();
+            for (int i = period; i < dxList.Count; i++)
+            {
+                adx = ((adx * (period - 1)) + dxList[i]) / period;
+            }
+
+            return (Math.Round(adx, 2), Math.Round(lastPlusDi, 2), Math.Round(lastMinusDi, 2));
         }
 
         public decimal CalculateCci(List<Kline> klines, int period = 20)
@@ -528,16 +551,85 @@ namespace CryptoSense.Application.Services
 
         public (decimal SuperTrend, bool IsBullish) CalculateSuperTrend(List<Kline> klines, int period = 10, decimal multiplier = 3m)
         {
-            if (klines.Count < period + 1) return (klines.LastOrDefault()?.Close ?? 0, true);
+            if (klines == null || klines.Count < period + 1)
+                return (klines?.LastOrDefault()?.Close ?? 0, true);
 
-            decimal atr = CalculateAtr(klines, period);
-            decimal upperBand = ((klines.Last().High + klines.Last().Low) / 2) + (multiplier * atr);
-            decimal lowerBand = ((klines.Last().High + klines.Last().Low) / 2) - (multiplier * atr);
-            decimal lastClose = klines.Last().Close;
+            var trList = new List<decimal>();
+            for (int i = 1; i < klines.Count; i++)
+            {
+                decimal tr = Math.Max(klines[i].High - klines[i].Low,
+                    Math.Max(Math.Abs(klines[i].High - klines[i - 1].Close), Math.Abs(klines[i].Low - klines[i - 1].Close)));
+                trList.Add(tr);
+            }
 
-            bool isBullish = lastClose >= lowerBand;
-            decimal val = isBullish ? lowerBand : upperBand;
-            return (Math.Round(val, 4), isBullish);
+            var atrValues = new List<decimal>();
+            if (trList.Count >= period)
+            {
+                decimal currentAtr = trList.Take(period).Average();
+                atrValues.Add(currentAtr);
+                for (int i = period; i < trList.Count; i++)
+                {
+                    currentAtr = (currentAtr * (period - 1) + trList[i]) / period;
+                    atrValues.Add(currentAtr);
+                }
+            }
+            else
+            {
+                return (klines.Last().Close, true);
+            }
+
+            decimal finalUpper = 0;
+            decimal finalLower = 0;
+            decimal prevFinalUpper = 0;
+            decimal prevFinalLower = 0;
+            decimal superTrend = 0;
+            bool isBullish = true;
+
+            for (int i = 0; i < atrValues.Count; i++)
+            {
+                int candleIdx = i + period;
+                var candle = klines[candleIdx];
+                var prevCandle = klines[candleIdx - 1];
+                decimal hl2 = (candle.High + candle.Low) / 2m;
+                decimal basicUpper = hl2 + (multiplier * atrValues[i]);
+                decimal basicLower = hl2 - (multiplier * atrValues[i]);
+
+                if (i == 0)
+                {
+                    finalUpper = basicUpper;
+                    finalLower = basicLower;
+                    superTrend = candle.Close >= basicLower ? finalLower : finalUpper;
+                    isBullish = candle.Close >= basicLower;
+                }
+                else
+                {
+                    if (basicUpper < prevFinalUpper || prevCandle.Close > prevFinalUpper)
+                        finalUpper = basicUpper;
+                    else
+                        finalUpper = prevFinalUpper;
+
+                    if (basicLower > prevFinalLower || prevCandle.Close < prevFinalLower)
+                        finalLower = basicLower;
+                    else
+                        finalLower = prevFinalLower;
+
+                    if (superTrend == prevFinalUpper)
+                    {
+                        superTrend = candle.Close > finalUpper ? finalLower : finalUpper;
+                        isBullish = candle.Close > finalUpper;
+                    }
+                    else
+                    {
+                        superTrend = candle.Close < finalLower ? finalUpper : finalLower;
+                        isBullish = candle.Close >= finalLower;
+                    }
+                }
+
+                prevFinalUpper = finalUpper;
+                prevFinalLower = finalLower;
+            }
+
+            return (Math.Round(superTrend, 4), isBullish);
         }
 
         public decimal CalculateVwap(List<Kline> klines)

@@ -113,29 +113,40 @@ namespace CryptoSense.Infrastructure.Persistence.Repositories
                 .ToListAsync();
 
             var closedSignals = signals.Where(s => s.IsClosed || s.Status != SignalStatus.Open).ToList();
-            var groupedByCoin = closedSignals.GroupBy(s => s.Symbol).ToDictionary(g => g.Key, g => g.ToList());
+            
+            static string Norm(string sym)
+            {
+                var c = sym.Replace("USDT", "");
+                if (c.StartsWith("1000")) c = c.Substring(4);
+                return c;
+            }
 
-            var allCoins = new HashSet<string>(groupedByCoin.Keys);
+            var groupedByCoin = closedSignals
+                .GroupBy(s => Norm(s.Symbol))
+                .ToDictionary(g => g.Key, g => g.ToList());
+
+            var allNormCoins = new HashSet<string>(groupedByCoin.Keys);
             if (monitoredCoins != null)
             {
-                foreach (var c in monitoredCoins) allCoins.Add(c);
+                foreach (var c in monitoredCoins) allNormCoins.Add(Norm(c));
             }
 
             var result = new List<CryptoSense.Application.DTOs.CoinPerformanceBreakdownDto>();
 
-            foreach (var coin in allCoins.OrderBy(c => c))
+            foreach (var normCoin in allNormCoins.OrderBy(c => c))
             {
                 var dto = new CryptoSense.Application.DTOs.CoinPerformanceBreakdownDto
                 {
-                    Symbol = coin
+                    Symbol = normCoin + "USDT"
                 };
 
-                if (groupedByCoin.TryGetValue(coin, out var list) && list.Count > 0)
+                if (groupedByCoin.TryGetValue(normCoin, out var list) && list.Count > 0)
                 {
                     dto.TotalTrades = list.Count;
                     dto.SuccessTrades = list.Count(s => s.Status == SignalStatus.Success);
                     dto.FailedTrades = list.Count(s => s.Status == SignalStatus.Failed || s.Status == SignalStatus.Neutral);
-                    dto.OverallWinRate = dto.TotalTrades > 0 ? Math.Round(((decimal)dto.SuccessTrades / dto.TotalTrades) * 100, 1) : 0;
+                    int decisive = dto.SuccessTrades + dto.FailedTrades;
+                    dto.OverallWinRate = decisive > 0 ? Math.Round(((decimal)dto.SuccessTrades / decisive) * 100, 1) : 0;
                     dto.TotalNetProfitPercent = Math.Round(list.Where(s => s.ResultPercent.HasValue).Sum(s => s.ResultPercent!.Value), 2);
 
                     var tfGroups = list.GroupBy(s => s.Timeframe);
@@ -144,7 +155,8 @@ namespace CryptoSense.Infrastructure.Persistence.Repositories
                         var tfTotal = tfGroup.Count();
                         var tfSuccess = tfGroup.Count(s => s.Status == SignalStatus.Success);
                         var tfFailed = tfGroup.Count(s => s.Status == SignalStatus.Failed || s.Status == SignalStatus.Neutral);
-                        var tfWinRate = tfTotal > 0 ? Math.Round(((decimal)tfSuccess / tfTotal) * 100, 1) : 0;
+                        int tfDecisive = tfSuccess + tfFailed;
+                        var tfWinRate = tfDecisive > 0 ? Math.Round(((decimal)tfSuccess / tfDecisive) * 100, 1) : 0;
                         var tfPnL = Math.Round(tfGroup.Where(s => s.ResultPercent.HasValue).Sum(s => s.ResultPercent!.Value), 2);
 
                         dto.TimeframeStats[tfGroup.Key] = new CryptoSense.Application.DTOs.TimeframeStatsDto

@@ -116,6 +116,8 @@ namespace CryptoSense.Infrastructure.MarketData
         private static DateTime _lastMacroFetch = DateTime.MinValue;
         private static readonly object _macroLock = new();
 
+        private static readonly HttpClient _coinGeckoClient = new() { Timeout = TimeSpan.FromSeconds(5) };
+
         public async Task<MacroMarketOverview> GetMacroMarketOverviewAsync()
         {
             if (_cachedMacro != null && (DateTime.UtcNow - _lastMacroFetch).TotalSeconds < 180)
@@ -126,9 +128,11 @@ namespace CryptoSense.Infrastructure.MarketData
             var overview = new MacroMarketOverview();
             try
             {
-                using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
-                client.DefaultRequestHeaders.Add("User-Agent", "CryptoSense-MacroBot/2.0");
-                var json = await client.GetStringAsync("https://api.coingecko.com/api/v3/global");
+                if (!_coinGeckoClient.DefaultRequestHeaders.Contains("User-Agent"))
+                {
+                    _coinGeckoClient.DefaultRequestHeaders.Add("User-Agent", "CryptoSense-MacroBot/2.0");
+                }
+                var json = await _coinGeckoClient.GetStringAsync("https://api.coingecko.com/api/v3/global");
                 using var doc = JsonDocument.Parse(json);
                 var data = doc.RootElement.GetProperty("data");
 

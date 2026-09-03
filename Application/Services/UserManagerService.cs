@@ -18,43 +18,43 @@ namespace CryptoSense.Application.Services
             InitializeSuperAdmin();
         }
 
+        private static bool _superAdminInitialized = false;
+        private static readonly object _initLock = new();
+
         private void InitializeSuperAdmin()
         {
-            try
+            if (_superAdminInitialized) return;
+            lock (_initLock)
             {
-                _unitOfWork.EnsureDatabaseCreated();
-                var superAdmin = _unitOfWork.Users.GetByUsernameAsync("Ali").GetAwaiter().GetResult() ??
-                                 _unitOfWork.Users.GetByUsernameAsync("Ali Mahammadov").GetAwaiter().GetResult();
-
-                var hash = BCrypt.Net.BCrypt.HashPassword("23031999Am");
-
-                if (superAdmin == null)
+                if (_superAdminInitialized) return;
+                try
                 {
-                    var newAdmin = new UserAccount
+                    _unitOfWork.EnsureDatabaseCreated();
+                    var superAdmin = _unitOfWork.Users.GetByUsernameAsync("Ali").GetAwaiter().GetResult() ??
+                                     _unitOfWork.Users.GetByUsernameAsync("Ali Mahammadov").GetAwaiter().GetResult();
+
+                    if (superAdmin == null)
                     {
-                        Username = "Ali",
-                        PasswordHash = hash,
-                        Role = UserRole.Admin,
-                        TelegramUsername = "Ali_Mahammadov",
-                        TelegramUserId = 1219998176,
-                        IsActive = true,
-                        CreatedAtUtc = DateTime.UtcNow,
-                        LastLoginAt = DateTime.UtcNow
-                    };
-                    _unitOfWork.Users.AddAsync(newAdmin).GetAwaiter().GetResult();
-                    _unitOfWork.SaveChangesAsync().GetAwaiter().GetResult();
+                        var hash = BCrypt.Net.BCrypt.HashPassword("23031999Am");
+                        var newAdmin = new UserAccount
+                        {
+                            Username = "Ali",
+                            PasswordHash = hash,
+                            Role = UserRole.Admin,
+                            TelegramUsername = "Ali_Mahammadov",
+                            TelegramUserId = 1219998176,
+                            IsActive = true,
+                            CreatedAtUtc = DateTime.UtcNow,
+                            LastLoginAt = DateTime.UtcNow
+                        };
+                        _unitOfWork.Users.AddAsync(newAdmin).GetAwaiter().GetResult();
+                        _unitOfWork.SaveChangesAsync().GetAwaiter().GetResult();
+                    }
+                    _superAdminInitialized = true;
                 }
-                else
+                catch
                 {
-                    superAdmin.PasswordHash = hash;
-                    superAdmin.Role = UserRole.Admin;
-                    superAdmin.IsActive = true;
-                    _unitOfWork.Users.UpdateAsync(superAdmin).GetAwaiter().GetResult();
-                    _unitOfWork.SaveChangesAsync().GetAwaiter().GetResult();
                 }
-            }
-            catch
-            {
             }
         }
 

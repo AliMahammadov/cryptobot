@@ -134,6 +134,25 @@ namespace CryptoSense.Infrastructure.Telegram
                 return false;
             }
 
+            // Telegram API maximum limit is 4096 chars. If message exceeds 3900 chars, split safely into chunks:
+            if (message.Length > 3900)
+            {
+                var chunks = SplitMessage(message, 3800);
+                for (int i = 0; i < chunks.Count; i++)
+                {
+                    var isLast = i == chunks.Count - 1;
+                    var success = await SendSingleMessageAsync(chunks[i], targetChatId, isLast ? replyMarkup : null);
+                    if (!success) return false;
+                    if (!isLast) await Task.Delay(200);
+                }
+                return true;
+            }
+
+            return await SendSingleMessageAsync(message, targetChatId, replyMarkup);
+        }
+
+        private async Task<bool> SendSingleMessageAsync(string message, string targetChatId, object? replyMarkup = null)
+        {
             try
             {
                 var url = $"https://api.telegram.org/bot{_config.TelegramBotToken}/sendMessage";
@@ -152,6 +171,11 @@ namespace CryptoSense.Infrastructure.Telegram
 
                 var content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
                 var response = await _httpClient.PostAsync(url, content);
+                if (!response.IsSuccessStatusCode)
+                {
+                    var err = await response.Content.ReadAsStringAsync();
+                    Console.WriteLine($"[TelegramBotService] Send error: {response.StatusCode} - {err}");
+                }
                 return response.IsSuccessStatusCode;
             }
             catch (Exception ex)
@@ -159,6 +183,44 @@ namespace CryptoSense.Infrastructure.Telegram
                 Console.WriteLine($"[TelegramBotService] Send error: {ex.Message}");
                 return false;
             }
+        }
+
+        private static List<string> SplitMessage(string text, int maxChunkSize)
+        {
+            var result = new List<string>();
+            var lines = text.Split('\n');
+            var current = new StringBuilder();
+
+            foreach (var line in lines)
+            {
+                if (current.Length + line.Length + 1 > maxChunkSize)
+                {
+                    if (current.Length > 0)
+                    {
+                        result.Add(current.ToString());
+                        current.Clear();
+                    }
+                }
+
+                if (line.Length > maxChunkSize)
+                {
+                    for (int i = 0; i < line.Length; i += maxChunkSize)
+                    {
+                        result.Add(line.Substring(i, Math.Min(maxChunkSize, line.Length - i)));
+                    }
+                }
+                else
+                {
+                    current.AppendLine(line);
+                }
+            }
+
+            if (current.Length > 0)
+            {
+                result.Add(current.ToString());
+            }
+
+            return result;
         }
 
         public async Task<bool> DeleteMessageAsync(string chatId, long messageId)
@@ -232,8 +294,8 @@ namespace CryptoSense.Infrastructure.Telegram
                     continue;
                 }
 
-                // Strict Chronological check: never send a signal generated before the user selected timeframe / resumed
-                if (signal.GeneratedAt < settings.LastResumeTime.AddSeconds(-2))
+                // Strict Chronological check: never send a signal generated before the user selected timeframe / resumed (with 5 min buffer)
+                if (signal.GeneratedAt < settings.LastResumeTime.AddMinutes(-5))
                 {
                     continue;
                 }
@@ -273,23 +335,22 @@ namespace CryptoSense.Infrastructure.Telegram
                 // Check timeframe filter
                 if (settings.Timeframe != "Hamısı" && settings.Timeframe != "Hamisi" && settings.Timeframe != signal.Timeframe) continue;
 
-                // Check if signal occurred before user resumed
-                if (signal.GeneratedAt < settings.LastResumeTime.AddSeconds(-5)) continue;
-
-                int userSigNum = 0;
                 var mapKey = $"{signal.Id}_{chatId}";
-                if (_signalUserNumberMap.TryGetValue(mapKey, out var mappedNum) && mappedNum > 0)
+                int userSigNum = 0;
+                bool receivedThisSignal = _signalUserNumberMap.TryGetValue(mapKey, out var mappedNum) && mappedNum > 0;
+                if (!receivedThisSignal && signal.UserSignalNumbers.TryGetValue(chatId, out var fbNum) && fbNum > 0)
                 {
-                    userSigNum = mappedNum;
+                    mappedNum = fbNum;
+                    receivedThisSignal = true;
                 }
-                else if (signal.UserSignalNumbers.TryGetValue(chatId, out var fallbackNum) && fallbackNum > 0)
+
+                // Only send outcome alert if this user actually received the initial signal alert
+                if (!receivedThisSignal)
                 {
-                    userSigNum = fallbackNum;
+                    continue;
                 }
-                else
-                {
-                    userSigNum = signal.SignalNumber;
-                }
+
+                userSigNum = mappedNum;
 
                 var msg = TelegramMessageFormatter.FormatOutcomeAlert(signal, userSigNum, outcomeType, hitPrice, profitPct);
                 await SendMessageAsync(msg, chatId);
@@ -909,6 +970,12 @@ namespace CryptoSense.Infrastructure.Telegram
             }
             else if (text.Contains("Dərin Coin") || text.Contains("Derin Coin") || text == "📈 Dərin Coin Statistikası" || text == "📈 Coinlər Üzrə Dərin Statistika" || text == "/coin_stats")
             {
+                if (!isAdmin)
+                {
+                    await SendMessageAsync("⛔ <b>Bu bölmə yalnız Super Admin üçün əlçatandır.</b>", chatId, TelegramKeyboards.BuildUserKeyboard(userSettings, isAdmin));
+                    return;
+                }
+
                 _userStates.TryRemove(chatId, out _);
                 await SendMessageAsync("⏳ <b>Bütün coinlər və zaman çərçivələri üzrə qlobal nəticələr hesablanır...</b>", chatId);
 
@@ -918,7 +985,7 @@ namespace CryptoSense.Infrastructure.Telegram
 
                 var breakdown = await signalEngine.GetCoinPerformanceBreakdownAsync(monitored);
                 var report = TelegramMessageFormatter.FormatCoinPerformanceBreakdown(breakdown, monitored);
-                await SendMessageAsync(report, chatId, TelegramKeyboards.BuildUserKeyboard(userSettings, isAdmin));
+                await SendMessageAsync(report, chatId, TelegramKeyboards.BuildAdminKeyboard());
             }
             else if (text.Contains("Statistika") || text == "/stats")
             {
@@ -1020,9 +1087,24 @@ namespace CryptoSense.Infrastructure.Telegram
                 if (!potentialSym.EndsWith("USDT")) potentialSym += "USDT";
                 var tf = (userSettings.Timeframe == "Hamısı" || userSettings.Timeframe == "Hamisi") ? "3m" : userSettings.Timeframe;
                 var sig = await signalEngine.AnalyzeCoinAsync(potentialSym, tf);
-                if (sig.SignalType != "MƏLUMAT AZDIR")
+                if (sig.SignalType.Contains("LONG") || sig.SignalType.Contains("SHORT"))
                 {
                     await SendSignalAlertAsync(sig, chatId);
+                }
+                else if (sig.SignalType != "MƏLUMAT AZDIR")
+                {
+                    var cleanSym = sig.Symbol.Replace("USDT", "");
+                    var reasonList = sig.AnalysisReasons.Count > 0 
+                        ? string.Join("\n• ", sig.AnalysisReasons) 
+                        : "Bazar təsdiqlənmiş trend istiqaməti göstərmir.";
+                    var analysisMsg = $"🔍 <b>{cleanSym} ({tf}) Canlı Texniki Analiz:</b>\n\n" +
+                                      $"⚪ <b>Vəziyyət:</b> <b>NEYTRAL (GÖZLƏMƏ) ⚪</b>\n" +
+                                      $"💵 <b>Cari Qiymət:</b> ${sig.CurrentPrice}\n" +
+                                      $"🎯 <b>Confluence Balı:</b> {sig.ConfluenceScore}%\n\n" +
+                                      $"📊 <b>İndiqator Göstəriciləri:</b>\n" +
+                                      $"• {reasonList}\n\n" +
+                                      $"ℹ️ <i>Hal-hazırda bu coin üzrə təsdiqlənmiş giriş siqnalı yoxdur. Tələblərə cavab verən (>=75%) giriş yarandıqda canlı siqnal göndəriləcək.</i>";
+                    await SendMessageAsync(analysisMsg, chatId, TelegramKeyboards.BuildUserKeyboard(userSettings, isAdmin));
                 }
                 else
                 {

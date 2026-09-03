@@ -385,6 +385,8 @@ namespace CryptoSense.Worker
                                 catch (Exception)
                                 {
                                 }
+
+                                await Task.Delay(50, stoppingToken);
                             }
                         }
 
