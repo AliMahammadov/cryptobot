@@ -34,7 +34,7 @@ namespace CryptoSense.Domain.Entities
         public string Summary { get; set; } = "";
         public decimal Rsi15m { get; set; }
         public string EmaStructure { get; set; } = "";
-        public string TimestampFormatted { get; set; } = DateTime.Now.ToString("dd.MM.yyyy | HH:mm:ss");
+        public string TimestampFormatted { get; set; } = CryptoSense.Domain.Common.TimeHelper.NowFormatted;
     }
 
     public class CryptoNewsItem

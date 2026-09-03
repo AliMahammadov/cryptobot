@@ -69,7 +69,7 @@ namespace CryptoSense.Infrastructure.Telegram
             sb.AppendLine($"💵 <b>Bağlanış Qiyməti:</b> ${hitPrice.ToString(CultureInfo.InvariantCulture)}");
             sb.AppendLine($"📈 <b>Xalis Nəticə (PnL):</b> <b>{(profitPct >= 0 ? "+" : "")}{profitPct.ToString("F2", CultureInfo.InvariantCulture)}%</b>");
             sb.AppendLine($"🕒 <b>Siqnal Vaxtı:</b> {signal.TimestampFormatted}");
-            sb.AppendLine($"🕒 <b>Bağlanma Vaxtı:</b> {DateTime.Now:dd.MM.yyyy | HH:mm:ss}");
+            sb.AppendLine($"🕒 <b>Bağlanma Vaxtı:</b> {CryptoSense.Domain.Common.TimeHelper.NowFormatted}");
             return sb.ToString();
         }
 

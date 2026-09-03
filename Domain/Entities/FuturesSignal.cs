@@ -88,7 +88,7 @@ namespace CryptoSense.Domain.Entities
         public bool SignalAlertSent { get; set; } = false;
         public bool OutcomeAlertSent { get; set; } = false;
         
-        public string TimestampFormatted { get; set; } = DateTime.Now.ToString("dd.MM.yyyy | HH:mm:ss");
+        public string TimestampFormatted { get; set; } = CryptoSense.Domain.Common.TimeHelper.NowFormatted;
         
         [NotMapped]
         public List<string> AnalysisReasons { get; set; } = new();

@@ -67,7 +67,7 @@ namespace CryptoSense.Application.Services
             var btcKlines = await _marketData.GetKlinesAsync("BTCUSDT", "15m", 60);
             var compass = new BtcMarketCompass
             {
-                TimestampFormatted = DateTime.Now.ToString("dd.MM.yyyy | HH:mm:ss")
+                TimestampFormatted = CryptoSense.Domain.Common.TimeHelper.NowFormatted
             };
 
             if (btcKlines.Count == 0) return compass;
@@ -247,7 +247,7 @@ namespace CryptoSense.Application.Services
                 SourceCandleOpenTimeUtc = sourceCandleTime,
                 GeneratedAt = DateTime.UtcNow,
                 ExpiryTimeUtc = DateTime.UtcNow.AddMinutes(durationMinutes),
-                TimestampFormatted = DateTime.Now.ToString("dd.MM.yyyy | HH:mm:ss"),
+                TimestampFormatted = CryptoSense.Domain.Common.TimeHelper.NowFormatted,
                 NewsSentimentImpact = newsSummary.Status,
                 AnalysisReasons = reasons,
                 Indicators = indicators,

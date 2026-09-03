@@ -147,6 +147,12 @@ namespace CryptoSense.Infrastructure.Telegram
                     continue;
                 }
 
+                // Strict Chronological check: never send a signal generated before the user selected timeframe / resumed
+                if (signal.GeneratedAt < settings.LastResumeTime.AddSeconds(-2))
+                {
+                    continue;
+                }
+
                 // Coin filter check
                 if (settings.Coins.Count > 0 && !settings.Coins.Contains(signal.Symbol)) continue;
 
@@ -173,15 +179,10 @@ namespace CryptoSense.Infrastructure.Telegram
                 if (!settings.IsActive) continue;
 
                 bool receivedThisSignal = signal.UserSignalNumbers.ContainsKey(chatId);
-
                 if (!receivedThisSignal)
                 {
-                    if (settings.Timeframe != "Hamısı" && settings.Timeframe != "Hamisi" && settings.Timeframe != signal.Timeframe)
-                    {
-                        continue;
-                    }
-
-                    if (settings.Coins.Count > 0 && !settings.Coins.Contains(signal.Symbol)) continue;
+                    // User never received the signal (e.g. signal occurred before user started or selected timeframe)
+                    continue;
                 }
 
                 signal.UserSignalNumbers.TryGetValue(chatId, out var userSigNum);
@@ -198,7 +199,7 @@ namespace CryptoSense.Infrastructure.Telegram
 
             var msg = $"🔔 <b>YENİ GİRİŞ BİLDİRİŞİ:</b>\n\n" +
                       $"👤 <b>İstifadəçi:</b> <code>{username}</code>\n" +
-                      $"🕒 <b>Tarix:</b> <code>{DateTime.Now:dd.MM.yyyy | HH:mm:ss}</code>\n" +
+                      $"🕒 <b>Tarix:</b> <code>{CryptoSense.Domain.Common.TimeHelper.NowFormatted}</code>\n" +
                       $"🌐 <b>Platforma / Mənbə:</b> {platform}";
             await SendMessageAsync(msg, SuperAdminChatId);
         }
@@ -606,25 +607,10 @@ namespace CryptoSense.Infrastructure.Telegram
                 userSettings.Timeframe = targetTf;
                 userSettings.LastResumeTime = DateTime.UtcNow;
 
-                var openSignals = await signalEngine.GetTrackedActiveSignalsAsync();
-                var activeSig = openSignals.FirstOrDefault(s => 
-                    (targetTf == "Hamısı" || s.Timeframe == targetTf) && 
-                    (s.SignalType.Contains("LONG") || s.SignalType.Contains("SHORT")) &&
-                    s.Status == Domain.Enums.SignalStatus.Open &&
-                    s.ExpiryTimeUtc > DateTime.UtcNow);
-
-                if (activeSig != null)
-                {
-                    await SendMessageAsync($"✅ <b>Zaman Çərçivəsi Təyin Edildi:</b> <code>{targetTf}</code>\n<i>Aktiv cari əməliyyat tapıldı:</i>", chatId, TelegramKeyboards.BuildUserKeyboard(userSettings, isAdmin));
-                    await SendSignalAlertAsync(activeSig, chatId);
-                }
-                else
-                {
-                    var noSigMsg = $"✅ <b>Zaman Çərçivəsi Təyin Edildi:</b> <code>{targetTf}</code>\n\n" +
-                                   $"ℹ️ <i>Hal-hazırda ({targetTf} üzrə) tələblərə cavab verən (>=70% win-rate) aktiv siqnal yoxdur.</i>\n\n" +
-                                   $"🟢 <b>Sistem canlı rejimdə bazarı 24/7 analiz edir.</b> Yeni təsdiqlənmiş şam formalaşan kimi siqnal dərhal sizə göndəriləcək.";
-                    await SendMessageAsync(noSigMsg, chatId, TelegramKeyboards.BuildUserKeyboard(userSettings, isAdmin));
-                }
+                var confirmMsg = $"✅ <b>Zaman Çərçivəsi Təyin Edildi:</b> <code>{targetTf}</code>\n\n" +
+                                 $"ℹ️ <i>Hal-hazırda ({targetTf} üzrə) tələblərə cavab verən (>=70% win-rate) aktiv siqnal yoxdur.</i>\n\n" +
+                                 $"🟢 <b>Sistem canlı rejimdə bazarı 24/7 analiz edir.</b> Yalnız bu andan etibarən yaranacaq yeni təsdiqlənmiş şam formalaşan kimi siqnal dərhal sizə göndəriləcək.";
+                await SendMessageAsync(confirmMsg, chatId, TelegramKeyboards.BuildUserKeyboard(userSettings, isAdmin));
                 return;
             }
 
