@@ -54,8 +54,18 @@ namespace CryptoSense.Infrastructure.Telegram
             var directionStr = (signal.Direction == SignalDirection.Buy || signal.SignalType.Contains("LONG")) ? "LONG" : "SHORT";
 
             var sb = new StringBuilder();
-            sb.AppendLine($"{icon} <b>#{userSigNum} NƏTİCƏ HESABATI:</b>");
-            sb.AppendLine($"<b>{statusText}</b>");
+            if (outcomeType.Contains("Stop Loss") || outcomeType.Contains("SL"))
+            {
+                sb.AppendLine($"⛔ <b>#{userSigNum} NÖMRƏLİ SİQNAL ÜZRƏ STOP-LOSS (SL) VURDU!</b>");
+                sb.AppendLine($"<b>Stop Loss (SL) (UĞURSUZ) ❌</b>");
+                sb.AppendLine();
+                sb.AppendLine($"⚠️ <b>Təcili əməliyyatı dayandırın!</b>");
+            }
+            else
+            {
+                sb.AppendLine($"{icon} <b>#{userSigNum} NƏTİCƏ HESABATI:</b>");
+                sb.AppendLine($"<b>{statusText}</b>");
+            }
             sb.AppendLine();
             sb.AppendLine($"🪙 <b>Cütlük:</b> {cleanSymbol} Futures ({directionStr} - {signal.Timeframe})");
             sb.AppendLine($"📍 <b>İlkin Giriş Qiyməti:</b> ${signal.EntryPrice.ToString(CultureInfo.InvariantCulture)}");

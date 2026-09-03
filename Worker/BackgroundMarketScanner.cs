@@ -287,6 +287,14 @@ namespace CryptoSense.Worker
                             {
                                 if (stoppingToken.IsCancellationRequested) break;
 
+                                // Anti-Spam / Active Candle Lock:
+                                // If this coin already has an active, unclosed signal on this timeframe, wait until it finishes/expires!
+                                bool hasActiveUnclosedSignal = activeSignals.Any(s => s.Symbol == sym && s.Timeframe == tf && !s.IsClosed && s.Status == SignalStatus.Open);
+                                if (hasActiveUnclosedSignal)
+                                {
+                                    continue;
+                                }
+
                                 try
                                 {
                                     var signal = await signalEngine.AnalyzeCoinAsync(sym, tf, isLiveScan: true);
