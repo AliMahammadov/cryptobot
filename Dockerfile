@@ -10,4 +10,6 @@ WORKDIR /app
 COPY --from=build /app/publish .
 ENV ASPNETCORE_URLS=http://+:5083
 EXPOSE 5083
+RUN mkdir -p /app/data
+VOLUME ["/app/data"]
 ENTRYPOINT ["dotnet", "CryptoSense.dll"]

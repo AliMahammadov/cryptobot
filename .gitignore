@@ -8,3 +8,6 @@ publish/
 *.db-shm
 *.db-wal
 *.log
+data/
+user_preferences.json
+signal_user_numbers.json

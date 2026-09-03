@@ -33,17 +33,30 @@ builder.WebHost.UseUrls("http://0.0.0.0:5083");
 builder.Services.Configure<AppConfig>(builder.Configuration.GetSection("AppConfig"));
 
 // 2. Persistence Layer (SQLite with EF Core)
-var connectionString = builder.Configuration.GetConnectionString("DefaultConnection") ?? "Data Source=cryptosense.db";
+var dataDir = Directory.Exists("/app/data")
+    ? "/app/data"
+    : Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "data");
 
-// If running in Docker with /app/data mounted or data folder exists, ensure db persists in data/
-if (Directory.Exists("/app/data"))
+if (!Directory.Exists(dataDir))
 {
-    connectionString = "Data Source=/app/data/cryptosense.db";
+    Directory.CreateDirectory(dataDir);
 }
-else if (Directory.Exists("data"))
+
+var dbPath = Path.Combine(dataDir, "cryptosense.db");
+
+if (!File.Exists(dbPath))
 {
-    connectionString = "Data Source=data/cryptosense.db";
+    if (File.Exists("cryptosense.db"))
+    {
+        try { File.Copy("cryptosense.db", dbPath); Console.WriteLine($"[Persistence] Migrated root cryptosense.db -> {dbPath}"); } catch { }
+    }
+    else if (File.Exists(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "cryptosense.db")))
+    {
+        try { File.Copy(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "cryptosense.db"), dbPath); Console.WriteLine($"[Persistence] Migrated base cryptosense.db -> {dbPath}"); } catch { }
+    }
 }
+
+var connectionString = $"Data Source={dbPath}";
 
 builder.Services.AddDbContext<AppDbContext>(options =>
     options.UseSqlite(connectionString));

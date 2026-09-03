@@ -29,8 +29,11 @@ namespace CryptoSense.Infrastructure.Telegram
         public static ConcurrentDictionary<string, UserSettings> UserPreferences { get; } = new();
         private static readonly ConcurrentDictionary<string, string> _userStates = new();
         private static readonly ConcurrentDictionary<string, int> _signalUserNumberMap = new();
-        private static readonly string SettingsFilePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "user_preferences.json");
-        private static readonly string SignalMapFilePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "signal_user_numbers.json");
+        private static readonly string DataDirectory = Directory.Exists("/app/data")
+            ? "/app/data"
+            : Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "data");
+        private static readonly string SettingsFilePath = Path.Combine(DataDirectory, "user_preferences.json");
+        private static readonly string SignalMapFilePath = Path.Combine(DataDirectory, "signal_user_numbers.json");
 
         static TelegramBotService()
         {
@@ -41,6 +44,24 @@ namespace CryptoSense.Infrastructure.Telegram
         {
             try
             {
+                if (!Directory.Exists(DataDirectory))
+                {
+                    Directory.CreateDirectory(DataDirectory);
+                }
+
+                // Auto-migrate legacy files from base directory if present
+                var legacySettings = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "user_preferences.json");
+                if (!File.Exists(SettingsFilePath) && File.Exists(legacySettings))
+                {
+                    try { File.Copy(legacySettings, SettingsFilePath); } catch { }
+                }
+
+                var legacySignalMap = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "signal_user_numbers.json");
+                if (!File.Exists(SignalMapFilePath) && File.Exists(legacySignalMap))
+                {
+                    try { File.Copy(legacySignalMap, SignalMapFilePath); } catch { }
+                }
+
                 if (File.Exists(SettingsFilePath))
                 {
                     var json = File.ReadAllText(SettingsFilePath);
@@ -74,6 +95,11 @@ namespace CryptoSense.Infrastructure.Telegram
         {
             try
             {
+                if (!Directory.Exists(DataDirectory))
+                {
+                    Directory.CreateDirectory(DataDirectory);
+                }
+
                 var dict = new Dictionary<string, UserSettings>(UserPreferences);
                 var json = JsonSerializer.Serialize(dict, new JsonSerializerOptions { WriteIndented = true });
                 File.WriteAllText(SettingsFilePath, json);
