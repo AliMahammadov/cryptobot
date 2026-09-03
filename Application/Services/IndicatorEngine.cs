@@ -118,8 +118,29 @@ namespace CryptoSense.Application.Services
                 res.EmaVote = IndicatorVote.Bearish;
             }
 
-            // 5. SMA 20
+            // 5. MA / SMA (20, 50)
             res.Sma20 = closes.Skip(Math.Max(0, closes.Count - 20)).Average();
+            res.Sma50 = closes.Skip(Math.Max(0, closes.Count - 50)).Average();
+            if (lastClose > res.Sma20 && res.Sma20 >= res.Sma50)
+            {
+                res.SmaTrend = "Güclü Yüksəliş (Bullish)";
+                res.SmaVote = IndicatorVote.Bullish;
+            }
+            else if (lastClose > res.Sma20)
+            {
+                res.SmaTrend = "Müsbət Trend";
+                res.SmaVote = IndicatorVote.Bullish;
+            }
+            else if (lastClose < res.Sma20 && res.Sma20 <= res.Sma50)
+            {
+                res.SmaTrend = "Güclü Eniş (Bearish)";
+                res.SmaVote = IndicatorVote.Bearish;
+            }
+            else
+            {
+                res.SmaTrend = "Mənfi Trend";
+                res.SmaVote = IndicatorVote.Bearish;
+            }
 
             // 6. Bollinger Bands (20, 2)
             var (bUpper, bLower, bBandwidth) = CalculateBollingerBands(closes, 20, 2m);
@@ -257,26 +278,24 @@ namespace CryptoSense.Application.Services
                 if (klines[i].High < klines[i - 2].Low) res.HasBearishFvg = true;
             }
 
-            // 17. Multi-Category Confluence Scoring (Section 5 Specification)
+            // 17. Core Confluence Scoring (User-specified EMA, MA, MACD architecture)
             decimal emaScore = res.EmaVote == IndicatorVote.Bullish ? 1.0m : (res.EmaVote == IndicatorVote.Bearish ? -1.0m : 0.0m);
-            decimal adxScore = res.AdxVote == IndicatorVote.Bullish ? 1.0m : (res.AdxVote == IndicatorVote.Bearish ? -1.0m : 0.0m);
-            decimal superTrendScore = res.SuperTrendVote == IndicatorVote.Bullish ? 1.0m : -1.0m;
-            res.TrendScore = Math.Round((emaScore * 0.45m) + (adxScore * 0.30m) + (superTrendScore * 0.25m), 3);
+            decimal smaScore = res.SmaVote == IndicatorVote.Bullish ? 1.0m : (res.SmaVote == IndicatorVote.Bearish ? -1.0m : 0.0m);
+            res.TrendScore = Math.Round((emaScore * 0.50m) + (smaScore * 0.50m), 3);
 
-            decimal rsiScore = res.RsiVote == IndicatorVote.Bullish ? 1.0m : (res.RsiVote == IndicatorVote.Bearish ? -1.0m : 0.0m);
             decimal macdScore = res.MacdVote == IndicatorVote.Bullish ? 1.0m : (res.MacdVote == IndicatorVote.Bearish ? -1.0m : 0.0m);
-            decimal stochScore = res.StochVote == IndicatorVote.Bullish ? 1.0m : (res.StochVote == IndicatorVote.Bearish ? -1.0m : 0.0m);
-            res.MomentumScore = Math.Round((rsiScore * 0.35m) + (macdScore * 0.45m) + (stochScore * 0.20m), 3);
+            decimal rsiScore = res.RsiVote == IndicatorVote.Bullish ? 1.0m : (res.RsiVote == IndicatorVote.Bearish ? -1.0m : 0.0m);
+            res.MomentumScore = Math.Round((macdScore * 0.70m) + (rsiScore * 0.30m), 3);
 
             decimal bbScore = res.BollingerVote == IndicatorVote.Bullish ? 1.0m : (res.BollingerVote == IndicatorVote.Bearish ? -1.0m : 0.0m);
             res.VolatilityScore = bbScore;
 
             decimal obvScore = res.ObvVote == IndicatorVote.Bullish ? 1.0m : (res.ObvVote == IndicatorVote.Bearish ? -1.0m : 0.0m);
             decimal volScore = res.VolumeVote == IndicatorVote.Bullish ? 1.0m : (res.VolumeVote == IndicatorVote.Bearish ? -1.0m : 0.0m);
-            decimal vwapScore = res.VwapVote == IndicatorVote.Bullish ? 1.0m : -1.0m;
-            res.VolumeScore = Math.Round((obvScore * 0.40m) + (volScore * 0.30m) + (vwapScore * 0.30m), 3);
+            res.VolumeScore = Math.Round((obvScore * 0.50m) + (volScore * 0.50m), 3);
 
-            decimal rawScore = (res.TrendScore * 0.35m) + (res.MomentumScore * 0.30m) + (res.VolatilityScore * 0.15m) + (res.VolumeScore * 0.20m);
+            // 45% Trend (EMA + MA) + 40% Momentum (MACD) + 15% Volume & Volatility
+            decimal rawScore = (res.TrendScore * 0.45m) + (res.MomentumScore * 0.40m) + (res.VolatilityScore * 0.05m) + (res.VolumeScore * 0.10m);
 
             decimal mtfFactor = 1.0m;
             if (btcCompass != null)

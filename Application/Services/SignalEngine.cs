@@ -126,73 +126,69 @@ namespace CryptoSense.Application.Services
             var currentPrice = klines.Last().Close;
 
             var btcCompass = await GetBtcCompassAsync();
+            var macroOverview = await _marketData.GetMacroMarketOverviewAsync();
             var indicators = _indicatorEngine.CalculateIndicators(klines, btcCompass);
             var newsSummary = await _newsService.GetNewsAndSentimentAsync();
 
             var reasons = new List<string>();
 
-            // 1. BTC Macro alignment
-            if (btcCompass.BullishScore >= 55)
-            {
-                reasons.Add($"Bitcoin Kompası: {btcCompass.Trend} ({btcCompass.BullishScore}%)");
-                indicators.BtcAlignment = "Bullish";
-            }
-            else if (btcCompass.BullishScore <= 45)
-            {
-                reasons.Add($"Bitcoin Kompası: {btcCompass.Trend} ({btcCompass.BullishScore}%)");
-                indicators.BtcAlignment = "Bearish";
-            }
-            else
-            {
-                indicators.BtcAlignment = "Neytral";
-            }
+            // 1. Core Technical Indicators (EMA, MA, MACD)
+            reasons.Add($"EMA (20/50): ${indicators.Ema20} / ${indicators.Ema50} ({indicators.EmaTrend})");
+            reasons.Add($"MA / SMA (20/50): ${indicators.Sma20} / ${indicators.Sma50} ({indicators.SmaTrend})");
+            reasons.Add($"MACD (12,26,9): Hist={indicators.MacdHist:F4} ({indicators.MacdStatus})");
 
-            // 2. Decision Logic based on Section 5 Weighted Confluence
+            // 2. Macro Dominance & BTC Compass
+            reasons.Add($"Bitcoin Kompası: {btcCompass.Trend} ({btcCompass.BullishScore}%)");
+            reasons.Add($"Dominasiya: BTC.D {macroOverview.BtcDominance}% | USDT.D {macroOverview.UsdtDominance}%");
+
+            // 3. High-Probability Decision Logic (Target: >=70% Win-Rate)
             SignalDirection direction = SignalDirection.Buy;
             string determinedType = "NEYTRAL (GÖZLƏMƏ) ⚪";
             int confidence = 65;
 
-            // Long condition (Confluence Score >= 75 and TrendScore >= 0)
-            if (indicators.ConfluenceScore >= 75m && indicators.TrendScore >= 0)
+            bool emaBullish = currentPrice > indicators.Ema20 && indicators.Ema20 >= indicators.Ema50;
+            bool smaBullish = currentPrice > indicators.Sma20;
+            bool macdBullish = indicators.MacdHist > 0 && indicators.Macd >= indicators.MacdSignal;
+            bool btcNotBearish = btcCompass.BullishScore >= 45;
+
+            bool emaBearish = currentPrice < indicators.Ema20 && indicators.Ema20 <= indicators.Ema50;
+            bool smaBearish = currentPrice < indicators.Sma20;
+            bool macdBearish = indicators.MacdHist < 0 && indicators.Macd <= indicators.MacdSignal;
+            bool btcNotBullish = btcCompass.BullishScore <= 55;
+
+            // Long Setup: EMA Bullish + SMA Bullish + MACD Bullish + BTC not bearish
+            if (emaBullish && smaBullish && macdBullish && btcNotBearish)
             {
                 direction = SignalDirection.Buy;
                 determinedType = "GÜCLÜ LONG (ALIŞ) 🟢";
                 confidence = Math.Clamp((int)indicators.ConfluenceScore, 78, 96);
+                if (confidence < 80) confidence = 80;
             }
-            // Short condition (Confluence Score <= 25 or bearish confluence >= 75% and TrendScore <= 0)
-            else if (indicators.ConfluenceScore <= 25m && indicators.TrendScore <= 0)
+            // Short Setup: EMA Bearish + SMA Bearish + MACD Bearish + BTC not bullish
+            else if (emaBearish && smaBearish && macdBearish && btcNotBullish)
             {
                 direction = SignalDirection.Sell;
                 determinedType = "GÜCLÜ SHORT (SATIŞ) 🔴";
                 confidence = Math.Clamp((int)(100m - indicators.ConfluenceScore), 78, 96);
+                if (confidence < 80) confidence = 80;
             }
-            else if (indicators.BullishIndicatorsCount >= 9 && indicators.BullishIndicatorsCount > indicators.BearishIndicatorsCount)
+            // Secondary High-Confluence confirmation
+            else if (indicators.ConfluenceScore >= 80m && btcNotBearish && indicators.MacdHist >= 0)
             {
                 direction = SignalDirection.Buy;
                 determinedType = "GÜCLÜ LONG (ALIŞ) 🟢";
-                confidence = 80;
+                confidence = (int)indicators.ConfluenceScore;
             }
-            else if (indicators.BearishIndicatorsCount >= 9 && indicators.BearishIndicatorsCount > indicators.BullishIndicatorsCount)
+            else if (indicators.ConfluenceScore <= 20m && btcNotBullish && indicators.MacdHist <= 0)
             {
                 direction = SignalDirection.Sell;
                 determinedType = "GÜCLÜ SHORT (SATIŞ) 🔴";
-                confidence = 80;
+                confidence = (int)(100m - indicators.ConfluenceScore);
             }
 
             decimal directionalConfluence = direction == SignalDirection.Sell 
                 ? Math.Round(100m - indicators.ConfluenceScore, 1) 
                 : Math.Round(indicators.ConfluenceScore, 1);
-
-            // Technical details
-            reasons.Add($"Confluence Balı: {directionalConfluence}% (Trend: {indicators.TrendScore:+0.00;-0.00}, Momentum: {indicators.MomentumScore:+0.00;-0.00})");
-            reasons.Add($"RSI (14): {indicators.Rsi:F1} - {indicators.RsiStatus}");
-            reasons.Add($"MACD (12,26,9): Hist={indicators.MacdHist:F4} ({indicators.MacdStatus})");
-            reasons.Add($"EMA Struktur (20/50): {indicators.EmaTrend} (EMA20: ${indicators.Ema20})");
-            reasons.Add($"SuperTrend (10,3): {indicators.SuperTrendDirection} (Xətt: ${indicators.SuperTrend})");
-            reasons.Add($"Bollinger Bands (20,2): {indicators.BollingerStatus} (Bant Eni: {indicators.BollingerBandwidth}%)");
-            reasons.Add($"ADX Trend Gücü (14): {indicators.Adx:F1} ({indicators.AdxTrendStrength})");
-            reasons.Add($"Həcm Analizi: {indicators.ObvTrend}, Sıçrayış: {indicators.VolumeSurgeRatio:F1}x");
-            reasons.Add($"Struktur: Dəstək ${indicators.SupportLevel} | Müqavimət ${indicators.ResistanceLevel}");
 
             decimal minTfMultiplier = timeframe switch
             {

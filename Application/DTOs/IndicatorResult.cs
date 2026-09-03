@@ -30,8 +30,11 @@ namespace CryptoSense.Application.DTOs
         public string EmaTrend { get; set; } = "Neytral";
         public IndicatorVote EmaVote { get; set; } = IndicatorVote.Neutral;
 
-        // 5. SMA 20
+        // 5. MA / SMA (20, 50)
         public decimal Sma20 { get; set; }
+        public decimal Sma50 { get; set; }
+        public string SmaTrend { get; set; } = "Neytral";
+        public IndicatorVote SmaVote { get; set; } = IndicatorVote.Neutral;
 
         // 6. Bollinger Bands (20, 2)
         public decimal BollingerUpper { get; set; }

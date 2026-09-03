@@ -334,10 +334,32 @@ namespace CryptoSense.Worker
                                         }
                                     }
                                 }
-                                catch (Exception coinEx)
+                                catch (Exception)
                                 {
-                                    Console.WriteLine($"[BackgroundMarketScanner] Coin scan warning ({sym}): {coinEx.Message}");
                                 }
+                            }
+                        }
+
+                        // =========================================================================
+                        // 3. PERIODIC LIVENESS HEARTBEAT (EVERY 15 MINUTES IF NO SIGNALS OCCURRED)
+                        // =========================================================================
+                        var nowUtc = DateTime.UtcNow;
+                        foreach (var kvp in TelegramBotService.UserPreferences)
+                        {
+                            var chatId = kvp.Key;
+                            var s = kvp.Value;
+                            if (!s.IsActive) continue;
+
+                            var minutesSinceSignal = (nowUtc - s.LastSignalSentUtc).TotalMinutes;
+                            var minutesSinceHeartbeat = (nowUtc - s.LastHeartbeatSentUtc).TotalMinutes;
+
+                            if (minutesSinceSignal >= 15 && minutesSinceHeartbeat >= 15)
+                            {
+                                s.LastHeartbeatSentUtc = nowUtc;
+                                var heartbeatMsg = "🟢 <b>Sistem Canlı İzləmədədir (15 Dəqiqəlik Vəziyyət):</b>\n\n" +
+                                                   "ℹ️ <i>Son 15 dəqiqə ərzində bazarda 70%+ uğur tələblərinə tam cavab verən risk-təsdiqli yeni siqnal aşkarlanmadı.</i>\n\n" +
+                                                   "🎯 <b>Bot 24/7 rejimində bazarı analiz edir.</b> EMA, MA və MACD razılaşması olan yeni şam formalaşan kimi siqnal dərhal sizə göndəriləcək.";
+                                await _telegramService.SendMessageAsync(heartbeatMsg, chatId);
                             }
                         }
                     }

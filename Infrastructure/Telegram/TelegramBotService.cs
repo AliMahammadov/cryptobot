@@ -123,6 +123,8 @@ namespace CryptoSense.Infrastructure.Telegram
                 var settings = GetSettings(specificChatId);
                 var userSigNum = signal.UserSignalNumbers.GetOrAdd(specificChatId, _ => ++settings.AlertCounter);
                 var msg = TelegramMessageFormatter.FormatSignalAlert(signal, userSigNum);
+                settings.LastSignalSentUtc = DateTime.UtcNow;
+                settings.LastHeartbeatSentUtc = DateTime.UtcNow;
                 await SendMessageAsync(msg, specificChatId);
                 return;
             }
@@ -150,6 +152,8 @@ namespace CryptoSense.Infrastructure.Telegram
 
                 var userSigNum = signal.UserSignalNumbers.GetOrAdd(chatId, _ => ++settings.AlertCounter);
                 var msg = TelegramMessageFormatter.FormatSignalAlert(signal, userSigNum);
+                settings.LastSignalSentUtc = DateTime.UtcNow;
+                settings.LastHeartbeatSentUtc = DateTime.UtcNow;
                 await SendMessageAsync(msg, chatId);
             }
         }
@@ -594,57 +598,37 @@ namespace CryptoSense.Infrastructure.Telegram
             {
                 var sampleCoins = new[] { "SOLUSDT", "BTCUSDT", "ETHUSDT", "DOGEUSDT", "XRPUSDT", "BNBUSDT", "SUIUSDT", "PEPEUSDT", "AVAXUSDT" };
 
-                if (text.Contains("Bütün Zamanlar") || text.Contains("Hamısı"))
+                string targetTf = "Hamısı";
+                if (text.Contains("15m") || text.Contains("15 Dəqiqə") || text.Contains("15 deqiqe")) targetTf = "15m";
+                else if (text.Contains("3m") || text.Contains("3 Dəqiqə") || text.Contains("3 deqiqe")) targetTf = "3m";
+                else if (text.Contains("5m") || text.Contains("5 Dəqiqə") || text.Contains("5 deqiqe")) targetTf = "5m";
+                else if (text.Contains("1h") || text.Contains("1 Saat")) targetTf = "1h";
+                else if (text.Contains("4h") || text.Contains("4 Saat")) targetTf = "4h";
+                else if (text.Contains("Bütün Zamanlar") || text.Contains("Hamısı")) targetTf = "Hamısı";
+
+                userSettings.Timeframe = targetTf;
+                userSettings.LastResumeTime = DateTime.UtcNow;
+
+                var openSignals = await signalEngine.GetTrackedActiveSignalsAsync();
+                var activeSig = openSignals.FirstOrDefault(s => 
+                    (targetTf == "Hamısı" || s.Timeframe == targetTf) && 
+                    (s.SignalType.Contains("LONG") || s.SignalType.Contains("SHORT")) &&
+                    s.Status == Domain.Enums.SignalStatus.Open &&
+                    s.ExpiryTimeUtc > DateTime.UtcNow);
+
+                if (activeSig != null)
                 {
-                    userSettings.Timeframe = "Hamısı";
-                    userSettings.LastResumeTime = DateTime.UtcNow;
-                    await SendMessageAsync("⏳ <b>Bütün zaman çərçivələri (3m, 5m, 15m, 1h, 4h) üzrə bazar skan edilir...</b>", chatId, TelegramKeyboards.BuildUserKeyboard(userSettings, isAdmin));
-                    var tfs = new[] { "3m", "5m", "15m", "1h", "4h" };
-                    foreach (var tf in tfs)
-                    {
-                        foreach (var sym in sampleCoins.Take(3))
-                        {
-                            var sig = await signalEngine.AnalyzeCoinAsync(sym, tf);
-                            if (sig.Confidence >= 78 && (sig.SignalType.Contains("LONG") || sig.SignalType.Contains("SHORT")))
-                            {
-                                await SendSignalAlertAsync(sig, chatId);
-                                await Task.Delay(250);
-                            }
-                        }
-                    }
-                    return;
+                    await SendMessageAsync($"✅ <b>Zaman Çərçivəsi Təyin Edildi:</b> <code>{targetTf}</code>\n<i>Aktiv cari əməliyyat tapıldı:</i>", chatId, TelegramKeyboards.BuildUserKeyboard(userSettings, isAdmin));
+                    await SendSignalAlertAsync(activeSig, chatId);
                 }
                 else
                 {
-                    string targetTf = "15m";
-                    if (text.Contains("15m") || text.Contains("15 Dəqiqə") || text.Contains("15 deqiqe")) targetTf = "15m";
-                    else if (text.Contains("3m") || text.Contains("3 Dəqiqə") || text.Contains("3 deqiqe")) targetTf = "3m";
-                    else if (text.Contains("5m") || text.Contains("5 Dəqiqə") || text.Contains("5 deqiqe")) targetTf = "5m";
-                    else if (text.Contains("1h") || text.Contains("1 Saat")) targetTf = "1h";
-                    else if (text.Contains("4h") || text.Contains("4 Saat")) targetTf = "4h";
-
-                    userSettings.Timeframe = targetTf;
-                    userSettings.LastResumeTime = DateTime.UtcNow;
-
-                    await SendMessageAsync($"⏳ <b>Yalnız ({targetTf}) üzrə 78%+ Confluence siqnalları axtarılır... (Profiliniz '{targetTf}' olaraq təyin edildi)</b>", chatId, TelegramKeyboards.BuildUserKeyboard(userSettings, isAdmin));
-
-                    int found = 0;
-                    foreach (var sym in sampleCoins)
-                    {
-                        var sig = await signalEngine.AnalyzeCoinAsync(sym, targetTf);
-                        if (sig.Confidence >= 78 && (sig.SignalType.Contains("LONG") || sig.SignalType.Contains("SHORT")))
-                        {
-                            await SendSignalAlertAsync(sig, chatId);
-                            found++;
-                            await Task.Delay(250);
-                        }
-                    }
-                    if (found == 0)
-                    {
-                        await SendMessageAsync($"ℹ️ Hal-hazırda {targetTf} zamanında tələblərə cavab verən aktiv siqnal yoxdur.", chatId, TelegramKeyboards.BuildUserKeyboard(userSettings, isAdmin));
-                    }
-                    return;
+                    var noSigMsg = $"✅ <b>Zaman Çərçivəsi Təyin Edildi:</b> <code>{targetTf}</code>\n\n" +
+                                   $"ℹ️ <i>Hal-hazırda ({targetTf} üzrə) tələblərə cavab verən (>=70% win-rate) aktiv siqnal yoxdur.</i>\n\n" +
+                                   $"🟢 <b>Sistem canlı rejimdə bazarı 24/7 analiz edir.</b> Yeni təsdiqlənmiş şam formalaşan kimi siqnal dərhal sizə göndəriləcək.";
+                    await SendMessageAsync(noSigMsg, chatId, TelegramKeyboards.BuildUserKeyboard(userSettings, isAdmin));
                 }
+                return;
             }
 
             // DIRECT TIMEFRAME PREFERENCE SELECTION

@@ -69,4 +69,14 @@ namespace CryptoSense.Domain.Entities
         public decimal BestTradePercent { get; set; }
         public decimal WorstTradePercent { get; set; }
     }
+
+    public class MacroMarketOverview
+    {
+        public decimal BtcDominance { get; set; } = 59.0m;
+        public decimal UsdtDominance { get; set; } = 6.8m;
+        public decimal TotalMarketCapUsd { get; set; } = 2.65e12m;
+        public decimal MarketCapChange24h { get; set; } = 0m;
+        public string Summary { get; set; } = "Bazar Sabitdir";
+        public DateTime FetchedAtUtc { get; set; } = DateTime.UtcNow;
+    }
 }

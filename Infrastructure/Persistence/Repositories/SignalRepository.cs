@@ -66,7 +66,9 @@ namespace CryptoSense.Infrastructure.Persistence.Repositories
 
         public async Task<PerformanceStats> GetPerformanceStatsAsync()
         {
-            var all = await _context.Signals.ToListAsync();
+            var all = await _context.Signals
+                .Where(s => s.SignalType.Contains("LONG") || s.SignalType.Contains("SHORT"))
+                .ToListAsync();
             var closed = all.Where(s => s.Status != SignalStatus.Open || s.IsClosed).ToList();
 
             var stats = new PerformanceStats
