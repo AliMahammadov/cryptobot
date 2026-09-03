@@ -113,7 +113,7 @@ namespace CryptoSense.Infrastructure.MarketData
                 {
                     var response = await _httpClient.GetStringAsync("/fapi/v1/ticker/24hr");
                     var list = ParseTickers(response);
-                    if (list.Count > 0) return list.Take(topCount).ToList();
+                    if (list.Count > 0) return list.OrderByDescending(t => t.VolumeQuote).Take(topCount).ToList();
                 }
                 catch (HttpRequestException ex) when (ex.StatusCode == System.Net.HttpStatusCode.TooManyRequests || (int?)ex.StatusCode == 418 || (int?)ex.StatusCode == 451)
                 {
@@ -133,7 +133,7 @@ namespace CryptoSense.Infrastructure.MarketData
             {
                 var response = await _visionClient.GetStringAsync($"{VisionUrl}/api/v3/ticker/24hr");
                 var list = ParseTickers(response);
-                if (list.Count > 0) return list.Take(topCount).ToList();
+                if (list.Count > 0) return list.OrderByDescending(t => t.VolumeQuote).Take(topCount).ToList();
             }
             catch (Exception ex)
             {
@@ -141,6 +141,72 @@ namespace CryptoSense.Infrastructure.MarketData
             }
 
             return new List<CoinTicker>();
+        }
+
+        public async Task<CoinTicker?> Get24hTickerAsync(string symbol)
+        {
+            var cleanSym = symbol.ToUpper();
+            if (!cleanSym.EndsWith("USDT")) cleanSym += "USDT";
+
+            bool tryFutures = DateTime.UtcNow >= _futuresCoolDownUntil;
+            if (tryFutures)
+            {
+                try
+                {
+                    var response = await _httpClient.GetStringAsync($"/fapi/v1/ticker/24hr?symbol={cleanSym}");
+                    using var doc = JsonDocument.Parse(response);
+                    var item = doc.RootElement;
+                    if (decimal.TryParse(item.GetProperty("lastPrice").GetString(), NumberStyles.Any, CultureInfo.InvariantCulture, out var price))
+                    {
+                        decimal.TryParse(item.GetProperty("priceChangePercent").GetString(), NumberStyles.Any, CultureInfo.InvariantCulture, out var change);
+                        decimal.TryParse(item.GetProperty("quoteVolume").GetString(), NumberStyles.Any, CultureInfo.InvariantCulture, out var vol);
+                        decimal high = 0, low = 0;
+                        if (item.TryGetProperty("highPrice", out var hp)) decimal.TryParse(hp.GetString(), NumberStyles.Any, CultureInfo.InvariantCulture, out high);
+                        if (item.TryGetProperty("lowPrice", out var lp)) decimal.TryParse(lp.GetString(), NumberStyles.Any, CultureInfo.InvariantCulture, out low);
+
+                        return new CoinTicker
+                        {
+                            Symbol = cleanSym,
+                            Price = price,
+                            PriceChangePercent = change,
+                            VolumeQuote = vol,
+                            High24h = high,
+                            Low24h = low
+                        };
+                    }
+                }
+                catch { }
+            }
+
+            // Fallback to Vision / Spot
+            try
+            {
+                var spotSym = cleanSym.StartsWith("1000") ? cleanSym.Substring(4) : cleanSym;
+                var response = await _visionClient.GetStringAsync($"{VisionUrl}/api/v3/ticker/24hr?symbol={spotSym}");
+                using var doc = JsonDocument.Parse(response);
+                var item = doc.RootElement;
+                if (decimal.TryParse(item.GetProperty("lastPrice").GetString(), NumberStyles.Any, CultureInfo.InvariantCulture, out var price))
+                {
+                    decimal.TryParse(item.GetProperty("priceChangePercent").GetString(), NumberStyles.Any, CultureInfo.InvariantCulture, out var change);
+                    decimal.TryParse(item.GetProperty("quoteVolume").GetString(), NumberStyles.Any, CultureInfo.InvariantCulture, out var vol);
+                    decimal high = 0, low = 0;
+                    if (item.TryGetProperty("highPrice", out var hp)) decimal.TryParse(hp.GetString(), NumberStyles.Any, CultureInfo.InvariantCulture, out high);
+                    if (item.TryGetProperty("lowPrice", out var lp)) decimal.TryParse(lp.GetString(), NumberStyles.Any, CultureInfo.InvariantCulture, out low);
+
+                    return new CoinTicker
+                    {
+                        Symbol = cleanSym,
+                        Price = price,
+                        PriceChangePercent = change,
+                        VolumeQuote = vol,
+                        High24h = high,
+                        Low24h = low
+                    };
+                }
+            }
+            catch { }
+
+            return null;
         }
 
         private static List<CoinTicker> ParseTickers(string json)

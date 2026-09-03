@@ -100,8 +100,7 @@ namespace CryptoSense.Application.Services
                 // 1. Live 24h Ticker & Dominance (always ensures live price even if klines lag)
                 try
                 {
-                    var tickers = await _marketData.GetTopFuturesTickersAsync(100);
-                    var btcTicker = tickers.FirstOrDefault(t => t.Symbol == "BTCUSDT");
+                    var btcTicker = await _marketData.Get24hTickerAsync("BTCUSDT");
                     if (btcTicker != null)
                     {
                         compass.Price = btcTicker.Price;
