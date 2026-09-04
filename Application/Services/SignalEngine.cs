@@ -198,6 +198,46 @@ namespace CryptoSense.Application.Services
             var sourceCandleTime = closedCandle.Time;
             var currentPrice = klines.Last().Close;
 
+            // Live Freshness Guard: In live scanning, a signal is ONLY valid if its closed candle just finished!
+            // If the candle closed minutes or hours ago, it is historical/stale and must not generate live trades.
+            if (isLiveScan)
+            {
+                var candleCloseTime = DateTimeOffset.FromUnixTimeMilliseconds(closedCandle.CloseTime).UtcDateTime;
+                var candleAge = DateTime.UtcNow - candleCloseTime;
+                var maxLiveDelay = timeframe switch
+                {
+                    "1m" => TimeSpan.FromSeconds(90),
+                    "3m" => TimeSpan.FromMinutes(3),
+                    "5m" => TimeSpan.FromMinutes(4),
+                    "15m" => TimeSpan.FromMinutes(8),
+                    "1h" => TimeSpan.FromMinutes(15),
+                    "4h" => TimeSpan.FromMinutes(30),
+                    _ => TimeSpan.FromMinutes(3)
+                };
+
+                if (candleAge > maxLiveDelay)
+                {
+                    return new FuturesSignal
+                    {
+                        Symbol = symbol,
+                        Timeframe = timeframe,
+                        Direction = SignalDirection.Buy,
+                        SignalType = "NEYTRAL (GÖZLƏMƏ) ⚪",
+                        Status = SignalStatus.Open,
+                        OutcomeStatus = "GÖZLƏMƏ ⚪",
+                        CurrentPrice = currentPrice,
+                        EntryPrice = currentPrice,
+                        ConfluenceScore = 50,
+                        Confidence = 50,
+                        SourceCandleOpenTimeUtc = sourceCandleTime,
+                        GeneratedAt = DateTime.UtcNow,
+                        ExpiryTimeUtc = DateTime.UtcNow.AddMinutes(30),
+                        TimestampFormatted = CryptoSense.Domain.Common.TimeHelper.NowFormatted,
+                        AnalysisReasons = new List<string> { $"Son bağlanan şam {candleAge.TotalMinutes:F0} dəqiqə əvvəl bitib. Yeni canlı şamın bağlanması gözlənilir." }
+                    };
+                }
+            }
+
             var candleKey = $"{symbol}_{timeframe}_{sourceCandleTime:yyyyMMddHHmmss}";
 
             // Check if existing signal for this candle already created (Physical Dedup)

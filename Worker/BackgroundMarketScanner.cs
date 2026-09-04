@@ -476,6 +476,32 @@ namespace CryptoSense.Worker
                         var signal = await engine.AnalyzeCoinAsync(pair.sym, pair.tf, isLiveScan: true);
                         if (signal.Confidence >= _config.MinConfidenceThreshold && (signal.SignalType.Contains("LONG") || signal.SignalType.Contains("SHORT")))
                         {
+                            var candleDuration = signal.Timeframe switch
+                            {
+                                "1m" => TimeSpan.FromMinutes(1),
+                                "3m" => TimeSpan.FromMinutes(3),
+                                "5m" => TimeSpan.FromMinutes(5),
+                                "15m" => TimeSpan.FromMinutes(15),
+                                "1h" => TimeSpan.FromHours(1),
+                                "4h" => TimeSpan.FromHours(4),
+                                _ => TimeSpan.FromMinutes(5)
+                            };
+                            var maxTolerance = signal.Timeframe switch
+                            {
+                                "1m" => TimeSpan.FromSeconds(90),
+                                "3m" => TimeSpan.FromMinutes(3),
+                                "5m" => TimeSpan.FromMinutes(4),
+                                "15m" => TimeSpan.FromMinutes(8),
+                                "1h" => TimeSpan.FromMinutes(15),
+                                "4h" => TimeSpan.FromMinutes(30),
+                                _ => TimeSpan.FromMinutes(3)
+                            };
+                            var candleCloseUtc = signal.SourceCandleOpenTimeUtc + candleDuration;
+                            if (DateTime.UtcNow - candleCloseUtc > maxTolerance)
+                            {
+                                return;
+                            }
+
                             var alertKey = $"{signal.Symbol}_{signal.Timeframe}_{signal.SourceCandleOpenTimeUtc:yyyyMMddHHmmss}";
                             if (!_lastAlertSent.ContainsKey(alertKey) && !signal.SignalAlertSent)
                             {

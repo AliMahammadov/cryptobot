@@ -390,8 +390,35 @@ namespace CryptoSense.Infrastructure.Telegram
                     continue;
                 }
 
-                // Strict Chronological check: never send a signal generated before the user selected timeframe / resumed (with 5 min buffer)
-                if (signal.GeneratedAt < settings.LastResumeTime.AddMinutes(-5))
+                // Strict Chronological check: never send a signal generated before the user selected timeframe / resumed
+                if (signal.GeneratedAt < settings.LastResumeTime.AddSeconds(-15))
+                {
+                    continue;
+                }
+
+                // Strict Candle Freshness check: never deliver a signal whose closed candle is older than tolerance
+                var candleDuration = signal.Timeframe switch
+                {
+                    "1m" => TimeSpan.FromMinutes(1),
+                    "3m" => TimeSpan.FromMinutes(3),
+                    "5m" => TimeSpan.FromMinutes(5),
+                    "15m" => TimeSpan.FromMinutes(15),
+                    "1h" => TimeSpan.FromHours(1),
+                    "4h" => TimeSpan.FromHours(4),
+                    _ => TimeSpan.FromMinutes(5)
+                };
+                var maxTolerance = signal.Timeframe switch
+                {
+                    "1m" => TimeSpan.FromSeconds(90),
+                    "3m" => TimeSpan.FromMinutes(3),
+                    "5m" => TimeSpan.FromMinutes(4),
+                    "15m" => TimeSpan.FromMinutes(8),
+                    "1h" => TimeSpan.FromMinutes(15),
+                    "4h" => TimeSpan.FromMinutes(30),
+                    _ => TimeSpan.FromMinutes(3)
+                };
+                var candleCloseUtc = signal.SourceCandleOpenTimeUtc + candleDuration;
+                if (DateTime.UtcNow - candleCloseUtc > maxTolerance)
                 {
                     continue;
                 }
