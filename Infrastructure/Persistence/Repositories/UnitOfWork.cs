@@ -50,6 +50,18 @@ namespace CryptoSense.Infrastructure.Persistence.Repositories
                 });
                 _context.SaveChanges();
             }
+
+            // Cleanup legacy premature timeout signals from past bugged 1-candle versions
+            try
+            {
+                var legacyFakeSignals = _context.Signals.Where(s => s.Status == SignalStatus.Failed && (s.OutcomeStatus.Contains("Bitdi") || s.OutcomeStatus.Contains("Vaxt bitdi"))).ToList();
+                if (legacyFakeSignals.Count > 0)
+                {
+                    _context.Signals.RemoveRange(legacyFakeSignals);
+                    _context.SaveChanges();
+                }
+            }
+            catch { }
         }
 
         public void PurgeAndResetDatabase()

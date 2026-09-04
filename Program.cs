@@ -86,8 +86,8 @@ builder.Services.AddSingleton<ITelegramBotService>(sp =>
     return new TelegramBotService(client, config, sp);
 });
 
-// If running in test mode, we don't start background daemons
-if (!args.Contains("--test"))
+// If running in test or maintenance mode, we don't start background daemons
+if (!args.Contains("--test") && !args.Contains("--clean-db") && !args.Contains("--reset-db"))
 {
     builder.Services.AddHostedService(sp => (TelegramBotService)sp.GetRequiredService<ITelegramBotService>());
     builder.Services.AddHostedService<BackgroundMarketScanner>();
@@ -114,6 +114,7 @@ using (var scope = app.Services.CreateScope())
     {
         unitOfWork.PurgeAndResetDatabase();
         Console.WriteLine("[Database] Database purged and clean SuperAdmin re-created.");
+        return;
     }
 
     var userManager = scope.ServiceProvider.GetRequiredService<IUserManagerService>();

@@ -379,6 +379,41 @@ namespace CryptoSense.Infrastructure.Testing
                 return Task.FromResult(userKb != null && tfKb != null && allSignalsKb != null);
             });
 
+            // 15. Complete Telegram Command Dispatcher & End-to-End User Flow Simulation
+            await AssertTest("Test 22: Complete Telegram Command Dispatcher & End-to-End User Flow Simulation", async () =>
+            {
+                var userSettings = new UserSettings { Timeframe = "3m", IsActive = true };
+                userSettings.Coins.Add("BTCUSDT");
+                userSettings.Coins.Add("ETHUSDT");
+
+                // 1. My Coins Prompt
+                var cleanList = string.Join(", ", userSettings.Coins.Select(c => c.Replace("USDT", "")));
+                var myCoinsPrompt = $"⭐ Mənim Coinlərim: {cleanList}";
+                if (!myCoinsPrompt.Contains("BTC, ETH")) return false;
+
+                // 2. Compass Formatter
+                var compass = await _signalEngine.GetBtcCompassAsync();
+                var compassMsg = TelegramMessageFormatter.FormatBtcCompass(compass);
+                if (!compassMsg.Contains("Bitcoin Makro Bazar Kompası") || compass.Price <= 0) return false;
+
+                // 3. News Formatter
+                var news = await _newsService.GetNewsAndSentimentAsync();
+                var newsMsg = TelegramMessageFormatter.FormatNewsSentiment(news);
+                if (!newsMsg.Contains("Qlobal Kripto Xəbərləri")) return false;
+
+                // 4. Performance Stats Formatter
+                var stats = await _signalEngine.GetPerformanceStatsAsync(userSettings.Timeframe, userSettings.Coins);
+                var statsMsg = TelegramMessageFormatter.FormatPerformanceStats(stats);
+                if (!statsMsg.Contains("Canlı Statistik Performans")) return false;
+
+                // 5. Deep Breakdown Formatter
+                var breakdown = await _signalEngine.GetCoinPerformanceBreakdownAsync(userSettings.Coins);
+                var breakdownMsg = TelegramMessageFormatter.FormatCoinPerformanceBreakdown(breakdown, userSettings.Coins);
+                if (!breakdownMsg.Contains("Coinlər Üzrə Qlobal Win-Rate")) return false;
+
+                return true;
+            });
+
             Console.WriteLine("\n========================================================");
             Console.WriteLine($"🏁 TEST NƏTİCƏLƏRİ: {passed} UĞURLU (PASS), {failed} UĞURSUZ (FAIL)");
             Console.WriteLine("========================================================\n");
