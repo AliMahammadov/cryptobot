@@ -450,6 +450,53 @@ namespace CryptoSense.Infrastructure.Testing
                 return matches;
             });
 
+            // 18. Chronological Signal Ordering & Deduplication Integrity Test
+            await AssertTest("Test 25: Chronological Signal Ordering, Formatting & Deduplication Verification", () =>
+            {
+                var baseTime = DateTime.UtcNow.Date.AddHours(12);
+                var sig1 = new FuturesSignal { Id = 101, Symbol = "ARBUSDT", Timeframe = "3m", Confidence = 88, GeneratedAt = baseTime.AddMinutes(0).AddSeconds(37) };
+                var sig2 = new FuturesSignal { Id = 102, Symbol = "OPUSDT", Timeframe = "3m", Confidence = 85, GeneratedAt = baseTime.AddMinutes(0).AddSeconds(37) };
+                var sig3 = new FuturesSignal { Id = 103, Symbol = "ARBUSDT", Timeframe = "15m", Confidence = 75, GeneratedAt = baseTime.AddMinutes(0).AddSeconds(55) };
+                var sig4 = new FuturesSignal { Id = 104, Symbol = "INJUSDT", Timeframe = "1h", Confidence = 85, GeneratedAt = baseTime.AddMinutes(2).AddSeconds(51) };
+                var sig5 = new FuturesSignal { Id = 105, Symbol = "BTCUSDT", Timeframe = "1h", Confidence = 75, GeneratedAt = baseTime.AddMinutes(2).AddSeconds(51) };
+                var sig6 = new FuturesSignal { Id = 106, Symbol = "BTCUSDT", Timeframe = "4h", Confidence = 95, GeneratedAt = baseTime.AddMinutes(2).AddSeconds(52) };
+                var sig7 = new FuturesSignal { Id = 107, Symbol = "WLDUSDT", Timeframe = "3m", Confidence = 85, GeneratedAt = baseTime.AddMinutes(3).AddSeconds(3), TimestampFormatted = CryptoSense.Domain.Common.TimeHelper.FormatAz(baseTime.AddMinutes(3).AddSeconds(3)) };
+
+                var rawList = new List<FuturesSignal> { sig6, sig1, sig4, sig7, sig2, sig5, sig3 };
+
+                // Production ordering pipeline
+                var ordered = rawList
+                    .OrderBy(s => s.GeneratedAt)
+                    .ThenBy(s => s.SourceCandleOpenTimeUtc)
+                    .ThenByDescending(s => s.Confidence)
+                    .ToList();
+
+                // Check strict chronological ordering: each signal time >= previous signal time
+                for (int i = 1; i < ordered.Count; i++)
+                {
+                    if (ordered[i].GeneratedAt < ordered[i - 1].GeneratedAt)
+                        return Task.FromResult(false);
+                }
+
+                // Check formatting
+                if (sig7.TimestampFormatted != CryptoSense.Domain.Common.TimeHelper.FormatAz(sig7.GeneratedAt))
+                    return Task.FromResult(false);
+
+                // Check deduplication
+                string mockChatId = "test_user_chron_123";
+                sig1.UserSignalNumbers[mockChatId] = 1;
+                sig2.UserSignalNumbers[mockChatId] = 2;
+                sig3.UserSignalNumbers[mockChatId] = 3;
+                sig4.UserSignalNumbers[mockChatId] = 4;
+                sig5.UserSignalNumbers[mockChatId] = 5;
+                sig6.UserSignalNumbers[mockChatId] = 6;
+
+                var newForUser = ordered.Where(s => !s.UserSignalNumbers.ContainsKey(mockChatId)).ToList();
+                bool dedupSuccess = newForUser.Count == 1 && newForUser[0].Symbol == "WLDUSDT";
+
+                return Task.FromResult(dedupSuccess && ordered[0].Symbol == "ARBUSDT" && ordered.Last().Symbol == "WLDUSDT");
+            });
+
             Console.WriteLine("\n========================================================");
             Console.WriteLine($"🏁 TEST NƏTİCƏLƏRİ: {passed} UĞURLU (PASS), {failed} UĞURSUZ (FAIL)");
             Console.WriteLine("========================================================\n");

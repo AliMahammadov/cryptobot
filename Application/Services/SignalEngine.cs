@@ -201,14 +201,12 @@ namespace CryptoSense.Application.Services
             var candleKey = $"{symbol}_{timeframe}_{sourceCandleTime:yyyyMMddHHmmss}";
 
             // Check if existing signal for this candle already created (Physical Dedup)
-            if (isLiveScan)
+            var existingSignal = await _unitOfWork.Signals.GetExistingCandleSignalAsync(symbol, timeframe, sourceCandleTime);
+            if (existingSignal != null)
             {
-                var existingSignal = await _unitOfWork.Signals.GetExistingCandleSignalAsync(symbol, timeframe, sourceCandleTime);
-                if (existingSignal != null)
-                {
-                    existingSignal.CurrentPrice = currentPrice;
-                    return existingSignal;
-                }
+                existingSignal.CurrentPrice = currentPrice;
+                _recentCandleSignals.TryAdd(candleKey, existingSignal);
+                return existingSignal;
             }
 
             if (_recentCandleSignals.TryGetValue(candleKey, out var cachedSig))
