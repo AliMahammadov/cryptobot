@@ -7,7 +7,7 @@ namespace CryptoSense.Application.DTOs
         public string SuperAdminTelegram { get; set; } = "@Ali_Mahammadov";
         public string SuperAdminChatId { get; set; } = "1219998176";
         public long SuperAdminUserId { get; set; } = 1219998176;
-        public string TelegramBotToken { get; set; } = "8671151605:AAG57j5r_Uwwq7o_9rlUnjGkyTp5d5BZHWI";
+        public string TelegramBotToken { get; set; } = "8671151605:AAH6dzgLm2fiYaKGOtvK3Ic34UcsNuZVMDg";
         public bool AutoScanEnabled { get; set; } = true;
         public int MinConfidenceThreshold { get; set; } = 78;
         public List<string> SelectedCoins { get; set; } = new();
