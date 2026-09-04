@@ -38,20 +38,24 @@ namespace CryptoSense.Infrastructure.Telegram
 
         public static string FormatOutcomeAlert(FuturesSignal signal, int userSigNum, string outcomeType, decimal hitPrice, decimal profitPct)
         {
-            bool isWin = outcomeType.Contains("Hədəf") || outcomeType.Contains("TP") || outcomeType.Contains("Uğurlu") || outcomeType.Contains("Ugurlu") || outcomeType.Contains("Breakeven") || outcomeType.Contains("Qorundu");
-            
-            if (outcomeType.Contains("Stop Loss") || outcomeType.Contains("SL") || outcomeType.Contains("Bitdi"))
+            // Real trade success evaluation:
+            // If the signal status is Success, or it hit any TP, or closed at breakeven/protected, or profit is positive: it's a WIN!
+            bool isExplicitFail = outcomeType.Contains("Stop Loss") || outcomeType.Contains("SL") || signal.Status == SignalStatus.Failed || (profitPct < -0.30m && !signal.Tp1Notified && !outcomeType.Contains("Breakeven") && !outcomeType.Contains("Qorundu"));
+            bool isExplicitWin = signal.Status == SignalStatus.Success || outcomeType.Contains("Hədəf") || outcomeType.Contains("TP") || outcomeType.Contains("Uğurlu") || outcomeType.Contains("Ugurlu") || outcomeType.Contains("Breakeven") || outcomeType.Contains("Qorundu") || signal.Tp1Notified || profitPct > 0;
+
+            bool isWin = isExplicitWin && !isExplicitFail;
+            if (outcomeType.Contains("Stop Loss") || outcomeType.Contains("SL"))
             {
-                if (!outcomeType.Contains("Breakeven") && !outcomeType.Contains("Qorundu"))
-                {
-                    isWin = false;
-                }
+                isWin = false;
             }
 
-            if (isWin && profitPct < 0) profitPct = Math.Abs(profitPct);
-            if (!isWin && profitPct > 0) profitPct = -Math.Abs(profitPct);
+            // DO NOT invert profitPct! Retain the true mathematical PnL!
+            if (!isWin && profitPct > 0 && (outcomeType.Contains("Stop Loss") || outcomeType.Contains("SL")))
+            {
+                profitPct = -Math.Abs(profitPct);
+            }
 
-            var icon = isWin ? "🎯" : "⛔";
+            var icon = isWin ? "🎯" : (profitPct >= -0.30m && profitPct <= 0.30m && !signal.Tp1Notified ? "⚪" : "⛔");
             var cleanSymbol = signal.Symbol.Replace("USDT", "");
             var directionStr = (signal.Direction == SignalDirection.Buy || signal.SignalType.Contains("LONG")) ? "LONG" : "SHORT";
 
@@ -59,13 +63,25 @@ namespace CryptoSense.Infrastructure.Telegram
             if (outcomeType.Contains("Stop Loss") || outcomeType.Contains("SL"))
             {
                 sb.AppendLine($"⛔ <b>#{userSigNum} NƏTİCƏ HESABATI</b>");
-                sb.AppendLine($"📌 <b>#{userSigNum} nömrəli əməliyyat üzrə Stop-Loss vurdu (UĞURSUZ OLDU) ❌</b>");
+                sb.AppendLine($"📌 <b>#{userSigNum} nömrəli əməliyyat üzrə: Stop-Loss vurdu (UĞURSUZ OLDU) ❌</b>");
                 sb.AppendLine();
                 sb.AppendLine($"⚠️ <b>Təcili əməliyyatı dayandırın!</b>");
             }
             else
             {
-                var statusText = isWin ? $"{outcomeType} (UĞURLU OLDU) ✅" : $"{outcomeType} (UĞURSUZ OLDU) ❌";
+                string statusText;
+                if (isWin)
+                {
+                    statusText = outcomeType.Contains("✅") ? outcomeType : $"{outcomeType} (UĞURLU OLDU) ✅";
+                }
+                else if (icon == "⚪")
+                {
+                    statusText = outcomeType.Contains("⚪") ? outcomeType : $"{outcomeType} (Zərərsiz/Neytral) ⚪";
+                }
+                else
+                {
+                    statusText = outcomeType.Contains("❌") ? outcomeType : $"{outcomeType} (UĞURSUZ OLDU) ❌";
+                }
                 sb.AppendLine($"{icon} <b>#{userSigNum} NƏTİCƏ HESABATI</b>");
                 sb.AppendLine($"📌 <b>#{userSigNum} nömrəli əməliyyat üzrə: {statusText}</b>");
             }
@@ -185,15 +201,27 @@ namespace CryptoSense.Infrastructure.Telegram
             return sb.ToString();
         }
 
-        public static string FormatPerformanceStats(PerformanceStats stats)
+        public static string FormatPerformanceStats(PerformanceStats stats, string? activeTimeframe = null)
         {
             var sb = new StringBuilder();
             sb.AppendLine("📊 <b>Canlı Statistik Performans:</b>");
+            if (!string.IsNullOrEmpty(activeTimeframe) && activeTimeframe != "Hamısı" && activeTimeframe != "Hamisi")
+            {
+                sb.AppendLine($"⏱ <b>Seçilmiş Rejim:</b> <code>{activeTimeframe}</code>");
+            }
+            else
+            {
+                sb.AppendLine("🌐 <b>Əhatə:</b> <code>Bütün Zamanlar və Bütün Coinlər</code>");
+            }
             sb.AppendLine("-----------------------------------");
             sb.AppendLine($"📌 <b>Ümumi Analizlər:</b> {stats.TotalSignals} ədəd");
             sb.AppendLine($"🟡 <b>Açıq İzlənən:</b> {stats.OpenSignals} ədəd");
             sb.AppendLine($"✅ <b>Uğurlu (Hədəfə Çatan):</b> {stats.SuccessSignals} ədəd");
             sb.AppendLine($"❌ <b>Uğursuz:</b> {stats.FailedSignals} ədəd");
+            if (stats.NeutralSignals > 0)
+            {
+                sb.AppendLine($"⚪ <b>Neytral / Zərərsiz:</b> {stats.NeutralSignals} ədəd");
+            }
             sb.AppendLine("-----------------------------------");
             sb.AppendLine($"🎯 <b>Real Qələbə Faizi (Win Rate):</b> <b>{stats.WinRatePercent.ToString("F1", CultureInfo.InvariantCulture)}%</b>");
             sb.AppendLine($"📈 <b>Xalis Nəticə (PnL):</b> <b>{(stats.TotalNetProfitPercent >= 0 ? "+" : "")}{stats.TotalNetProfitPercent.ToString("F2", CultureInfo.InvariantCulture)}%</b>");

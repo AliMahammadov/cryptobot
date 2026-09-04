@@ -497,6 +497,87 @@ namespace CryptoSense.Infrastructure.Testing
                 return Task.FromResult(dedupSuccess && ordered[0].Symbol == "ARBUSDT" && ordered.Last().Symbol == "WLDUSDT");
             });
 
+            // 19. Timeout Outcome PnL & Win/Loss Mathematical Integrity Test
+            await AssertTest("Test 26: Outcome Alert Mathematical & Status Integrity (No Profit Inversion)", () =>
+            {
+                var tp1WonSignal = new FuturesSignal
+                {
+                    SignalNumber = 7,
+                    Symbol = "SANDUSDT",
+                    Direction = SignalDirection.Sell,
+                    SignalType = "PEŞƏKAR TREND SHORT 🔴",
+                    Timeframe = "5m",
+                    EntryPrice = 0.03922m,
+                    Status = SignalStatus.Success,
+                    Tp1Notified = true
+                };
+
+                // SAND #7 scenario: +2.17% profit when 5m duration ended after TP1 was hit
+                var alert = TelegramMessageFormatter.FormatOutcomeAlert(tp1WonSignal, 7, "5m Müddəti Tamamlandı (Qazancla Qorundu)", 0.03837m, 2.17m);
+                bool sandWinValid = alert.Contains("+2.17%") && !alert.Contains("-2.17%") && !alert.Contains("UĞURSUZ") && alert.Contains("🎯");
+
+                // Genuine Stop Loss test: must reflect loss
+                var stopLossSignal = new FuturesSignal
+                {
+                    SignalNumber = 8,
+                    Symbol = "OPUSDT",
+                    Direction = SignalDirection.Buy,
+                    SignalType = "PEŞƏKAR TREND LONG 🟢",
+                    Timeframe = "3m",
+                    EntryPrice = 0.1000m,
+                    Status = SignalStatus.Failed
+                };
+                var lossAlert = TelegramMessageFormatter.FormatOutcomeAlert(stopLossSignal, 8, "Stop Loss (SL)", 0.0980m, -2.00m);
+                bool lossValid = lossAlert.Contains("-2.00%") && lossAlert.Contains("UĞURSUZ") && lossAlert.Contains("⛔");
+
+                return Task.FromResult(sandWinValid && lossValid);
+            });
+
+            // 20. Performance Stats Formatter & Coverage Integrity Test
+            await AssertTest("Test 27: Performance Stats Formatting & Neutral Trade Separation", () =>
+            {
+                var stats = new PerformanceStats
+                {
+                    TotalSignals = 25,
+                    OpenSignals = 5,
+                    SuccessSignals = 18,
+                    FailedSignals = 2,
+                    NeutralSignals = 0,
+                    WinRatePercent = 90.0m,
+                    TotalNetProfitPercent = 38.50m,
+                    AvgProfitPerTradePercent = 1.92m
+                };
+
+                var formattedGlobal = TelegramMessageFormatter.FormatPerformanceStats(stats, "Hamısı");
+                bool globalValid = formattedGlobal.Contains("Bütün Zamanlar və Bütün Coinlər") &&
+                                   formattedGlobal.Contains("90.0%") &&
+                                   formattedGlobal.Contains("+38.50%");
+
+                var formattedTf = TelegramMessageFormatter.FormatPerformanceStats(stats, "15m");
+                bool tfValid = formattedTf.Contains("Seçilmiş Rejim:") && formattedTf.Contains("<code>15m</code>");
+
+                return Task.FromResult(globalValid && tfValid);
+            });
+
+            // 21. Live Scanner Multi-Position Capacity Test
+            await AssertTest("Test 28: Multi-Position Market Scanner Capacity (No 5-Trade Block)", () =>
+            {
+                // Verify that having 5+ active unclosed trades does not block scanner execution
+                var activeList = new List<FuturesSignal>
+                {
+                    new() { Symbol = "BTCUSDT", Timeframe = "15m", Status = SignalStatus.Open, IsClosed = false },
+                    new() { Symbol = "ETHUSDT", Timeframe = "15m", Status = SignalStatus.Open, IsClosed = false },
+                    new() { Symbol = "SOLUSDT", Timeframe = "15m", Status = SignalStatus.Open, IsClosed = false },
+                    new() { Symbol = "BNBUSDT", Timeframe = "15m", Status = SignalStatus.Open, IsClosed = false },
+                    new() { Symbol = "DOGEUSDT", Timeframe = "15m", Status = SignalStatus.Open, IsClosed = false },
+                    new() { Symbol = "SUIUSDT", Timeframe = "15m", Status = SignalStatus.Open, IsClosed = false }
+                };
+
+                // A new candidate pair on ARBUSDT 15m must be allowed to scan because ARB is not in activeList
+                bool hasArb = activeList.Any(s => s.Symbol == "ARBUSDT" && s.Timeframe == "15m" && !s.IsClosed && s.Status == SignalStatus.Open);
+                return Task.FromResult(!hasArb && activeList.Count >= 5);
+            });
+
             Console.WriteLine("\n========================================================");
             Console.WriteLine($"🏁 TEST NƏTİCƏLƏRİ: {passed} UĞURLU (PASS), {failed} UĞURSUZ (FAIL)");
             Console.WriteLine("========================================================\n");

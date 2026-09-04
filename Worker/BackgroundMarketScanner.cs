@@ -214,22 +214,28 @@ namespace CryptoSense.Worker
                             {
                                 sig.Status = SignalStatus.Success;
                                 sig.OutcomeStatus = $"{sig.Timeframe} Müddəti Tamamlandı (Qazancla Qorundu: +{pct}%) ✅";
+                                await unitOfWork.Signals.UpdateAsync(sig);
+                                await unitOfWork.SaveChangesAsync(stoppingToken);
+                                if (sig.SignalAlertSent) await _telegramService.SendOutcomeAlertAsync(sig, $"{sig.Timeframe} Müddəti Tamamlandı (Qazancla Qorundu)", currentPrice, Math.Abs(pct));
                             }
                             else if (pct >= -0.30m)
                             {
                                 // Price essentially flat / within normal spread noise
-                                sig.Status = SignalStatus.Success;
+                                sig.Status = SignalStatus.Neutral;
                                 sig.OutcomeStatus = $"{sig.Timeframe} Müddəti Tamamlandı (Zərərsiz/Neytral: {pct}%) ⚪";
+                                await unitOfWork.Signals.UpdateAsync(sig);
+                                await unitOfWork.SaveChangesAsync(stoppingToken);
+                                if (sig.SignalAlertSent) await _telegramService.SendOutcomeAlertAsync(sig, $"{sig.Timeframe} Müddəti Tamamlandı (Neytral)", currentPrice, pct);
                             }
                             else
                             {
                                 sig.Status = SignalStatus.Failed;
                                 sig.OutcomeStatus = $"{sig.Timeframe} Müddəti Tamamlandı (Düzəlişdə Bağlandı: {pct}%) ❌";
+                                sig.ResultPercent = -Math.Abs(pct);
+                                await unitOfWork.Signals.UpdateAsync(sig);
+                                await unitOfWork.SaveChangesAsync(stoppingToken);
+                                if (sig.SignalAlertSent) await _telegramService.SendOutcomeAlertAsync(sig, $"{sig.Timeframe} Müddəti Bitdi", currentPrice, sig.ResultPercent.Value);
                             }
-
-                            await unitOfWork.Signals.UpdateAsync(sig);
-                            await unitOfWork.SaveChangesAsync(stoppingToken);
-                            if (sig.SignalAlertSent) await _telegramService.SendOutcomeAlertAsync(sig, $"{sig.Timeframe} Müddəti Bitdi", currentPrice, pct);
                         }
                     }
                     else // SHORT
@@ -319,22 +325,28 @@ namespace CryptoSense.Worker
                             {
                                 sig.Status = SignalStatus.Success;
                                 sig.OutcomeStatus = $"{sig.Timeframe} Müddəti Tamamlandı (Qazancla Qorundu: +{pct}%) ✅";
+                                await unitOfWork.Signals.UpdateAsync(sig);
+                                await unitOfWork.SaveChangesAsync(stoppingToken);
+                                if (sig.SignalAlertSent) await _telegramService.SendOutcomeAlertAsync(sig, $"{sig.Timeframe} Müddəti Tamamlandı (Qazancla Qorundu)", currentPrice, Math.Abs(pct));
                             }
                             else if (pct >= -0.30m)
                             {
                                 // Price essentially flat / within normal spread noise
-                                sig.Status = SignalStatus.Success;
+                                sig.Status = SignalStatus.Neutral;
                                 sig.OutcomeStatus = $"{sig.Timeframe} Müddəti Tamamlandı (Zərərsiz/Neytral: {pct}%) ⚪";
+                                await unitOfWork.Signals.UpdateAsync(sig);
+                                await unitOfWork.SaveChangesAsync(stoppingToken);
+                                if (sig.SignalAlertSent) await _telegramService.SendOutcomeAlertAsync(sig, $"{sig.Timeframe} Müddəti Tamamlandı (Neytral)", currentPrice, pct);
                             }
                             else
                             {
                                 sig.Status = SignalStatus.Failed;
                                 sig.OutcomeStatus = $"{sig.Timeframe} Müddəti Tamamlandı (Düzəlişdə Bağlandı: {pct}%) ❌";
+                                sig.ResultPercent = -Math.Abs(pct);
+                                await unitOfWork.Signals.UpdateAsync(sig);
+                                await unitOfWork.SaveChangesAsync(stoppingToken);
+                                if (sig.SignalAlertSent) await _telegramService.SendOutcomeAlertAsync(sig, $"{sig.Timeframe} Müddəti Bitdi", currentPrice, sig.ResultPercent.Value);
                             }
-
-                            await unitOfWork.Signals.UpdateAsync(sig);
-                            await unitOfWork.SaveChangesAsync(stoppingToken);
-                            if (sig.SignalAlertSent) await _telegramService.SendOutcomeAlertAsync(sig, $"{sig.Timeframe} Müddəti Bitdi", currentPrice, pct);
                         }
                     }
 
@@ -342,13 +354,13 @@ namespace CryptoSense.Worker
                     {
                         var cooldownMinutes = sig.Timeframe switch
                         {
-                            "1m" => 5,
-                            "3m" => 10,
-                            "5m" => 15,
-                            "15m" => 30,
-                            "1h" => 120,
-                            "4h" => 360,
-                            _ => 15
+                            "1m" => 2,
+                            "3m" => 5,
+                            "5m" => 8,
+                            "15m" => 15,
+                            "1h" => 45,
+                            "4h" => 90,
+                            _ => 10
                         };
                         _activeCandleLocks[$"{sig.Symbol}_{sig.Timeframe}"] = DateTime.UtcNow.AddMinutes(cooldownMinutes);
                     }
@@ -430,14 +442,11 @@ namespace CryptoSense.Worker
                 activeTimeframes.Add("15m");
             }
 
+            var scanPairs = new List<(string sym, string tf)>();
             foreach (var tf in activeTimeframes)
             {
-                if (stoppingToken.IsCancellationRequested) break;
-
                 foreach (var sym in subscribedCoins)
                 {
-                    if (stoppingToken.IsCancellationRequested) break;
-
                     var lockKey = $"{sym}_{tf}";
                     if (_activeCandleLocks.TryGetValue(lockKey, out var expiry) && DateTime.UtcNow < expiry)
                     {
@@ -450,16 +459,21 @@ namespace CryptoSense.Worker
                         continue;
                     }
 
-                    // Risk Management: Limit simultaneous open positions to 5 to avoid market-wide overexposure
-                    int currentOpenCount = activeSignals.Count(s => !s.IsClosed && s.Status == SignalStatus.Open);
-                    if (currentOpenCount >= 5)
-                    {
-                        continue;
-                    }
+                    scanPairs.Add((sym, tf));
+                }
+            }
 
+            if (scanPairs.Count > 0)
+            {
+                await Parallel.ForEachAsync(scanPairs, new ParallelOptions { MaxDegreeOfParallelism = 8, CancellationToken = stoppingToken }, async (pair, ct) =>
+                {
                     try
                     {
-                        var signal = await signalEngine.AnalyzeCoinAsync(sym, tf, isLiveScan: true);
+                        using var innerScope = _serviceProvider.CreateScope();
+                        var engine = innerScope.ServiceProvider.GetRequiredService<ISignalEngine>();
+                        var uow = innerScope.ServiceProvider.GetRequiredService<IUnitOfWork>();
+
+                        var signal = await engine.AnalyzeCoinAsync(pair.sym, pair.tf, isLiveScan: true);
                         if (signal.Confidence >= _config.MinConfidenceThreshold && (signal.SignalType.Contains("LONG") || signal.SignalType.Contains("SHORT")))
                         {
                             var alertKey = $"{signal.Symbol}_{signal.Timeframe}_{signal.SourceCandleOpenTimeUtc:yyyyMMddHHmmss}";
@@ -468,25 +482,16 @@ namespace CryptoSense.Worker
                                 _lastAlertSent[alertKey] = DateTime.UtcNow;
                                 signal.SignalAlertSent = true;
 
-                                var duration = signal.Timeframe switch
-                                {
-                                    "1m" => TimeSpan.FromMinutes(30),
-                                    "3m" => TimeSpan.FromMinutes(90),
-                                    "5m" => TimeSpan.FromMinutes(150),
-                                    "15m" => TimeSpan.FromMinutes(360),
-                                    "1h" => TimeSpan.FromHours(24),
-                                    "4h" => TimeSpan.FromHours(48),
-                                    _ => TimeSpan.FromMinutes(120)
-                                };
-                                _activeCandleLocks[lockKey] = DateTime.UtcNow.Add(duration);
+                                var lockKey = $"{pair.sym}_{pair.tf}";
+                                _activeCandleLocks[lockKey] = DateTime.UtcNow.AddMinutes(2);
                                 activeSignals.Add(signal);
 
-                                var dbSig = await unitOfWork.Signals.GetByIdAsync(signal.Id);
+                                var dbSig = await uow.Signals.GetByIdAsync(signal.Id);
                                 if (dbSig != null)
                                 {
                                     dbSig.SignalAlertSent = true;
-                                    await unitOfWork.Signals.UpdateAsync(dbSig);
-                                    await unitOfWork.SaveChangesAsync(stoppingToken);
+                                    await uow.Signals.UpdateAsync(dbSig);
+                                    await uow.SaveChangesAsync(ct);
                                 }
 
                                 await _telegramService.SendSignalAlertAsync(signal);
@@ -496,9 +501,7 @@ namespace CryptoSense.Worker
                     catch (Exception)
                     {
                     }
-
-                    await Task.Delay(120, stoppingToken);
-                }
+                });
             }
 
             // Periodic Liveness Heartbeat (Every 15 minutes if no signals)

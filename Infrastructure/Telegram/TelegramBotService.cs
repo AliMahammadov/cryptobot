@@ -363,11 +363,24 @@ namespace CryptoSense.Infrastructure.Telegram
             var userManager = scope.ServiceProvider.GetRequiredService<IUserManagerService>();
             var activeUsers = await userManager.GetAllUsersAsync();
 
+            var targetChatIds = new HashSet<string>();
             foreach (var user in activeUsers)
             {
-                if (string.IsNullOrEmpty(user.TelegramChatId) || !user.IsActive) continue;
-                var chatId = user.TelegramChatId;
+                if (!string.IsNullOrEmpty(user.TelegramChatId) && user.IsActive)
+                {
+                    targetChatIds.Add(user.TelegramChatId);
+                }
+            }
+            foreach (var kvp in UserPreferences)
+            {
+                if (kvp.Value.IsActive && !string.IsNullOrEmpty(kvp.Key))
+                {
+                    targetChatIds.Add(kvp.Key);
+                }
+            }
 
+            foreach (var chatId in targetChatIds)
+            {
                 var settings = GetSettings(chatId);
                 if (!settings.IsActive) continue;
 
@@ -385,6 +398,22 @@ namespace CryptoSense.Infrastructure.Telegram
 
                 // Coin filter check
                 if (settings.Coins.Count > 0 && !settings.Coins.Contains(signal.Symbol)) continue;
+
+                // Fresh Entry Filter: If price drifted > 0.35% away from entry towards TP1 or StopLoss, don't send stale setup
+                if (signal.CurrentPrice > 0 && signal.EntryPrice > 0)
+                {
+                    bool isLong = signal.Direction == SignalDirection.Buy || signal.SignalType.Contains("LONG");
+                    if (isLong && signal.TakeProfit1 > signal.EntryPrice)
+                    {
+                        decimal maxAllowed = signal.EntryHigh > 0 ? signal.EntryHigh * 1.0035m : signal.EntryPrice * 1.0035m;
+                        if (signal.CurrentPrice > maxAllowed) continue;
+                    }
+                    else if (!isLong && signal.TakeProfit1 < signal.EntryPrice)
+                    {
+                        decimal minAllowed = signal.EntryLow > 0 ? signal.EntryLow * 0.9965m : signal.EntryPrice * 0.9965m;
+                        if (signal.CurrentPrice < minAllowed) continue;
+                    }
+                }
 
                 var userSigNum = signal.UserSignalNumbers.GetOrAdd(chatId, _ => ++settings.AlertCounter);
                 _signalUserNumberMap[$"{signal.Id}_{chatId}"] = userSigNum;
@@ -475,80 +504,37 @@ namespace CryptoSense.Infrastructure.Telegram
         private async Task ScanUserCoinsInstantlyAsync(UserSettings userSettings, string chatId, string timeframe)
         {
             if (userSettings.Coins.Count == 0) return;
-            var tfsToScan = (timeframe == "Hamısı" || timeframe == "Hamisi") 
-                ? new[] { "1m", "3m", "5m", "15m", "1h", "4h" } 
-                : new[] { timeframe };
-
             using var scope = _serviceProvider.CreateScope();
-            var signalEngine = scope.ServiceProvider.GetRequiredService<ISignalEngine>();
+            var uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
 
             var tfDisplay = (timeframe == "Hamısı" || timeframe == "Hamisi") ? "Bütün Zamanlar (1m, 3m, 5m, 15m, 1h, 4h)" : timeframe;
-            await SendMessageAsync($"⏳ <i>Seçilmiş coinləriniz ({tfDisplay}) dərhal skan edilir...</i>", chatId);
-            var pairs = new List<(string sym, string tf)>();
-            foreach (var tf in tfsToScan)
-            {
-                foreach (var sym in userSettings.Coins)
-                {
-                    pairs.Add((sym, tf));
-                }
-            }
+            var openSignals = await uow.Signals.GetOpenTrackedSignalsAsync();
+            var userOpenSignals = openSignals.Where(s => userSettings.Coins.Contains(s.Symbol) && (timeframe == "Hamısı" || timeframe == "Hamisi" || s.Timeframe == timeframe)).ToList();
 
-            var matchingSignals = new System.Collections.Concurrent.ConcurrentBag<FuturesSignal>();
-            await Parallel.ForEachAsync(pairs, new ParallelOptions { MaxDegreeOfParallelism = 10 }, async (pair, ct) =>
-            {
-                try
-                {
-                    using var innerScope = _serviceProvider.CreateScope();
-                    var engine = innerScope.ServiceProvider.GetRequiredService<ISignalEngine>();
-                    var sig = await engine.AnalyzeCoinAsync(pair.sym, pair.tf, isLiveScan: false);
-                    if (sig.Confidence >= 78 && (sig.SignalType.Contains("LONG") || sig.SignalType.Contains("SHORT")))
-                    {
-                        matchingSignals.Add(sig);
-                    }
-                }
-                catch { }
-            });
+            var cleanList = string.Join(", ", userSettings.Coins.Select(c => c.Replace("USDT", "")));
+            var sb = new StringBuilder();
+            sb.AppendLine($"⚡ <b>Seçilmiş Coinlər Üzrə Canlı İzləmə Aktivdir! 🟢</b>\n");
+            sb.AppendLine($"⏱ <b>Aktiv Rejim:</b> <code>{tfDisplay}</code>");
+            sb.AppendLine($"🪙 <b>Coinləriniz ({userSettings.Coins.Count} ədəd):</b> <code>{cleanList}</code>\n");
 
-            var newSignals = matchingSignals
-                .Where(s => !s.UserSignalNumbers.ContainsKey(chatId))
-                .OrderBy(s => s.GeneratedAt)
-                .ThenBy(s => s.SourceCandleOpenTimeUtc)
-                .ThenByDescending(s => s.Confidence)
-                .ToList();
-
-            var alreadySentSignals = matchingSignals
-                .Where(s => s.UserSignalNumbers.ContainsKey(chatId))
-                .OrderBy(s => s.UserSignalNumbers[chatId])
-                .ToList();
-
-            if (newSignals.Count > 0)
+            if (userOpenSignals.Count > 0)
             {
-                foreach (var sig in newSignals)
-                {
-                    await SendSignalAlertAsync(sig, chatId);
-                    await Task.Delay(200);
-                }
-            }
-            else if (alreadySentSignals.Count > 0)
-            {
-                var sb = new StringBuilder();
-                sb.AppendLine($"⚡ <b>Skan Nəticəsi ({tfDisplay}):</b>\n");
-                sb.AppendLine($"ℹ️ <i>Seçdiyiniz coinlər üzrə aktiv siqnallar artıq çatınıza göndərilib və canlı izlənilir.</i>\n");
-                sb.AppendLine($"📌 <b>Hazırda Açıq İzlənən Əməliyyatlar ({alreadySentSignals.Count} ədəd):</b>");
-                foreach (var sig in alreadySentSignals)
+                sb.AppendLine($"📌 <b>Hazırda Açıq İzlənən Əməliyyatlar ({userOpenSignals.Count} ədəd):</b>");
+                foreach (var sig in userOpenSignals)
                 {
                     var num = sig.UserSignalNumbers.TryGetValue(chatId, out var n) ? n : sig.SignalNumber;
                     var icon = sig.SignalType.Contains("LONG") ? "🟢" : "🔴";
-                    var dir = sig.SignalType.Contains("LONG") ? "LONG" : "SHORT";
+                    var dir = (sig.Direction == SignalDirection.Buy || sig.SignalType.Contains("LONG")) ? "LONG" : "SHORT";
                     sb.AppendLine($"• <b>#{num} {sig.CleanSymbol}</b> ({sig.Timeframe}) - {dir} {icon} (${sig.EntryPrice.ToString(CultureInfo.InvariantCulture)}) | Confluence: <b>{sig.ConfluenceScore.ToString("F1", CultureInfo.InvariantCulture)}%</b>");
                 }
-                sb.AppendLine($"\n🟢 <i>Sistem canlı izləmədədir, yeni şamlar bağlandıqca təzə siqnallar dərhal göndəriləcək.</i>");
-                await SendMessageAsync(sb.ToString(), chatId);
+                sb.AppendLine();
             }
             else
             {
-                await SendMessageAsync($"ℹ️ <i>Hal-hazırda seçdiyiniz coinlərdə {tfDisplay} üzrə 78%+ Confluence siqnalı yoxdur. Bazar canlı izlənilir, ilk güclü fürsət yaranan kimi dərhal bildiriş alacaqsınız!</i>", chatId);
+                sb.AppendLine($"ℹ️ <i>Seçilmiş coinləriniz üzrə hazırda açıq əməliyyat yoxdur.</i>\n");
             }
+            sb.AppendLine($"🟢 <b>Sistem canlı izləmədədir.</b> Seçdiyiniz coinlərdə yeni şam bağlandıqca 75%+ siqnallar real vaxtda avtomatik çatınıza göndəriləcək.");
+            await SendMessageAsync(sb.ToString(), chatId);
         }
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -1084,85 +1070,45 @@ namespace CryptoSense.Infrastructure.Telegram
                 userSettings.LastResumeTime = DateTime.UtcNow;
                 SaveSettings();
 
-                var allCoins = _config.SelectedCoins != null && _config.SelectedCoins.Count > 0 
-                    ? _config.SelectedCoins 
-                    : new List<string> { "BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT", "DOGEUSDT", "SUIUSDT", "PEPEUSDT", "AVAXUSDT" };
-
-                var tfsToScan = targetTf == "Hamısı" 
-                    ? new[] { "1m", "3m", "5m", "15m", "1h", "4h" } 
-                    : new[] { targetTf };
-
                 var tfDisplay = targetTf == "Hamısı" ? "Bütün Zamanlar (1m, 3m, 5m, 15m, 1h, 4h)" : targetTf;
-                await SendMessageAsync($"🌐 <b>Bütün Bazar (50 Coin) üzrə canlı izləmə və analiz başladıldı! 🟢</b>\n<i>Aktiv Zaman: {tfDisplay} | 75%+ Confluence siqnalları axtarılır...</i>", chatId, TelegramKeyboards.BuildUserKeyboard(userSettings, isAdmin));
 
-                var pairs = new List<(string sym, string tf)>();
-                foreach (var tf in tfsToScan)
+                var uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
+                var openSignals = await uow.Signals.GetOpenTrackedSignalsAsync();
+
+                if (targetTf != "Hamısı")
                 {
-                    foreach (var sym in allCoins)
-                    {
-                        pairs.Add((sym, tf));
-                    }
+                    openSignals = openSignals.Where(s => s.Timeframe == targetTf).ToList();
                 }
 
-                var foundSignals = new System.Collections.Concurrent.ConcurrentBag<FuturesSignal>();
-                await Parallel.ForEachAsync(pairs, new ParallelOptions { MaxDegreeOfParallelism = 12 }, async (pair, ct) =>
-                {
-                    try
-                    {
-                        using var innerScope = _serviceProvider.CreateScope();
-                        var engine = innerScope.ServiceProvider.GetRequiredService<ISignalEngine>();
-                        var sig = await engine.AnalyzeCoinAsync(pair.sym, pair.tf, isLiveScan: false);
-                        if (sig.Confidence >= 75 && (sig.SignalType.Contains("LONG") || sig.SignalType.Contains("SHORT")))
-                        {
-                            foundSignals.Add(sig);
-                        }
-                    }
-                    catch { }
-                });
+                var sb = new StringBuilder();
+                sb.AppendLine($"🌐 <b>Bütün Bazar (50 Coin) üzrə Canlı İzləmə Aktivləşdirildi! 🟢</b>\n");
+                sb.AppendLine($"⏱ <b>Aktiv Rejim:</b> <code>{tfDisplay}</code>");
+                sb.AppendLine($"🎯 <b>Tələb:</b> <code>75%+ Confluence & Təsdiqli Giriş</code>");
+                sb.AppendLine($"🪙 <b>İzlənən Bazar:</b> <code>50 Coin (Bütün Bazar)</code>\n");
+                sb.AppendLine($"✅ <b>Sistem 24/7 real-time skan rejimindədir.</b>");
+                sb.AppendLine($"Hər bir coində yeni şam bağlandıqca 75%+ siqnallar <b>avtomatik olaraq dərhal çatınıza göndəriləcək</b>.\n");
 
-                var newSignals = foundSignals
-                    .Where(s => !s.UserSignalNumbers.ContainsKey(chatId))
-                    .OrderBy(s => s.GeneratedAt)
-                    .ThenBy(s => s.SourceCandleOpenTimeUtc)
-                    .ThenByDescending(s => s.Confidence)
-                    .ToList();
-
-                var alreadySentSignals = foundSignals
-                    .Where(s => s.UserSignalNumbers.ContainsKey(chatId))
-                    .OrderBy(s => s.UserSignalNumbers[chatId])
-                    .ToList();
-
-                if (newSignals.Count > 0)
+                if (openSignals.Count > 0)
                 {
-                    foreach (var sig in newSignals)
-                    {
-                        await SendSignalAlertAsync(sig, chatId);
-                        await Task.Delay(250);
-                    }
-                }
-                else if (alreadySentSignals.Count > 0)
-                {
-                    var sb = new StringBuilder();
-                    sb.AppendLine($"⚡ <b>Bazar Skan Nəticəsi ({tfDisplay}):</b>\n");
-                    sb.AppendLine($"ℹ️ <i>Aktiv olan bütün siqnallar artıq çatınıza göndərilib və canlı izlənilir.</i>\n");
-                    sb.AppendLine($"📌 <b>Hazırda Açıq İzlənən Əməliyyatlar ({alreadySentSignals.Count} ədəd):</b>");
-                    foreach (var sig in alreadySentSignals)
+                    sb.AppendLine($"📌 <b>Hazırda Açıq İzlənən Əməliyyatlar ({openSignals.Count} ədəd):</b>");
+                    foreach (var sig in openSignals.Take(10))
                     {
                         var num = sig.UserSignalNumbers.TryGetValue(chatId, out var n) ? n : sig.SignalNumber;
                         var icon = sig.SignalType.Contains("LONG") ? "🟢" : "🔴";
-                        var dir = sig.SignalType.Contains("LONG") ? "LONG" : "SHORT";
+                        var dir = (sig.Direction == SignalDirection.Buy || sig.SignalType.Contains("LONG")) ? "LONG" : "SHORT";
                         sb.AppendLine($"• <b>#{num} {sig.CleanSymbol}</b> ({sig.Timeframe}) - {dir} {icon} (${sig.EntryPrice.ToString(CultureInfo.InvariantCulture)}) | Confluence: <b>{sig.ConfluenceScore.ToString("F1", CultureInfo.InvariantCulture)}%</b>");
                     }
-                    sb.AppendLine($"\n🟢 <b>Sistem canlı izləmədədir.</b> Növbəti yeni şam bağlandıqda yeni giriş formalaşarsa dərhal siqnal bildirişi alacaqsınız.");
-                    await SendMessageAsync(sb.ToString(), chatId, TelegramKeyboards.BuildUserKeyboard(userSettings, isAdmin));
+                    if (openSignals.Count > 10)
+                    {
+                        sb.AppendLine($"<i>... və daha {openSignals.Count - 10} ədəd açıq əməliyyat canlı izlənilir.</i>");
+                    }
                 }
                 else
                 {
-                    var noSigMsg = $"⚡ <b>Bazar Skan Nəticəsi ({tfDisplay}):</b>\n\n" +
-                                   $"ℹ️ <i>Hal-hazırda {tfDisplay} üzrə 50 coin arasında 75%+ Confluence tələbinə cavab verən risk-təsdiqli yeni siqnal aşkarlanmadı.</i>\n\n" +
-                                   $"🟢 <b>Sistem canlı izləmədədir.</b> 50 coinin hər birində yeni şam bağlandıqca şərtlər ödənildiyi an siqnal dərhal sizə göndəriləcək.";
-                    await SendMessageAsync(noSigMsg, chatId, TelegramKeyboards.BuildUserKeyboard(userSettings, isAdmin));
+                    sb.AppendLine($"ℹ️ <i>Hazırda açıq əməliyyat yoxdur. Bazar canlı izlənilir, yeni şamlar bağlandıqca siqnallar real-time gələcək.</i>");
                 }
+
+                await SendMessageAsync(sb.ToString(), chatId, TelegramKeyboards.BuildUserKeyboard(userSettings, isAdmin));
                 return;
             }
 
@@ -1370,7 +1316,7 @@ namespace CryptoSense.Infrastructure.Telegram
             else if (text.Contains("Statistika") || text == "/stats")
             {
                 var stats = await signalEngine.GetPerformanceStatsAsync(userSettings.Timeframe, userSettings.Coins);
-                var msg = TelegramMessageFormatter.FormatPerformanceStats(stats);
+                var msg = TelegramMessageFormatter.FormatPerformanceStats(stats, userSettings.Timeframe);
                 await SendMessageAsync(msg, chatId, TelegramKeyboards.BuildUserKeyboard(userSettings, isAdmin));
             }
             else if (text == "⚡ Bütün Siqnallar" || text == "Bütün Siqnallar" || text == "/scan")
