@@ -456,6 +456,12 @@ namespace CryptoSense.Application.Services
         public async Task ClearAllSignalsAsync()
         {
             await _unitOfWork.Signals.ClearAllSignalsAsync();
+            _recentCandleSignals.Clear();
+            lock (_lock)
+            {
+                _nextSignalNumber = 1;
+                _initializedNumber = true;
+            }
         }
     }
 }

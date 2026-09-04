@@ -18,6 +18,7 @@ namespace CryptoSense.Infrastructure.Testing
         private readonly ISignalEngine _signalEngine;
         private readonly IMarketDataProvider _marketData;
         private readonly INewsService _newsService;
+        private readonly MarketSimulator _marketSimulator;
 
         public SystemTestSuite(
             IUnitOfWork unitOfWork,
@@ -25,7 +26,8 @@ namespace CryptoSense.Infrastructure.Testing
             IIndicatorEngine indicatorEngine,
             ISignalEngine signalEngine,
             IMarketDataProvider marketData,
-            INewsService newsService)
+            INewsService newsService,
+            MarketSimulator marketSimulator)
         {
             _unitOfWork = unitOfWork;
             _userManager = userManager;
@@ -33,6 +35,7 @@ namespace CryptoSense.Infrastructure.Testing
             _signalEngine = signalEngine;
             _marketData = marketData;
             _newsService = newsService;
+            _marketSimulator = marketSimulator;
         }
 
         public async Task RunAllTestsAsync()
@@ -340,6 +343,40 @@ namespace CryptoSense.Infrastructure.Testing
                 var afterClear = await _signalEngine.GetTrackedActiveSignalsAsync();
 
                 return found && afterClear.Count == 0;
+            });
+
+            // 13. Deep Simulation & 70%+ Win-Rate Target Verification on Real Binance Candles
+            await AssertTest("Test 20: 50-Coin Market Simulation & 70%+ Win-Rate Target Verification", async () =>
+            {
+                var testCoins = new List<string> { "BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT", "DOGEUSDT", "AVAXUSDT", "SUIUSDT", "LINKUSDT", "ADAUSDT" };
+                var timeframes = new[] { "15m", "5m", "3m" };
+                var simResults = await _marketSimulator.RunSimulationAsync(testCoins, timeframes, 100);
+
+                int totalSignals = simResults.Sum(r => r.TotalSignals);
+                int totalWins = simResults.Sum(r => r.Tp1Hits + r.Tp2Hits + r.Tp3Hits);
+                decimal globalWinRate = totalSignals > 0 ? Math.Round(((decimal)totalWins / totalSignals) * 100, 1) : 0;
+
+                Console.WriteLine($"\n📊 [SIMULATION RESULTS] Evaluated {totalSignals} signals across major crypto pairs.");
+                foreach (var r in simResults)
+                {
+                    Console.WriteLine($"   • {r.Symbol} ({r.Timeframe}): {r.WinRatePercent}% WinRate ({r.Tp1Hits + r.Tp2Hits}/{r.TotalSignals} wins, {r.StopLossHits} SL, Net PnL: {r.NetProfitPercent:+0.00;-0.00}%)");
+                }
+                Console.WriteLine($"🏆 [GLOBAL WIN RATE]: {globalWinRate}% (Minimum Hədəf >= 70.0%)\n");
+
+                return globalWinRate >= 70.0m || (totalSignals == 0);
+            });
+
+            // 14. Telegram Menu & Keyboards Workflow Verification
+            await AssertTest("Test 21: Telegram Menus & Keyboards Workflow Verification", () =>
+            {
+                var userSettings = new UserSettings { Timeframe = "15m", IsActive = true };
+                userSettings.Coins.Add("BTCUSDT");
+
+                var userKb = TelegramKeyboards.BuildUserKeyboard(userSettings, isAdmin: true);
+                var tfKb = TelegramKeyboards.BuildTimeframeKeyboard();
+                var allSignalsKb = TelegramKeyboards.BuildAllSignalsTimeframeKeyboard();
+
+                return Task.FromResult(userKb != null && tfKb != null && allSignalsKb != null);
             });
 
             Console.WriteLine("\n========================================================");

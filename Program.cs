@@ -75,6 +75,7 @@ builder.Services.AddHttpClient<INewsService, NewsService>();
 builder.Services.AddSingleton<IIndicatorEngine, IndicatorEngine>();
 builder.Services.AddScoped<IUserManagerService, UserManagerService>();
 builder.Services.AddScoped<ISignalEngine, SignalEngine>();
+builder.Services.AddScoped<MarketSimulator>();
 builder.Services.AddScoped<SystemTestSuite>();
 
 // 4. Telegram Bot Service & Background Workers
