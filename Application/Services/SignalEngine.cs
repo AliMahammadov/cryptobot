@@ -303,6 +303,16 @@ namespace CryptoSense.Application.Services
                 confidence = (int)Math.Clamp(Math.Round(100m - indicators.ConfluenceScore), 50, 95);
             }
 
+            // 1m Timeframe Noise & Taker Fee Protection Filter (Chop / Fee Burn Prevention)
+            if (timeframe == "1m" && (determinedType.Contains("LONG") || determinedType.Contains("SHORT")))
+            {
+                if (indicators.Adx < 25m || indicators.VolumeSurgeRatio < 1.35m)
+                {
+                    determinedType = "NEYTRAL (GÖZLƏMƏ) ⚪";
+                    reasons.Add("1m Scalping Qoruması: ADX < 25 və ya Həcm Sıçrayışı < 1.35x (Micro-səs-küy və komissiya itkisinə qarşı neytral rejim)");
+                }
+            }
+
             decimal directionalConfluence = direction == SignalDirection.Sell 
                 ? Math.Round(100m - indicators.ConfluenceScore, 1) 
                 : Math.Round(indicators.ConfluenceScore, 1);

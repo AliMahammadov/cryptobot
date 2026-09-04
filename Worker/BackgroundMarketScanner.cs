@@ -5,6 +5,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using CryptoSense.Application.DTOs;
 using CryptoSense.Application.Interfaces;
+using CryptoSense.Application.Services;
 using CryptoSense.Domain.Entities;
 using CryptoSense.Domain.Enums;
 using CryptoSense.Domain.Interfaces;
@@ -159,7 +160,8 @@ namespace CryptoSense.Worker
                         else if (currentPrice >= sig.TakeProfit1 && !sig.Tp1Notified)
                         {
                             sig.Tp1Notified = true;
-                            sig.StopLoss = sig.EntryPrice; // Breakeven risk-free stop loss
+                            // Spread-safe and fee-cushioned breakeven buffer (+0.05% above EntryPrice)
+                            sig.StopLoss = SignalEngine.RoundToCoinPrecision(sig.EntryPrice, sig.EntryPrice * 1.0005m);
                             var profitPct = Math.Round(((currentPrice - sig.EntryPrice) / sig.EntryPrice) * 100, 2);
                             sig.ProfitPercentAchieved = profitPct;
                             await unitOfWork.Signals.UpdateAsync(sig);
@@ -176,11 +178,11 @@ namespace CryptoSense.Worker
 
                             if (sig.Tp1Notified)
                             {
-                                // Breakeven exit: Stop loss was raised to EntryPrice or TP1
+                                // Breakeven exit: Stop loss was raised to EntryPrice (+0.05% buffer) or TP1
                                 sig.Status = SignalStatus.Success;
                                 var pnl = sig.Tp2Notified
                                     ? Math.Round(((sig.TakeProfit1 - sig.EntryPrice) / sig.EntryPrice) * 100, 2)
-                                    : 0.0m;
+                                    : Math.Round(((sig.StopLoss - sig.EntryPrice) / sig.EntryPrice) * 100, 2);
                                 sig.ResultPercent = pnl;
                                 sig.OutcomeStatus = "Giriş Qiymətində Bağlandı (Breakeven - Qorundu) ✅";
                                 await unitOfWork.Signals.UpdateAsync(sig);
@@ -257,7 +259,8 @@ namespace CryptoSense.Worker
                         else if (currentPrice <= sig.TakeProfit1 && !sig.Tp1Notified)
                         {
                             sig.Tp1Notified = true;
-                            sig.StopLoss = sig.EntryPrice; // Breakeven risk-free stop loss
+                            // Spread-safe and fee-cushioned breakeven buffer (-0.05% below EntryPrice)
+                            sig.StopLoss = SignalEngine.RoundToCoinPrecision(sig.EntryPrice, sig.EntryPrice * 0.9995m);
                             var profitPct = Math.Round(((sig.EntryPrice - currentPrice) / sig.EntryPrice) * 100, 2);
                             sig.ProfitPercentAchieved = profitPct;
                             await unitOfWork.Signals.UpdateAsync(sig);
@@ -274,11 +277,11 @@ namespace CryptoSense.Worker
 
                             if (sig.Tp1Notified)
                             {
-                                // Breakeven exit: Stop loss was lowered to EntryPrice or TP1
+                                // Breakeven exit: Stop loss was lowered to EntryPrice (-0.05% buffer) or TP1
                                 sig.Status = SignalStatus.Success;
                                 var pnl = sig.Tp2Notified
                                     ? Math.Round(((sig.EntryPrice - sig.TakeProfit1) / sig.EntryPrice) * 100, 2)
-                                    : 0.0m;
+                                    : Math.Round(((sig.EntryPrice - sig.StopLoss) / sig.EntryPrice) * 100, 2);
                                 sig.ResultPercent = pnl;
                                 sig.OutcomeStatus = "Giriş Qiymətində Bağlandı (Breakeven - Qorundu) ✅";
                                 await unitOfWork.Signals.UpdateAsync(sig);

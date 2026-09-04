@@ -136,7 +136,7 @@ namespace CryptoSense.Infrastructure.Testing
                         {
                             tp1Reached = true;
                             tradePnl = Math.Round(((tp1 - entryPrice) / entryPrice) * 100, 2);
-                            stopLoss = entryPrice; // Move to Breakeven
+                            stopLoss = entryPrice * 1.0005m; // Move to Breakeven with buffer
                         }
 
                         // Check TP2
@@ -169,7 +169,7 @@ namespace CryptoSense.Infrastructure.Testing
                         {
                             tp1Reached = true;
                             tradePnl = Math.Round(((entryPrice - tp1) / entryPrice) * 100, 2);
-                            stopLoss = entryPrice; // Breakeven
+                            stopLoss = entryPrice * 0.9995m; // Move to Breakeven with buffer
                         }
 
                         // Check TP2

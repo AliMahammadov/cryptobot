@@ -119,23 +119,30 @@ $$\text{VWAP} = \frac{\sum (\text{Tipik Qiymət} \times \text{Həcm})}{\sum \tex
 
 ---
 
-## 3. Confluence Razılaşma Balı (0 - 100%) Necə Hesablanır?
+## 3. Confluence Razılaşma Balı (3 Ortogonal Ox Modeli)
 
-Sistem tək bir indikatora etibar etmir. Bütün indikatorlar dərəcələndirilmiş çəkilərlə ümumi bal toplayır:
+Eyni təbiətli indikatorların süni şəkildə toplanması (multikollinearlıq) xətasının qarşısını almaq üçün sistem **3 Müstəqil Ortogonal Ox** riyazi modelinə əsaslanır:
 
-| İndikator Kateqoriyası | Çəki (Maks. Bal) |
-| :--- | :--- |
-| **Trend İndikatorları (EMA 20/50, SMA 20/50)** | 25 Bal |
-| **Momentum (MACD Histoqram & Xətt Kəsişməsi)** | 20 Bal |
-| **İmpuls (RSI 14 səviyyəsi və meyillilik)** | 15 Bal |
-| **Həcm və Likvidlik (OBV, VWAP, Volume Surge)** | 15 Bal |
-| **SuperTrend və Dəstək/Müqavimət Səviyyəsi** | 15 Bal |
-| **Makro Bitcoin Kompası Uyğunluğu** | 10 Bal |
-| **CƏMİ:** | **100 Bal** |
+### A. Ox 1: İstiqamət Meyilliliyi (Directional Alignment)
+- **Komponentlər:** $EMA_{20}/EMA_{50}$ oriyentasiyası, $SMA_{20}/SMA_{50}$ və SuperTrend vəziyyəti.
+- **Riyazi Vektor:** $\text{Direction} = (EMA \times 0.40) + (SMA \times 0.25) + (SuperTrend \times 0.35) \in [-1.0, +1.0]$.
 
-- **LONG Siqnalı:** Confluence Balı $\ge 75\%$ olduqda yaranır.
-- **SHORT Siqnalı:** Confluence Balı $\le 25\%$ (və ya Bearish Confluence $\ge 75\%$) olduqda yaranır.
-- **45% - 55%:** Tam neytral zona (əməliyyat açılmır).
+### B. Ox 2: Bazar Rejimi və Sönümləmə (Market Regime & Volatility Damping)
+- **Komponentlər:** Wilder ADX və Bollinger Bandwidth.
+- **Məqsəd:** İstiqamət nə qədər aydın olsa belə, əgər bazar enerjisiz yan hərəkətdədirsə ($ADX < 20$), trend siqnalları mənfi riyazi gözləntiyə malik olur.
+- **Tənzimləyici Əmsal:**
+  $$\text{Regime Multiplier} = \begin{cases} 1.00, & \text{əgər } ADX \ge 25 \text{ (Güclü Trend Rejimi)} \\ 0.85, & \text{əgər } 20 \le ADX < 25 \text{ (Orta Keçid Rejimi)} \\ 0.50, & \text{əgər } ADX < 20 \text{ (Səs-küylü Yan Bazar Sönümləməsi)} \end{cases}$$
+- $\text{Trend Balı} = \text{Direction} \times \text{Regime Multiplier}$.
+
+### C. Ox 3: İştirak və Likvidlik Təsdiqi (Participation & Liquidity)
+- **Komponentlər:** Həcm Sıçrayış Əmsalı ($\text{Volume Surge}$), $VWAP$ oriyentasiyası və $OBV$ tendensiyası.
+- **Məqsəd:** Qiymət hərəkətinin arxasında institusional həcmin və alqı-satqı axınının olub-olmadığını təsdiqləyir. Əgər həcm sıçrayışı $\ge 1.30x$-dirsə, siqnal gücləndirilir; həcm zəifdirsə, çəkisi azaldılır.
+
+### D. Yekun Razılaşma Balı və 1m Qoruyucu Süzgəci:
+$$\text{RawScore} = (\text{Trend} \times 0.40) + (\text{Momentum} \times 0.30) + (\text{Participation} \times 0.20) + (\text{Volatility} \times 0.10)$$
+$$\text{ConfluenceScore} = \text{Clamp}\Big(\frac{\text{RawScore} \times \text{MtfFactor} + 1.0}{2.0} \times 100, \; 5\%, \; 98\%\Big)$$
+
+- **1m Ultra-Qısa Timeframe Qoruması:** 1m timeframelərdə komissiya və mikro səs-küyün kapitalı əritməsinin qarşısını almaq üçün $ADX \ge 25$ və $\text{Volume Surge} \ge 1.35x$ sərt tələbi qoyulur; əks halda mövqe açılmır və peşəkar neytral rejim saxlanılır.
 
 ---
 
@@ -228,7 +235,7 @@ Açıq əməliyyat hər 3 saniyədən bir canlı kotirovkalarla yoxlanılır:
 
 1. **TP1 Vurulduqda:**
    - Əməliyyat dərhal **Uğurlu (TP1) ✅** elan edilir.
-   - Stop-Loss səviyyəsi avtomatik olaraq **Giriş Qiymətinə (Breakeven - 0 Risk)** çəkilir.
+   - Stop-Loss səviyyəsi avtomatik olaraq **Giriş Qiymətinə (Breakeven) + Spread/Komissiya Buferinə** çəkilir (LONG üçün $\text{Giriş} \times 1.0005$, SHORT üçün $\text{Giriş} \times 0.9995$). Bu, bid-ask spreadi və birja komissiyası səbəbilə mövqenin vaxtından əvvəl zərərlə kəsilməsinin qarşısını tamamilə alır.
 2. **TP2 Vurulduqda:**
    - Stop-Loss səviyyəsi **TP1** qiymətinə qaldırılır (əldə olunmuş mənfəət zəmanət altına alınır).
 3. **TP3 Vurulduqda:**
