@@ -143,7 +143,7 @@ namespace CryptoSense.Infrastructure.Telegram
             sb.AppendLine("📈 <b>CANLI TEXNİKİ DƏRƏCƏLƏR:</b>");
             if (compass.Ema20 > 0 && compass.Ema50 > 0)
             {
-                var emaRel = compass.Ema20 > compass.Ema50 ? "EMA20 > EMA50 (Yüksəliş) 🟢" : "EMA20 < EMA50 (Eniş) 🔴";
+                var emaRel = compass.Ema20 > compass.Ema50 ? "EMA20 &gt; EMA50 (Yüksəliş) 🟢" : "EMA20 &lt; EMA50 (Eniş) 🔴";
                 sb.AppendLine($"• <b>EMA Strukturu:</b> {emaRel}");
                 sb.AppendLine($"  <code>EMA20: ${compass.Ema20.ToString("N2", CultureInfo.InvariantCulture)} | EMA50: ${compass.Ema50.ToString("N2", CultureInfo.InvariantCulture)}</code>");
             }

@@ -220,6 +220,21 @@ namespace CryptoSense.Infrastructure.Telegram
                 {
                     var err = await response.Content.ReadAsStringAsync();
                     Console.WriteLine($"[TelegramBotService] Send error: {response.StatusCode} - {err}");
+
+                    // Fallback: If Telegram rejected due to HTML parsing error, strip HTML tags and retry as plain text
+                    if (response.StatusCode == System.Net.HttpStatusCode.BadRequest && (err.Contains("can't parse entities") || err.Contains("Bad Request")))
+                    {
+                        try
+                        {
+                            var plainText = System.Text.RegularExpressions.Regex.Replace(message, "<.*?>", string.Empty);
+                            payload["text"] = plainText;
+                            payload.Remove("parse_mode");
+                            var retryContent = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
+                            var retryResp = await _httpClient.PostAsync(url, retryContent);
+                            return retryResp.IsSuccessStatusCode;
+                        }
+                        catch { }
+                    }
                 }
                 return response.IsSuccessStatusCode;
             }
@@ -1345,7 +1360,7 @@ namespace CryptoSense.Infrastructure.Telegram
                              "<code>BTC, ETH, SOL, SUI, DOGE, PEPE, AVAX</code>";
                 await SendMessageAsync(prompt, chatId, TelegramKeyboards.BuildUserKeyboard(userSettings, isAdmin));
             }
-            else if (text.Contains("Bitcoin") || text == "/btc")
+            else if (text.Contains("Bitcoin", StringComparison.OrdinalIgnoreCase) || text.Contains("Kompas", StringComparison.OrdinalIgnoreCase) || text.Contains("🧭") || text == "/btc" || text == "/compass")
             {
                 var compass = await signalEngine.GetBtcCompassAsync();
                 var btcMsg = TelegramMessageFormatter.FormatBtcCompass(compass);
