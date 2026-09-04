@@ -1307,17 +1307,25 @@ namespace CryptoSense.Infrastructure.Telegram
                     }
                     catch { }
 
+                    foreach (var s in UserPreferences.Values)
+                    {
+                        s.AlertCounter = 0;
+                        s.LastResumeTime = DateTime.UtcNow;
+                    }
+                    SaveSettings();
+
                     await SendMessageAsync(
                         "🧹 <b>Bütün Qlobal Siqnal Tarixçəsi və Statistikalar Sıfırlandı! ✅ (Admin)</b>\n\n" +
                         "• Bazadakı bütün keçmiş siqnal qeydləri təmizləndi.\n" +
                         "• Statistik göstəricilər sıfırlandı (0 əməliyyat).\n" +
-                        "• Sayğaclar və aktiv kilidlər sıfırlandı.\n\n" +
+                        "• Bütün istifadəçi sayğacları (#1) və aktiv kilidlər sıfırlandı.\n\n" +
                         "<i>Sistem sıfır nöqtəsindən tam təmiz şəkildə canlı izləməyə davam edir.</i>", 
                         chatId, 
                         TelegramKeyboards.BuildUserKeyboard(userSettings, isAdmin));
                 }
                 else
                 {
+                    SaveSettings();
                     await SendMessageAsync(
                         "🧹 <b>Şəxsi Bildiriş Sayğacınız Sıfırlandı! ✅</b>\n\n" +
                         "• Şəxsi siqnal sayğacınız sıfırlandı (#1-dən başlayacaq).\n" +
@@ -1342,8 +1350,9 @@ namespace CryptoSense.Infrastructure.Telegram
             }
             else if (text.Contains("Statistika") || text == "/stats")
             {
-                var stats = await signalEngine.GetPerformanceStatsAsync(userSettings.Timeframe, userSettings.Coins);
-                var msg = TelegramMessageFormatter.FormatPerformanceStats(stats, userSettings.Timeframe);
+                // Global performance stats across ALL coins and ALL timeframes
+                var stats = await signalEngine.GetPerformanceStatsAsync(null, null);
+                var msg = TelegramMessageFormatter.FormatPerformanceStats(stats, "Hamısı");
                 await SendMessageAsync(msg, chatId, TelegramKeyboards.BuildUserKeyboard(userSettings, isAdmin));
             }
             else if (text == "⚡ Bütün Siqnallar" || text == "Bütün Siqnallar" || text == "/scan")

@@ -21,9 +21,13 @@ namespace CryptoSense.Worker
         private readonly ITelegramBotService _telegramService;
         private readonly IServiceProvider _serviceProvider;
         private readonly AppConfig _config;
-        private readonly Dictionary<string, DateTime> _lastAlertSent = new();
+        private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, DateTime> _lastAlertSent = new();
         private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, DateTime> _activeCandleLocks = new();
-        public static void ClearLocks() => _activeCandleLocks.Clear();
+        public static void ClearLocks()
+        {
+            _activeCandleLocks.Clear();
+            _lastAlertSent.Clear();
+        }
 
         public BackgroundMarketScanner(
             ITelegramBotService telegramService,
