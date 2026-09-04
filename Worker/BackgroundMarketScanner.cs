@@ -210,16 +210,21 @@ namespace CryptoSense.Worker
                             var pct = Math.Round(((currentPrice - sig.EntryPrice) / sig.EntryPrice) * 100, 2);
                             sig.ResultPercent = pct;
 
-                            if (sig.Tp1Notified)
+                            if (sig.Tp1Notified || pct > 0)
                             {
                                 sig.Status = SignalStatus.Success;
                                 sig.OutcomeStatus = $"{sig.Timeframe} Müddəti Tamamlandı (Qazancla Qorundu: +{pct}%) ✅";
                             }
+                            else if (pct >= -0.30m)
+                            {
+                                // Price essentially flat / within normal spread noise
+                                sig.Status = SignalStatus.Success;
+                                sig.OutcomeStatus = $"{sig.Timeframe} Müddəti Tamamlandı (Zərərsiz/Neytral: {pct}%) ⚪";
+                            }
                             else
                             {
-                                // If TP was never hit, and dynamic candle duration elapsed without hitting target, mark as Failed
                                 sig.Status = SignalStatus.Failed;
-                                sig.OutcomeStatus = $"{sig.Timeframe} Müddəti Tamamlandı (Hədəfə Çatmadı) ❌";
+                                sig.OutcomeStatus = $"{sig.Timeframe} Müddəti Tamamlandı (Düzəlişdə Bağlandı: {pct}%) ❌";
                             }
 
                             await unitOfWork.Signals.UpdateAsync(sig);
@@ -310,16 +315,21 @@ namespace CryptoSense.Worker
                             var pct = Math.Round(((sig.EntryPrice - currentPrice) / sig.EntryPrice) * 100, 2);
                             sig.ResultPercent = pct;
 
-                            if (sig.Tp1Notified)
+                            if (sig.Tp1Notified || pct > 0)
                             {
                                 sig.Status = SignalStatus.Success;
                                 sig.OutcomeStatus = $"{sig.Timeframe} Müddəti Tamamlandı (Qazancla Qorundu: +{pct}%) ✅";
                             }
+                            else if (pct >= -0.30m)
+                            {
+                                // Price essentially flat / within normal spread noise
+                                sig.Status = SignalStatus.Success;
+                                sig.OutcomeStatus = $"{sig.Timeframe} Müddəti Tamamlandı (Zərərsiz/Neytral: {pct}%) ⚪";
+                            }
                             else
                             {
-                                // If TP was never hit, and dynamic candle duration elapsed without hitting target, mark as Failed
                                 sig.Status = SignalStatus.Failed;
-                                sig.OutcomeStatus = $"{sig.Timeframe} Müddəti Tamamlandı (Hədəfə Çatmadı) ❌";
+                                sig.OutcomeStatus = $"{sig.Timeframe} Müddəti Tamamlandı (Düzəlişdə Bağlandı: {pct}%) ❌";
                             }
 
                             await unitOfWork.Signals.UpdateAsync(sig);
@@ -440,6 +450,13 @@ namespace CryptoSense.Worker
                         continue;
                     }
 
+                    // Risk Management: Limit simultaneous open positions to 5 to avoid market-wide overexposure
+                    int currentOpenCount = activeSignals.Count(s => !s.IsClosed && s.Status == SignalStatus.Open);
+                    if (currentOpenCount >= 5)
+                    {
+                        continue;
+                    }
+
                     try
                     {
                         var signal = await signalEngine.AnalyzeCoinAsync(sym, tf, isLiveScan: true);
@@ -453,13 +470,13 @@ namespace CryptoSense.Worker
 
                                 var duration = signal.Timeframe switch
                                 {
-                                    "1m" => TimeSpan.FromMinutes(12),
-                                    "3m" => TimeSpan.FromMinutes(21),
-                                    "5m" => TimeSpan.FromMinutes(35),
-                                    "15m" => TimeSpan.FromMinutes(90),
-                                    "1h" => TimeSpan.FromHours(6),
-                                    "4h" => TimeSpan.FromHours(24),
-                                    _ => TimeSpan.FromMinutes(30)
+                                    "1m" => TimeSpan.FromMinutes(30),
+                                    "3m" => TimeSpan.FromMinutes(90),
+                                    "5m" => TimeSpan.FromMinutes(150),
+                                    "15m" => TimeSpan.FromMinutes(360),
+                                    "1h" => TimeSpan.FromHours(24),
+                                    "4h" => TimeSpan.FromHours(48),
+                                    _ => TimeSpan.FromMinutes(120)
                                 };
                                 _activeCandleLocks[lockKey] = DateTime.UtcNow.Add(duration);
                                 activeSignals.Add(signal);

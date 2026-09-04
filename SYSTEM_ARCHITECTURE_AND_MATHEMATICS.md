@@ -173,28 +173,30 @@ $$\text{Volume Surge} = \frac{\text{Cari Şamın Həcmi}}{\text{Son 20 Şamın O
 
 ---
 
-## 5. LONG və SHORT Əməliyyatlarının Təyin Olunma Düsturları
+## 5. LONG və SHORT Əməliyyatlarının Təyin Olunma Qaydaları (İnstitusional Standart)
 
-Sistem siqnalları 3 peşəkar kateqoriya üzrə təsnif edir:
+Bazar səs-küyündə təsadüfi və ya əks-trend əməliyyatların açılmasının qarşısını almaq üçün sistem **100% Çoxfaktorlu Uyğunluq** tələb edir:
 
-### 1. Peşəkar Retest (Trend İçi Geri Çəkilmə):
-- **LONG Şərtləri:**
-  - $EMA_{20} > EMA_{50}$ (Yüksəliş trendi)
-  - Qiymət $EMA_{20}$ zonasına geri çəkilib ($|\text{Qiymət} - EMA_{20}| / \text{Qiymət} \le 0.85\%$) və ya şamın alt kölgəsi alış təzyiqi göstərir ($\text{Alt Fitil} / \text{Şam Hündürlüyü} \ge 35\%$).
-  - $38 \le RSI \le 68$ (Aşırı alınmayıb)
-  - Bitcoin Kompası $\ge 45\%$
-- **SHORT Şərtləri:**
-  - $EMA_{20} < EMA_{50}$ (Eniş trendi)
-  - Qiymət $EMA_{20}$ zonasına qalxıb və ya şamın üst kölgəsi satış təzyiqi göstərir ($\text{Üst Fitil} / \text{Şam Hündürlüyü} \ge 35\%$).
-  - $32 \le RSI \le 62$
-  - Bitcoin Kompası $\le 55\%$
+### 1. Yüksək Ehtimallı LONG Şərtləri:
+- **Confluence Razılaşma Balı:** $\ge 70\%$ (Mütləq tələb)
+- **Trend İstiqaməti:** $EMA_{20} \ge EMA_{50}$ və Qiymət $\ge EMA_{50}$
+- **SuperTrend Vəziyyəti:** **MÜTLƏQ BULLISH 🟢** (SuperTrend qırmızı ikən heç vaxt LONG açılmır)
+- **Şam Təsdiqi:** Cari şam düşən qırmızı şam olmamalıdır ($Close \ge Open$ və ya alt kölgə alıcı təzyiqi $\ge 35\%$)
+- **Bazar Rejimi (ADX):** 1m-də $ADX \ge 25$, 3m-də $ADX \ge 20$, 5m-də $ADX \ge 18$ (Yan və ölü bazarda əməliyyat açılmır)
+- **Həcm Təsdiqi:** 1m üçün $\text{Volume Surge} \ge 1.35x$, digər intervallarda normal/artan həcm
+- **İmpuls:** $40 \le RSI \le 68$ və $MACD > 0$
+- **Bitcoin Kompası:** Altcoinlər üçün Bitcoin Kompası $\ge 45\%$ və BTC Dominantlığı təzyiq yaratmamalıdır.
 
-### 2. Peşəkar Breakout / Breakdown (Səviyyə Qırılması):
-- **Breakout LONG:** Qiymət lokal müqaviməti qırıb + SuperTrend Bullish + MACD Hist > 0 + Bitcoin Kompası Bullish.
-- **Breakdown SHORT:** Qiymət lokal dəstəyi qırıb + SuperTrend Bearish + MACD Hist < 0 + Bitcoin Kompası Bearish.
+### 2. Yüksək Ehtimallı SHORT Şərtləri:
+- **Confluence Razılaşma Balı:** $\le 30\%$ (Bearish Confluence $\ge 70\%$)
+- **Trend İstiqaməti:** $EMA_{20} \le EMA_{50}$ və Qiymət $\le EMA_{50}$
+- **SuperTrend Vəziyyəti:** **MÜTLƏQ BEARISH 🔴** (SuperTrend yaşıl ikən heç vaxt SHORT açılmır)
+- **Şam Təsdiqi:** Cari şam qalxan yaşıl şam olmamalıdır ($Close \le Open$ və ya üst kölgə satıcı təzyiqi $\ge 35\%$)
+- **Bazar Rejimi (ADX):** $ADX \ge 20$ (yan bazarda short açılmır)
+- **İmpuls:** $32 \le RSI \le 60$ və $MACD < 0$
+- **Bitcoin Kompası:** Altcoinlər üçün Bitcoin Kompası $\le 55\%$.
 
-### 3. Peşəkar Trend:
-- Confluence Balı $\ge 72\%$ (LONG) və ya $\le 28\%$ (SHORT).
+*(Əgər bu şərtlərdən hər hansı biri ödənməzsə, sistem əməliyyat açmır və peşəkar `NEYTRAL (GÖZLƏMƏ) ⚪` rejimini saxlayır).*
 
 ---
 

@@ -269,48 +269,62 @@ namespace CryptoSense.Application.Services
             bool btcConfirmsLong = isAltcoin ? (btcCompass.BullishScore >= 45 && !highBtcDominance) : (btcCompass.BullishScore >= 45);
             bool btcConfirmsShort = isAltcoin ? (btcCompass.BullishScore <= 55 || highBtcDominance) : (btcCompass.BullishScore <= 55);
 
+            // Market Regime & Chop Filter (Minimum ADX required for ANY timeframe to avoid dying in sideways chop)
+            decimal minAdxRequired = timeframe switch
+            {
+                "1m" => 25m,
+                "3m" => 20m,
+                "5m" => 18m,
+                _ => 16m
+            };
+            bool hasValidMarketRegime = indicators.Adx >= minAdxRequired;
+
+            // Candle Action Confirmations (Never enter against impulsive counter-trend bars)
+            bool bullishCandleConfirmation = closedCandle.Close >= closedCandle.Open || buyerRejection;
+            bool bearishCandleConfirmation = closedCandle.Close <= closedCandle.Open || sellerRejection;
+            bool volumeConfirmed = timeframe != "1m" || indicators.VolumeSurgeRatio >= 1.35m;
+
             // =========================================================================
-            // 🟢 PEŞƏKAR RETEST / BREAKOUT LONG
+            // 🟢 INSTITUTIONAL HIGH-CONVICTION LONG
             // =========================================================================
-            if ((isUptrend && (isPullbackZone || buyerRejection) && rsiAllowsLong && btcConfirmsLong) ||
-                (breakoutLong && indicators.SuperTrendVote == IndicatorVote.Bullish && indicators.MacdHist > 0 && btcConfirmsLong))
+            // Requires 100% Alignment: Confluence >= 70% + SuperTrend Bullish + EMA Trend + Bullish Candle Action + Regime (ADX) + BTC
+            if (indicators.ConfluenceScore >= 70m &&
+                indicators.SuperTrendVote == IndicatorVote.Bullish &&
+                isUptrend &&
+                bullishCandleConfirmation &&
+                hasValidMarketRegime &&
+                volumeConfirmed &&
+                rsiAllowsLong &&
+                btcConfirmsLong)
             {
                 direction = SignalDirection.Buy;
-                determinedType = breakoutLong ? "PEŞƏKAR BREAKOUT LONG 🟢" : "PEŞƏKAR RETEST LONG 🟢";
+                determinedType = breakoutLong ? "PEŞƏKAR BREAKOUT LONG 🟢" : (isPullbackZone ? "PEŞƏKAR RETEST LONG 🟢" : "PEŞƏKAR TREND LONG 🟢");
                 confidence = (int)Math.Clamp(Math.Round(indicators.ConfluenceScore), 50, 96);
             }
             // =========================================================================
-            // 🔴 PEŞƏKAR RETEST / BREAKDOWN SHORT
+            // 🔴 INSTITUTIONAL HIGH-CONVICTION SHORT
             // =========================================================================
-            else if ((isDowntrend && (isPullbackZone || sellerRejection) && rsiAllowsShort && btcConfirmsShort) ||
-                     (breakoutShort && indicators.SuperTrendVote == IndicatorVote.Bearish && indicators.MacdHist < 0 && btcConfirmsShort))
+            // Requires 100% Alignment: Bearish Confluence >= 70% + SuperTrend Bearish + EMA Downtrend + Bearish Candle Action + Regime + BTC
+            else if (indicators.ConfluenceScore <= 30m &&
+                     indicators.SuperTrendVote == IndicatorVote.Bearish &&
+                     isDowntrend &&
+                     bearishCandleConfirmation &&
+                     hasValidMarketRegime &&
+                     volumeConfirmed &&
+                     rsiAllowsShort &&
+                     btcConfirmsShort)
             {
                 direction = SignalDirection.Sell;
-                determinedType = breakoutShort ? "PEŞƏKAR BREAKDOWN SHORT 🔴" : "PEŞƏKAR RETEST SHORT 🔴";
+                determinedType = breakoutShort ? "PEŞƏKAR BREAKDOWN SHORT 🔴" : (isPullbackZone ? "PEŞƏKAR RETEST SHORT 🔴" : "PEŞƏKAR TREND SHORT 🔴");
                 confidence = (int)Math.Clamp(Math.Round(100m - indicators.ConfluenceScore), 50, 96);
             }
-            // İkincili Yüksək Confluence Süzgəci:
-            else if (indicators.ConfluenceScore >= 72m && btcConfirmsLong && rsiAllowsLong)
+            else
             {
                 direction = SignalDirection.Buy;
-                determinedType = "PEŞƏKAR TREND LONG 🟢";
-                confidence = (int)Math.Clamp(Math.Round(indicators.ConfluenceScore), 50, 95);
-            }
-            else if (indicators.ConfluenceScore <= 28m && btcConfirmsShort && rsiAllowsShort)
-            {
-                direction = SignalDirection.Sell;
-                determinedType = "PEŞƏKAR TREND SHORT 🔴";
-                confidence = (int)Math.Clamp(Math.Round(100m - indicators.ConfluenceScore), 50, 95);
-            }
-
-            // 1m Timeframe Noise & Taker Fee Protection Filter (Chop / Fee Burn Prevention)
-            if (timeframe == "1m" && (determinedType.Contains("LONG") || determinedType.Contains("SHORT")))
-            {
-                if (indicators.Adx < 25m || indicators.VolumeSurgeRatio < 1.35m)
-                {
-                    determinedType = "NEYTRAL (GÖZLƏMƏ) ⚪";
-                    reasons.Add("1m Scalping Qoruması: ADX < 25 və ya Həcm Sıçrayışı < 1.35x (Micro-səs-küy və komissiya itkisinə qarşı neytral rejim)");
-                }
+                determinedType = "NEYTRAL (GÖZLƏMƏ) ⚪";
+                confidence = 50;
+                if (!hasValidMarketRegime) reasons.Add($"Rejim Filtri: ADX ({indicators.Adx:F1}) < {minAdxRequired:F1} (Bazar zəif/yan konsolidasiyadadır, əməliyyat açılmır)");
+                if (indicators.SuperTrendVote != IndicatorVote.Bullish && isUptrend) reasons.Add("SuperTrend təsdiqi yoxdur (Trend ziddiyyətlidir)");
             }
 
             decimal directionalConfluence = direction == SignalDirection.Sell 
@@ -335,16 +349,16 @@ namespace CryptoSense.Application.Services
             decimal calculatedRisk = Math.Max(dynamicAtrRisk, minRisk);
 
             // Dinamik Şam Gözləmə Vaxtı (Trade Life Window - Şam hədəfə çatana və ya vaxt bitənə qədər)
-            // 1m: 12 dəqiqə (~12 şam), 3m: 21 dəqiqə (~7 şam), 5m: 35 dəqiqə (~7 şam), 15m: 90 dəqiqə (~6 şam)
+            // 1m: 30 dəqiqə (~30 şam), 3m: 90 dəqiqə (~30 şam), 5m: 150 dəqiqə (~30 şam), 15m: 360 dəqiqə (~24 şam)
             int durationMinutes = timeframe switch
             {
-                "1m" => 12,
-                "3m" => 21,
-                "5m" => 35,
-                "15m" => 90,
-                "1h" => 360,
-                "4h" => 1440,
-                _ => 30
+                "1m" => 30,
+                "3m" => 90,
+                "5m" => 150,
+                "15m" => 360,
+                "1h" => 1440,
+                "4h" => 2880,
+                _ => 120
             };
 
             bool isTradeSignal = determinedType.Contains("LONG") || determinedType.Contains("SHORT");

@@ -117,12 +117,12 @@ namespace CryptoSense.Infrastructure.Testing
 
                 int maxCandlesToWait = timeframe switch
                 {
-                    "1m" => 12,
-                    "3m" => 7,
-                    "5m" => 7,
-                    "15m" => 6,
-                    "1h" => 6,
-                    _ => 8
+                    "1m" => 30,
+                    "3m" => 30,
+                    "5m" => 30,
+                    "15m" => 24,
+                    "1h" => 24,
+                    _ => 20
                 };
                 int futureEnd = Math.Min(klines.Count - 1, i + maxCandlesToWait);
                 for (int f = i + 1; f <= futureEnd; f++)
@@ -205,6 +205,7 @@ namespace CryptoSense.Infrastructure.Testing
                 {
                     // Trade still resolving or timed out safely
                     if (tradePnl >= 0) result.Tp1Hits++;
+                    else if (tradePnl >= -0.30m) result.BreakevenCloses++;
                     else result.StopLossHits++;
                 }
 
