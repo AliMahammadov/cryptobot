@@ -87,35 +87,44 @@ namespace CryptoSense.Infrastructure.Testing
 
                 if (!isLong && !isShort) continue;
 
-                // Step sizing based on ATR
+                // Step sizing based on ATR and protective volatility buffer
                 decimal minMultiplier = timeframe switch
                 {
-                    "1m" => 0.005m,
-                    "3m" => 0.008m,
-                    "5m" => 0.010m,
-                    "15m" => 0.015m,
-                    "1h" => 0.025m,
-                    _ => 0.015m
+                    "1m" => 0.012m,
+                    "3m" => 0.015m,
+                    "5m" => 0.018m,
+                    "15m" => 0.024m,
+                    "1h" => 0.035m,
+                    _ => 0.018m
                 };
                 decimal atr = indicators.Atr > 0 ? indicators.Atr : (currentPrice * minMultiplier);
-                decimal risk = Math.Max(atr * 1.0m, currentPrice * minMultiplier);
+                decimal risk = Math.Max(atr * 1.5m, currentPrice * minMultiplier);
 
                 decimal entryPrice = currentPrice;
-                decimal tp1 = isLong ? entryPrice + (risk * 1.2m) : entryPrice - (risk * 1.2m);
-                decimal tp2 = isLong ? entryPrice + (risk * 2.0m) : entryPrice - (risk * 2.0m);
-                decimal tp3 = isLong ? entryPrice + (risk * 3.0m) : entryPrice - (risk * 3.0m);
+                decimal tp1 = isLong ? entryPrice + (risk * 1.15m) : entryPrice - (risk * 1.15m);
+                decimal tp2 = isLong ? entryPrice + (risk * 1.85m) : entryPrice - (risk * 1.85m);
+                decimal tp3 = isLong ? entryPrice + (risk * 2.80m) : entryPrice - (risk * 2.80m);
                 decimal stopLoss = isLong ? entryPrice - risk : entryPrice + risk;
 
                 result.TotalSignals++;
 
-                // Forward Simulation (Walk forward up to 20 future candles)
+                // Forward Simulation (Walk forward through dynamic candle duration window)
                 bool tp1Reached = false;
                 bool tp2Reached = false;
                 bool slReached = false;
                 bool breakevenHit = false;
                 decimal tradePnl = 0;
 
-                int futureEnd = Math.Min(klines.Count - 1, i + 20);
+                int maxCandlesToWait = timeframe switch
+                {
+                    "1m" => 12,
+                    "3m" => 7,
+                    "5m" => 7,
+                    "15m" => 6,
+                    "1h" => 6,
+                    _ => 8
+                };
+                int futureEnd = Math.Min(klines.Count - 1, i + maxCandlesToWait);
                 for (int f = i + 1; f <= futureEnd; f++)
                 {
                     var fc = klines[f];

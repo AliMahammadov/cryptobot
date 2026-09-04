@@ -56,7 +56,7 @@ namespace CryptoSense.Infrastructure.Persistence.Repositories
             {
                 var flagDir = Directory.Exists("/app/data") ? "/app/data" : Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "data");
                 if (!Directory.Exists(flagDir)) Directory.CreateDirectory(flagDir);
-                var flagFile = Path.Combine(flagDir, "v4_clean_reset.flag");
+                var flagFile = Path.Combine(flagDir, "v5_clean_reset.flag");
 
                 if (!File.Exists(flagFile))
                 {

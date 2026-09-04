@@ -414,6 +414,42 @@ namespace CryptoSense.Infrastructure.Testing
                 return true;
             });
 
+            // 16. Dynamic Candle Duration & Protective ATR Sizing Verification
+            await AssertTest("Test 23: Dynamic Candle Duration & Protective ATR Sizing", async () =>
+            {
+                var sig1m = await _signalEngine.AnalyzeCoinAsync("BTCUSDT", "1m", isLiveScan: false);
+                var sig3m = await _signalEngine.AnalyzeCoinAsync("BTCUSDT", "3m", isLiveScan: false);
+                var sig15m = await _signalEngine.AnalyzeCoinAsync("BTCUSDT", "15m", isLiveScan: false);
+
+                bool validDuration = (sig1m.ExpiryTimeUtc - sig1m.GeneratedAt).TotalMinutes >= 10 &&
+                                     (sig3m.ExpiryTimeUtc - sig3m.GeneratedAt).TotalMinutes >= 15 &&
+                                     (sig15m.ExpiryTimeUtc - sig15m.GeneratedAt).TotalMinutes >= 60;
+
+                bool validRisk = sig1m.EntryPrice > 0 && Math.Abs(sig1m.EntryPrice - sig1m.StopLoss) >= (sig1m.EntryPrice * 0.010m);
+
+                return validDuration && validRisk;
+            });
+
+            // 17. Persistent User Session Integrity
+            await AssertTest("Test 24: Persistent User Session & Database-backed Chat Binding", async () =>
+            {
+                string testChatId = "test_chat_" + Guid.NewGuid().ToString("N").Substring(0, 8);
+                string testUser = "session_user_" + Guid.NewGuid().ToString("N").Substring(0, 6);
+                string pass = "SecurePass123!";
+
+                await _userManager.CreateUserAsync(testUser, pass);
+                var (loginSuccess, user) = await _userManager.ValidateLoginAsync(testUser, pass, 999888777, testChatId);
+                if (!loginSuccess || user == null) return false;
+
+                // Lookup by chatId
+                var foundUser = await _userManager.GetUserByChatIdOrTelegramIdAsync(testChatId, 999888777);
+                bool matches = foundUser != null && foundUser.Username == testUser && foundUser.TelegramChatId == testChatId;
+
+                // Clean up
+                await _userManager.DeleteUserAsync(testUser);
+                return matches;
+            });
+
             Console.WriteLine("\n========================================================");
             Console.WriteLine($"🏁 TEST NƏTİCƏLƏRİ: {passed} UĞURLU (PASS), {failed} UĞURSUZ (FAIL)");
             Console.WriteLine("========================================================\n");

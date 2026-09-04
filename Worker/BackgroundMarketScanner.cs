@@ -107,17 +107,9 @@ namespace CryptoSense.Worker
                     }
                 }
 
-                var maxHoldDuration = sig.Timeframe switch
-                {
-                    "1m" or "3m" or "5m" => TimeSpan.FromHours(4),
-                    "15m" => TimeSpan.FromHours(12),
-                    "1h" => TimeSpan.FromHours(24),
-                    "4h" => TimeSpan.FromHours(48),
-                    _ => TimeSpan.FromHours(12)
-                };
-
-                var elapsed = DateTime.UtcNow - sig.GeneratedAt;
-                bool isMaxTimeReached = elapsed >= maxHoldDuration;
+                bool isMaxTimeReached = sig.ExpiryTimeUtc != default 
+                    ? DateTime.UtcNow >= sig.ExpiryTimeUtc 
+                    : (DateTime.UtcNow - sig.GeneratedAt) >= TimeSpan.FromMinutes(30);
 
                 if (currentPrice == 0 && isMaxTimeReached)
                 {
@@ -206,7 +198,7 @@ namespace CryptoSense.Worker
                                 if (sig.SignalAlertSent) await _telegramService.SendOutcomeAlertAsync(sig, "Stop Loss (SL)", currentPrice, sig.ResultPercent.Value);
                             }
                         }
-                        // Long Safety Timeout
+                        // Long Dynamic Waiting Duration Expired (Time-based exit)
                         else if (isMaxTimeReached && !sig.OutcomeAlertSent)
                         {
                             sig.OutcomeAlertSent = true;
@@ -223,10 +215,9 @@ namespace CryptoSense.Worker
                             }
                             else
                             {
-                                sig.Status = pct > 0 ? SignalStatus.Success : SignalStatus.Failed;
-                                sig.OutcomeStatus = pct > 0
-                                    ? $"{sig.Timeframe} Müddəti Tamamlandı (Qazancla Bağlandı: +{pct}%) ✅"
-                                    : $"{sig.Timeframe} Müddəti Tamamlandı (Hədəfə Çatmadı) ❌";
+                                // If TP was never hit, and dynamic candle duration elapsed without hitting target, mark as Failed
+                                sig.Status = SignalStatus.Failed;
+                                sig.OutcomeStatus = $"{sig.Timeframe} Müddəti Tamamlandı (Hədəfə Çatmadı) ❌";
                             }
 
                             await unitOfWork.Signals.UpdateAsync(sig);
@@ -306,7 +297,7 @@ namespace CryptoSense.Worker
                                 if (sig.SignalAlertSent) await _telegramService.SendOutcomeAlertAsync(sig, "Stop Loss (SL)", currentPrice, sig.ResultPercent.Value);
                             }
                         }
-                        // Short Safety Timeout
+                        // Short Dynamic Waiting Duration Expired (Time-based exit)
                         else if (isMaxTimeReached && !sig.OutcomeAlertSent)
                         {
                             sig.OutcomeAlertSent = true;
@@ -323,10 +314,9 @@ namespace CryptoSense.Worker
                             }
                             else
                             {
-                                sig.Status = pct > 0 ? SignalStatus.Success : SignalStatus.Failed;
-                                sig.OutcomeStatus = pct > 0
-                                    ? $"{sig.Timeframe} Müddəti Tamamlandı (Qazancla Bağlandı: +{pct}%) ✅"
-                                    : $"{sig.Timeframe} Müddəti Tamamlandı (Hədəfə Çatmadı) ❌";
+                                // If TP was never hit, and dynamic candle duration elapsed without hitting target, mark as Failed
+                                sig.Status = SignalStatus.Failed;
+                                sig.OutcomeStatus = $"{sig.Timeframe} Müddəti Tamamlandı (Hədəfə Çatmadı) ❌";
                             }
 
                             await unitOfWork.Signals.UpdateAsync(sig);
@@ -337,7 +327,17 @@ namespace CryptoSense.Worker
 
                     if (sig.IsClosed)
                     {
-                        _activeCandleLocks.TryRemove($"{sig.Symbol}_{sig.Timeframe}", out _);
+                        var cooldownMinutes = sig.Timeframe switch
+                        {
+                            "1m" => 5,
+                            "3m" => 10,
+                            "5m" => 15,
+                            "15m" => 30,
+                            "1h" => 120,
+                            "4h" => 360,
+                            _ => 15
+                        };
+                        _activeCandleLocks[$"{sig.Symbol}_{sig.Timeframe}"] = DateTime.UtcNow.AddMinutes(cooldownMinutes);
                     }
                 }
             }
@@ -388,8 +388,19 @@ namespace CryptoSense.Worker
 
             if (!anyUserActive)
             {
-                // All users have stopped notifications; pause scanning cycle
-                return;
+                var dbUsers = await unitOfWork.Users.GetAllActiveUsersAsync();
+                if (dbUsers.Any(u => u.IsActive))
+                {
+                    anyUserActive = true;
+                    anyUserWantsAllCoins = true;
+                    activeTimeframes.Add("3m");
+                    activeTimeframes.Add("15m");
+                }
+                else
+                {
+                    // All users have explicitly stopped notifications; pause scanning cycle
+                    return;
+                }
             }
 
             if (anyUserWantsAllCoins || subscribedCoins.Count == 0)
@@ -439,13 +450,13 @@ namespace CryptoSense.Worker
 
                                 var duration = signal.Timeframe switch
                                 {
-                                    "1m" => TimeSpan.FromMinutes(1),
-                                    "3m" => TimeSpan.FromMinutes(3),
-                                    "5m" => TimeSpan.FromMinutes(5),
-                                    "15m" => TimeSpan.FromMinutes(15),
-                                    "1h" => TimeSpan.FromHours(1),
-                                    "4h" => TimeSpan.FromHours(4),
-                                    _ => TimeSpan.FromMinutes(15)
+                                    "1m" => TimeSpan.FromMinutes(12),
+                                    "3m" => TimeSpan.FromMinutes(21),
+                                    "5m" => TimeSpan.FromMinutes(35),
+                                    "15m" => TimeSpan.FromMinutes(90),
+                                    "1h" => TimeSpan.FromHours(6),
+                                    "4h" => TimeSpan.FromHours(24),
+                                    _ => TimeSpan.FromMinutes(30)
                                 };
                                 _activeCandleLocks[lockKey] = DateTime.UtcNow.Add(duration);
                                 activeSignals.Add(signal);
@@ -477,6 +488,12 @@ namespace CryptoSense.Worker
                 var chatId = kvp.Key;
                 var s = kvp.Value;
                 if (!s.IsActive) continue;
+
+                if (s.LastHeartbeatSentUtc == default)
+                {
+                    s.LastHeartbeatSentUtc = nowUtc;
+                    continue;
+                }
 
                 var minutesSinceSignal = (nowUtc - s.LastSignalSentUtc).TotalMinutes;
                 var minutesSinceHeartbeat = (nowUtc - s.LastHeartbeatSentUtc).TotalMinutes;

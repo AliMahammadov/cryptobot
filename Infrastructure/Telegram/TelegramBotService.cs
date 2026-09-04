@@ -139,6 +139,30 @@ namespace CryptoSense.Infrastructure.Telegram
             {
                 SuperAdminChatId = _config.SuperAdminChatId;
             }
+
+            // Hydrate active users from database into UserPreferences so preferences and scanning never stall
+            try
+            {
+                using var scope = _serviceProvider.CreateScope();
+                var userManager = scope.ServiceProvider.GetRequiredService<IUserManagerService>();
+                var activeUsers = userManager.GetAllUsersAsync().GetAwaiter().GetResult();
+                foreach (var u in activeUsers)
+                {
+                    if (!string.IsNullOrEmpty(u.TelegramChatId) && u.IsActive)
+                    {
+                        var s = UserPreferences.GetOrAdd(u.TelegramChatId, _ => new UserSettings
+                        {
+                            Username = u.Username,
+                            TelegramUserId = u.TelegramUserId,
+                            IsActive = true,
+                            Timeframe = "3m"
+                        });
+                        s.Username = u.Username;
+                        s.TelegramUserId = u.TelegramUserId;
+                    }
+                }
+            }
+            catch { }
         }
 
         public static UserSettings GetSettings(string chatId)
@@ -1221,22 +1245,35 @@ namespace CryptoSense.Infrastructure.Telegram
                 _signalUserNumberMap.Clear();
                 CryptoSense.Worker.BackgroundMarketScanner.ClearLocks();
 
-                try
+                if (isAdmin)
                 {
-                    using var sc = _serviceProvider.CreateScope();
-                    var se = sc.ServiceProvider.GetRequiredService<ISignalEngine>();
-                    await se.ClearAllSignalsAsync();
-                }
-                catch { }
+                    try
+                    {
+                        using var sc = _serviceProvider.CreateScope();
+                        var se = sc.ServiceProvider.GetRequiredService<ISignalEngine>();
+                        await se.ClearAllSignalsAsync();
+                    }
+                    catch { }
 
-                await SendMessageAsync(
-                    "🧹 <b>Bütün Siqnal Tarixçəsi və Statistikalar Sıfırlandı! ✅</b>\n\n" +
-                    "• Bazadakı bütün keçmiş siqnal qeydləri təmizləndi.\n" +
-                    "• Statistik göstəricilər sıfırlandı (0 əməliyyat).\n" +
-                    "• Sayğaclar və aktiv kilidlər sıfırlandı.\n\n" +
-                    "<i>Sistem sıfır nöqtəsindən tam təmiz şəkildə canlı izləməyə davam edir.</i>", 
-                    chatId, 
-                    TelegramKeyboards.BuildUserKeyboard(userSettings, isAdmin));
+                    await SendMessageAsync(
+                        "🧹 <b>Bütün Qlobal Siqnal Tarixçəsi və Statistikalar Sıfırlandı! ✅ (Admin)</b>\n\n" +
+                        "• Bazadakı bütün keçmiş siqnal qeydləri təmizləndi.\n" +
+                        "• Statistik göstəricilər sıfırlandı (0 əməliyyat).\n" +
+                        "• Sayğaclar və aktiv kilidlər sıfırlandı.\n\n" +
+                        "<i>Sistem sıfır nöqtəsindən tam təmiz şəkildə canlı izləməyə davam edir.</i>", 
+                        chatId, 
+                        TelegramKeyboards.BuildUserKeyboard(userSettings, isAdmin));
+                }
+                else
+                {
+                    await SendMessageAsync(
+                        "🧹 <b>Şəxsi Bildiriş Sayğacınız Sıfırlandı! ✅</b>\n\n" +
+                        "• Şəxsi siqnal sayğacınız sıfırlandı (#1-dən başlayacaq).\n" +
+                        "• Yalnız bu andan etibarən yaranan yeni siqnallar sizə göndəriləcək.\n\n" +
+                        "<i>Qeyd: Qlobal verilənlər bazasını yalnız Super Admin sıfırlaya bilər.</i>", 
+                        chatId, 
+                        TelegramKeyboards.BuildUserKeyboard(userSettings, isAdmin));
+                }
             }
             else if (text.Contains("Dərin") || text.Contains("Derin") || text == "📈 Dərin Statistika" || text == "/coin_stats")
             {

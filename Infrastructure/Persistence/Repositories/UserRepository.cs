@@ -31,9 +31,18 @@ namespace CryptoSense.Infrastructure.Persistence.Repositories
 
         public async Task<UserAccount?> GetByChatIdOrTelegramUserIdAsync(string chatId, long? telegramUserId)
         {
-            return await _context.Users.FirstOrDefaultAsync(u => u.IsActive && 
-                ((!string.IsNullOrEmpty(u.TelegramChatId) && u.TelegramChatId == chatId) ||
-                 (telegramUserId.HasValue && u.TelegramUserId == telegramUserId.Value)));
+            if (!string.IsNullOrEmpty(chatId))
+            {
+                var userByChat = await _context.Users.FirstOrDefaultAsync(u => u.IsActive && u.TelegramChatId == chatId);
+                if (userByChat != null) return userByChat;
+            }
+
+            if (telegramUserId.HasValue && telegramUserId.Value > 0)
+            {
+                return await _context.Users.FirstOrDefaultAsync(u => u.IsActive && u.TelegramUserId == telegramUserId.Value);
+            }
+
+            return null;
         }
 
         public async Task<List<UserAccount>> GetAllActiveUsersAsync()

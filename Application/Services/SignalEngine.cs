@@ -18,7 +18,7 @@ namespace CryptoSense.Application.Services
         private readonly INewsService _newsService;
         private readonly IUnitOfWork _unitOfWork;
 
-        private static int _nextSignalNumber = 1;
+        private static int _nextSignalNumber = 0;
         private static bool _initializedNumber = false;
         private static readonly object _lock = new();
 
@@ -50,7 +50,7 @@ namespace CryptoSense.Application.Services
                 try
                 {
                     var maxNum = _unitOfWork.Signals.GetMaxSignalNumberAsync().GetAwaiter().GetResult();
-                    if (maxNum >= _nextSignalNumber) _nextSignalNumber = maxNum + 1;
+                    if (maxNum >= _nextSignalNumber) _nextSignalNumber = maxNum;
                     _initializedNumber = true;
                 }
                 catch
@@ -307,28 +307,34 @@ namespace CryptoSense.Application.Services
                 ? Math.Round(100m - indicators.ConfluenceScore, 1) 
                 : Math.Round(indicators.ConfluenceScore, 1);
 
+            // Dinamik Həqiqi Volatillik və Riskin Təyini (Mikro səs-küyün Stop-Loss-u vurmasının qarşısını almaq üçün bufer)
             decimal minTfMultiplier = timeframe switch
             {
-                "1m" => 0.005m,
-                "3m" => 0.008m,
-                "5m" => 0.010m,
-                "15m" => 0.015m,
-                "1h" => 0.030m,
-                "4h" => 0.050m,
-                _ => 0.015m
+                "1m" => 0.012m, // 1.2% minimum təbii dalğalanma buferi
+                "3m" => 0.015m, // 1.5% minimum bufer
+                "5m" => 0.018m, // 1.8% minimum bufer
+                "15m" => 0.024m, // 2.4% minimum bufer
+                "1h" => 0.035m, // 3.5%
+                "4h" => 0.050m, // 5.0%
+                _ => 0.018m
             };
 
             decimal atr = indicators.Atr > 0 ? indicators.Atr : (currentPrice * minTfMultiplier);
             decimal minRisk = currentPrice * minTfMultiplier;
-            if (atr < minRisk) atr = minRisk;
+            decimal dynamicAtrRisk = atr * 1.5m;
+            decimal calculatedRisk = Math.Max(dynamicAtrRisk, minRisk);
 
+            // Dinamik Şam Gözləmə Vaxtı (Trade Life Window - Şam hədəfə çatana və ya vaxt bitənə qədər)
+            // 1m: 12 dəqiqə (~12 şam), 3m: 21 dəqiqə (~7 şam), 5m: 35 dəqiqə (~7 şam), 15m: 90 dəqiqə (~6 şam)
             int durationMinutes = timeframe switch
             {
-                "1m" or "3m" or "5m" => 240,  // 4 hours minimum safe market swing window
-                "15m" => 720,                 // 12 hours
-                "1h" => 1440,                 // 24 hours
-                "4h" => 2880,                 // 48 hours
-                _ => 720
+                "1m" => 12,
+                "3m" => 21,
+                "5m" => 35,
+                "15m" => 90,
+                "1h" => 360,
+                "4h" => 1440,
+                _ => 30
             };
 
             bool isTradeSignal = determinedType.Contains("LONG") || determinedType.Contains("SHORT");
@@ -358,8 +364,8 @@ namespace CryptoSense.Application.Services
             };
 
             // Lokal Dəstək və Müqavimət Səviyyələri üzrə TP və SL Təyini
-            decimal localSupport = indicators.SupportLevel > 0 ? indicators.SupportLevel : (currentPrice - (atr * 1.2m));
-            decimal localResistance = indicators.ResistanceLevel > 0 ? indicators.ResistanceLevel : (currentPrice + (atr * 1.2m));
+            decimal localSupport = indicators.SupportLevel > 0 ? indicators.SupportLevel : (currentPrice - calculatedRisk);
+            decimal localResistance = indicators.ResistanceLevel > 0 ? indicators.ResistanceLevel : (currentPrice + calculatedRisk);
 
             if (direction == SignalDirection.Buy)
             {
@@ -367,18 +373,21 @@ namespace CryptoSense.Application.Services
                 newSignal.EntryLow = RoundToCoinPrecision(currentPrice, lowBound);
                 newSignal.EntryHigh = RoundToCoinPrecision(currentPrice, currentPrice * 1.0010m);
 
-                // Stop-Loss: Lokal dəstəyin bir az altına
-                decimal slTarget = localSupport * 0.998m;
-                if (currentPrice - slTarget < (atr * 0.8m)) slTarget = currentPrice - (atr * 1.1m);
+                // Stop-Loss: Minimum risk buferi və struktur dəstəyi ilə qorunmuş SL
+                decimal slTarget = currentPrice - calculatedRisk;
+                if (localSupport > 0 && localSupport < currentPrice && (currentPrice - localSupport) >= minRisk && (currentPrice - localSupport) <= calculatedRisk * 1.4m)
+                {
+                    slTarget = localSupport * 0.9985m;
+                }
                 newSignal.StopLoss = RoundToCoinPrecision(currentPrice, slTarget);
 
-                decimal risk = currentPrice - newSignal.StopLoss;
-                if (risk <= 0) risk = currentPrice * 0.01m;
+                decimal actualRisk = currentPrice - newSignal.StopLoss;
+                if (actualRisk <= 0) actualRisk = minRisk;
 
-                newSignal.TakeProfit1 = RoundToCoinPrecision(currentPrice, currentPrice + (risk * 1.2m));
-                decimal tp2Candidate = localResistance > currentPrice ? localResistance : currentPrice + (risk * 2.0m);
+                newSignal.TakeProfit1 = RoundToCoinPrecision(currentPrice, currentPrice + (actualRisk * 1.15m));
+                decimal tp2Candidate = localResistance > (currentPrice + (actualRisk * 1.15m)) ? localResistance : currentPrice + (actualRisk * 1.85m);
                 newSignal.TakeProfit2 = RoundToCoinPrecision(currentPrice, tp2Candidate);
-                newSignal.TakeProfit3 = RoundToCoinPrecision(currentPrice, currentPrice + (risk * 3.0m));
+                newSignal.TakeProfit3 = RoundToCoinPrecision(currentPrice, currentPrice + (actualRisk * 2.80m));
             }
             else // SHORT
             {
@@ -386,18 +395,21 @@ namespace CryptoSense.Application.Services
                 newSignal.EntryLow = RoundToCoinPrecision(currentPrice, currentPrice * 0.9990m);
                 newSignal.EntryHigh = RoundToCoinPrecision(currentPrice, highBound);
 
-                // Stop-Loss: Lokal müqavimətin bir az üstünə
-                decimal slTarget = localResistance * 1.002m;
-                if (slTarget - currentPrice < (atr * 0.8m)) slTarget = currentPrice + (atr * 1.1m);
+                // Stop-Loss: Minimum risk buferi və struktur müqaviməti ilə qorunmuş SL
+                decimal slTarget = currentPrice + calculatedRisk;
+                if (localResistance > currentPrice && (localResistance - currentPrice) >= minRisk && (localResistance - currentPrice) <= calculatedRisk * 1.4m)
+                {
+                    slTarget = localResistance * 1.0015m;
+                }
                 newSignal.StopLoss = RoundToCoinPrecision(currentPrice, slTarget);
 
-                decimal risk = newSignal.StopLoss - currentPrice;
-                if (risk <= 0) risk = currentPrice * 0.01m;
+                decimal actualRisk = newSignal.StopLoss - currentPrice;
+                if (actualRisk <= 0) actualRisk = minRisk;
 
-                newSignal.TakeProfit1 = RoundToCoinPrecision(currentPrice, currentPrice - (risk * 1.2m));
-                decimal tp2Candidate = localSupport < currentPrice ? localSupport : currentPrice - (risk * 2.0m);
+                newSignal.TakeProfit1 = RoundToCoinPrecision(currentPrice, currentPrice - (actualRisk * 1.15m));
+                decimal tp2Candidate = (localSupport > 0 && localSupport < (currentPrice - (actualRisk * 1.15m))) ? localSupport : currentPrice - (actualRisk * 1.85m);
                 newSignal.TakeProfit2 = RoundToCoinPrecision(currentPrice, tp2Candidate);
-                newSignal.TakeProfit3 = RoundToCoinPrecision(currentPrice, currentPrice - (risk * 3.0m));
+                newSignal.TakeProfit3 = RoundToCoinPrecision(currentPrice, currentPrice - (actualRisk * 2.80m));
             }
 
             _recentCandleSignals[candleKey] = newSignal;
@@ -457,7 +469,7 @@ namespace CryptoSense.Application.Services
             _recentCandleSignals.Clear();
             lock (_lock)
             {
-                _nextSignalNumber = 1;
+                _nextSignalNumber = 0;
                 _initializedNumber = true;
             }
         }
@@ -466,7 +478,7 @@ namespace CryptoSense.Application.Services
         {
             lock (_lock)
             {
-                _nextSignalNumber = 1;
+                _nextSignalNumber = 0;
                 _initializedNumber = true;
             }
         }

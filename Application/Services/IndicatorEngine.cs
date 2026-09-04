@@ -278,25 +278,30 @@ namespace CryptoSense.Application.Services
                 if (klines[i].High < klines[i - 2].Low) res.HasBearishFvg = true;
             }
 
-            // 17. Core Confluence Scoring (User-specified EMA, MA, MACD & SuperTrend architecture)
+            // 17. Core Confluence Scoring (User-specified EMA, MA, MACD & SuperTrend architecture with real Trade Power)
             decimal emaScore = res.EmaVote == IndicatorVote.Bullish ? 1.0m : (res.EmaVote == IndicatorVote.Bearish ? -1.0m : 0.0m);
             decimal smaScore = res.SmaVote == IndicatorVote.Bullish ? 1.0m : (res.SmaVote == IndicatorVote.Bearish ? -1.0m : 0.0m);
             decimal stScore = res.SuperTrendVote == IndicatorVote.Bullish ? 1.0m : (res.SuperTrendVote == IndicatorVote.Bearish ? -1.0m : 0.0m);
-            res.TrendScore = Math.Round((emaScore * 0.40m) + (smaScore * 0.35m) + (stScore * 0.25m), 3);
+            decimal adxScore = res.AdxVote == IndicatorVote.Bullish ? 1.0m : (res.AdxVote == IndicatorVote.Bearish ? -1.0m : 0.0m);
+
+            // ADX Trend Strength Damping (Filter out sideways low-energy chop)
+            decimal adxMultiplier = res.Adx >= 22 ? 1.0m : (res.Adx >= 18 ? 0.80m : 0.50m);
+            res.TrendScore = Math.Round(((emaScore * 0.35m) + (smaScore * 0.30m) + (stScore * 0.25m) + (adxScore * 0.10m)) * adxMultiplier, 3);
 
             decimal macdScore = res.MacdVote == IndicatorVote.Bullish ? 1.0m : (res.MacdVote == IndicatorVote.Bearish ? -1.0m : 0.0m);
             decimal rsiScore = res.RsiVote == IndicatorVote.Bullish ? 1.0m : (res.RsiVote == IndicatorVote.Bearish ? -1.0m : 0.0m);
-            res.MomentumScore = Math.Round((macdScore * 0.70m) + (rsiScore * 0.30m), 3);
+            res.MomentumScore = Math.Round((macdScore * 0.65m) + (rsiScore * 0.35m), 3);
 
             decimal bbScore = res.BollingerVote == IndicatorVote.Bullish ? 1.0m : (res.BollingerVote == IndicatorVote.Bearish ? -1.0m : 0.0m);
             res.VolatilityScore = bbScore;
 
             decimal obvScore = res.ObvVote == IndicatorVote.Bullish ? 1.0m : (res.ObvVote == IndicatorVote.Bearish ? -1.0m : 0.0m);
             decimal volScore = res.VolumeVote == IndicatorVote.Bullish ? 1.0m : (res.VolumeVote == IndicatorVote.Bearish ? -1.0m : 0.0m);
-            res.VolumeScore = Math.Round((obvScore * 0.50m) + (volScore * 0.50m), 3);
+            decimal volMultiplier = res.VolumeSurgeRatio >= 1.0m ? 1.0m : (res.VolumeSurgeRatio >= 0.7m ? 0.85m : 0.60m);
+            res.VolumeScore = Math.Round(((obvScore * 0.50m) + (volScore * 0.50m)) * volMultiplier, 3);
 
-            // 45% Trend (EMA + MA + SuperTrend) + 40% Momentum (MACD + RSI) + 15% Volume & Volatility
-            decimal rawScore = (res.TrendScore * 0.45m) + (res.MomentumScore * 0.40m) + (res.VolatilityScore * 0.05m) + (res.VolumeScore * 0.10m);
+            // 45% Trend (EMA + MA + SuperTrend + ADX) + 35% Momentum (MACD + RSI) + 8% Volatility + 12% Volume
+            decimal rawScore = (res.TrendScore * 0.45m) + (res.MomentumScore * 0.35m) + (res.VolatilityScore * 0.08m) + (res.VolumeScore * 0.12m);
 
             decimal mtfFactor = 1.0m;
             if (btcCompass != null)

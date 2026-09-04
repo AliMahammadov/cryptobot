@@ -51,7 +51,7 @@ namespace CryptoSense.Infrastructure.Persistence.Repositories
 
         public async Task<int> GetMaxSignalNumberAsync()
         {
-            return await _context.Signals.MaxAsync(s => (int?)s.SignalNumber) ?? 160;
+            return await _context.Signals.MaxAsync(s => (int?)s.SignalNumber) ?? 0;
         }
 
         public async Task AddAsync(FuturesSignal signal)
