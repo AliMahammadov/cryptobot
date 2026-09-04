@@ -112,6 +112,24 @@ namespace CryptoSense.Infrastructure.Telegram
             catch { }
         }
 
+        public static void ResetAllAlertCounters()
+        {
+            try
+            {
+                foreach (var kvp in UserPreferences)
+                {
+                    kvp.Value.AlertCounter = 0;
+                }
+                _signalUserNumberMap.Clear();
+                if (File.Exists(SignalMapFilePath))
+                {
+                    try { File.Delete(SignalMapFilePath); } catch { }
+                }
+                SaveSettings();
+            }
+            catch { }
+        }
+
         public TelegramBotService(HttpClient httpClient, IOptions<AppConfig> config, IServiceProvider serviceProvider)
         {
             _httpClient = httpClient;
@@ -323,11 +341,29 @@ namespace CryptoSense.Infrastructure.Telegram
 
                 var userSigNum = signal.UserSignalNumbers.GetOrAdd(chatId, _ => ++settings.AlertCounter);
                 _signalUserNumberMap[$"{signal.Id}_{chatId}"] = userSigNum;
+                signal.SignalAlertSent = true;
                 SaveSettings();
                 var msg = TelegramMessageFormatter.FormatSignalAlert(signal, userSigNum);
                 settings.LastSignalSentUtc = DateTime.UtcNow;
                 settings.LastHeartbeatSentUtc = DateTime.UtcNow;
                 await SendMessageAsync(msg, chatId);
+            }
+
+            if (signal.SignalAlertSent)
+            {
+                try
+                {
+                    using var s = _serviceProvider.CreateScope();
+                    var uow = s.ServiceProvider.GetRequiredService<IUnitOfWork>();
+                    var dbSig = await uow.Signals.GetByIdAsync(signal.Id);
+                    if (dbSig != null)
+                    {
+                        dbSig.SignalAlertSent = true;
+                        await uow.Signals.UpdateAsync(dbSig);
+                        await uow.SaveChangesAsync();
+                    }
+                }
+                catch { }
             }
         }
 
@@ -359,7 +395,6 @@ namespace CryptoSense.Infrastructure.Telegram
                 if (!settings.IsActive) continue;
 
                 var mapKey = $"{signal.Id}_{chatId}";
-                int userSigNum = 0;
                 bool explicitlyMapped = _signalUserNumberMap.TryGetValue(mapKey, out var mappedNum) && mappedNum > 0;
                 if (!explicitlyMapped && signal.UserSignalNumbers.TryGetValue(chatId, out var fbNum) && fbNum > 0)
                 {
@@ -367,16 +402,13 @@ namespace CryptoSense.Infrastructure.Telegram
                     explicitlyMapped = true;
                 }
 
-                if (explicitlyMapped)
+                // Strict filter: Only send outcome alert if this user actually received the initial signal alert!
+                if (!explicitlyMapped)
                 {
-                    userSigNum = mappedNum;
-                }
-                else
-                {
-                    // If trade signal was created, use the signal's sequential number or user counter
-                    userSigNum = signal.SignalNumber > 0 ? signal.SignalNumber : settings.AlertCounter;
+                    continue;
                 }
 
+                int userSigNum = mappedNum;
                 var msg = TelegramMessageFormatter.FormatOutcomeAlert(signal, userSigNum, outcomeType, hitPrice, profitPct);
                 await SendMessageAsync(msg, chatId);
             }

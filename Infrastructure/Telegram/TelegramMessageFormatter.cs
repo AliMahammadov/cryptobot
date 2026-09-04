@@ -58,16 +58,16 @@ namespace CryptoSense.Infrastructure.Telegram
             var sb = new StringBuilder();
             if (outcomeType.Contains("Stop Loss") || outcomeType.Contains("SL"))
             {
-                sb.AppendLine($"⛔ <b>#{userSigNum} NÖMRƏLİ SİQNAL ÜZRƏ STOP-LOSS (SL) VURDU!</b>");
-                sb.AppendLine($"<b>Stop Loss (SL) (UĞURSUZ) ❌</b>");
+                sb.AppendLine($"⛔ <b>#{userSigNum} NƏTİCƏ HESABATI</b>");
+                sb.AppendLine($"📌 <b>#{userSigNum} nömrəli əməliyyat üzrə Stop-Loss vurdu (UĞURSUZ OLDU) ❌</b>");
                 sb.AppendLine();
                 sb.AppendLine($"⚠️ <b>Təcili əməliyyatı dayandırın!</b>");
             }
             else
             {
-                var statusText = isWin ? $"{outcomeType} (UĞURLU) ✅" : $"{outcomeType} (UĞURSUZ) ❌";
-                sb.AppendLine($"{icon} <b>#{userSigNum} NƏTİCƏ HESABATI:</b>");
-                sb.AppendLine($"<b>{statusText}</b>");
+                var statusText = isWin ? $"{outcomeType} (UĞURLU OLDU) ✅" : $"{outcomeType} (UĞURSUZ OLDU) ❌";
+                sb.AppendLine($"{icon} <b>#{userSigNum} NƏTİCƏ HESABATI</b>");
+                sb.AppendLine($"📌 <b>#{userSigNum} nömrəli əməliyyat üzrə: {statusText}</b>");
             }
 
             sb.AppendLine();

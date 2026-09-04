@@ -18,7 +18,7 @@ namespace CryptoSense.Application.Services
         private readonly INewsService _newsService;
         private readonly IUnitOfWork _unitOfWork;
 
-        private static int _nextSignalNumber = 160;
+        private static int _nextSignalNumber = 1;
         private static bool _initializedNumber = false;
         private static readonly object _lock = new();
 
@@ -324,13 +324,11 @@ namespace CryptoSense.Application.Services
 
             int durationMinutes = timeframe switch
             {
-                "1m" => 1,
-                "3m" => 3,
-                "5m" => 5,
-                "15m" => 15,
-                "1h" => 60,
-                "4h" => 240,
-                _ => 15
+                "1m" or "3m" or "5m" => 240,  // 4 hours minimum safe market swing window
+                "15m" => 720,                 // 12 hours
+                "1h" => 1440,                 // 24 hours
+                "4h" => 2880,                 // 48 hours
+                _ => 720
             };
 
             bool isTradeSignal = determinedType.Contains("LONG") || determinedType.Contains("SHORT");
@@ -457,6 +455,15 @@ namespace CryptoSense.Application.Services
         {
             await _unitOfWork.Signals.ClearAllSignalsAsync();
             _recentCandleSignals.Clear();
+            lock (_lock)
+            {
+                _nextSignalNumber = 1;
+                _initializedNumber = true;
+            }
+        }
+
+        public static void ResetSignalCounter()
+        {
             lock (_lock)
             {
                 _nextSignalNumber = 1;

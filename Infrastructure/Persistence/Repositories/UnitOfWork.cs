@@ -51,14 +51,21 @@ namespace CryptoSense.Infrastructure.Persistence.Repositories
                 _context.SaveChanges();
             }
 
-            // Cleanup legacy premature timeout signals from past bugged 1-candle versions
+            // Full clean slate reset of legacy signals and counters on fresh deploy
             try
             {
-                var legacyFakeSignals = _context.Signals.Where(s => s.Status == SignalStatus.Failed && (s.OutcomeStatus.Contains("Bitdi") || s.OutcomeStatus.Contains("Vaxt bitdi"))).ToList();
-                if (legacyFakeSignals.Count > 0)
+                var flagDir = Directory.Exists("/app/data") ? "/app/data" : Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "data");
+                if (!Directory.Exists(flagDir)) Directory.CreateDirectory(flagDir);
+                var flagFile = Path.Combine(flagDir, "v4_clean_reset.flag");
+
+                if (!File.Exists(flagFile))
                 {
-                    _context.Signals.RemoveRange(legacyFakeSignals);
+                    _context.SignalIndicatorSnapshots.RemoveRange(_context.SignalIndicatorSnapshots);
+                    _context.Signals.RemoveRange(_context.Signals);
                     _context.SaveChanges();
+                    Telegram.TelegramBotService.ResetAllAlertCounters();
+                    Application.Services.SignalEngine.ResetSignalCounter();
+                    File.WriteAllText(flagFile, $"Clean reset at {DateTime.UtcNow:O}");
                 }
             }
             catch { }
