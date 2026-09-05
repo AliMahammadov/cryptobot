@@ -158,6 +158,35 @@ namespace CryptoSense.Application.Services
             }
         }
 
+        private static readonly ConcurrentDictionary<string, DateTime> _seenUrgentNews = new();
+
+        public async Task<List<CryptoNewsItem>> GetUrgentBreakingNewsAndListingsAsync()
+        {
+            var summary = await GetNewsAndSentimentAsync();
+            var urgentItems = new List<CryptoNewsItem>();
+            if (summary.LatestNews == null || summary.LatestNews.Count == 0) return urgentItems;
+
+            var listingWords = new[] { "list", "lists", "listing", "launch", "binance", "airdrop", "token", "təzə", "yeni" };
+            var breakingWords = new[] { "sec", "fed", "interest rate", "faiz", "rate cut", "inflation", "cpi", "emergency", "təcili", "hack", "exploit", "etf", "approval", "təsdiq", "court", "lawsuit", "məhkəmə", "tariff", "war", "ban", "qadağa", "breaking" };
+
+            foreach (var item in summary.LatestNews)
+            {
+                var lowerTitle = (item.Title + " " + item.Url).ToLowerInvariant();
+                bool isListing = listingWords.Any(w => lowerTitle.Contains(w));
+                bool isBreaking = breakingWords.Any(w => lowerTitle.Contains(w));
+
+                if (isListing || isBreaking || Math.Abs(item.SentimentScore) >= 60)
+                {
+                    var newsKey = string.IsNullOrWhiteSpace(item.Url) ? item.Title : item.Url;
+                    if (_seenUrgentNews.TryAdd(newsKey, DateTime.UtcNow))
+                    {
+                        urgentItems.Add(item);
+                    }
+                }
+            }
+            return urgentItems;
+        }
+
         private async Task<string> TranslateToAzAsync(string englishText)
         {
             if (_translationCache.TryGetValue(englishText, out var cached))

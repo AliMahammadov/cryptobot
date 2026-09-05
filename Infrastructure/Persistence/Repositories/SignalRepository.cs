@@ -40,6 +40,18 @@ namespace CryptoSense.Infrastructure.Persistence.Repositories
                 .ToListAsync();
         }
 
+        public async Task<bool> HasActiveSignalForSymbolAsync(string symbol)
+        {
+            return await _context.Signals
+                .AnyAsync(s => s.Symbol == symbol && s.Status == SignalStatus.Open && !s.IsClosed && s.SignalAlertSent);
+        }
+
+        public async Task<int> GetActiveSignalsCountAsync()
+        {
+            return await _context.Signals
+                .CountAsync(s => s.Status == SignalStatus.Open && !s.IsClosed && s.SignalAlertSent);
+        }
+
         public async Task<List<FuturesSignal>> GetRecentSignalsAsync(int count = 25)
         {
             return await _context.Signals

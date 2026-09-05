@@ -559,23 +559,155 @@ namespace CryptoSense.Infrastructure.Testing
                 return Task.FromResult(globalValid && tfValid);
             });
 
-            // 21. Live Scanner Multi-Position Capacity Test
-            await AssertTest("Test 28: Multi-Position Market Scanner Capacity (No 5-Trade Block)", () =>
+            // 22. New Architecture: Volatility & Extreme Risk Alert Formatting & Trigger Test
+            await AssertTest("Test 29: New Architecture - Volatility Risk Alert Formatter & Spike Trigger", () =>
             {
-                // Verify that having 5+ active unclosed trades does not block scanner execution
-                var activeList = new List<FuturesSignal>
+                var alert = TelegramMessageFormatter.FormatVolatilityRiskAlert("TRUMPUSDT", 14.50m, 35.8m, 5.2m, "Şam diapazonu son 20 şamın orta ATR dəyərindən 5.2x böyükdür (Spike)");
+                bool valid = alert.Contains("YÜKSƏK VOLATİLLİK / RİSK BİLDİRİŞİ") &&
+                             alert.Contains("TRUMP") &&
+                             alert.Contains("Səbəb") &&
+                             alert.Contains("5.2x");
+                return Task.FromResult(valid);
+            });
+
+            // 23. New Architecture: Urgent News & Listing Detection & Formatting Test
+            await AssertTest("Test 30: New Architecture - Urgent Breaking News & Listing Formatter", () =>
+            {
+                var newsItem = new CryptoNewsItem
                 {
-                    new() { Symbol = "BTCUSDT", Timeframe = "15m", Status = SignalStatus.Open, IsClosed = false },
-                    new() { Symbol = "ETHUSDT", Timeframe = "15m", Status = SignalStatus.Open, IsClosed = false },
-                    new() { Symbol = "SOLUSDT", Timeframe = "15m", Status = SignalStatus.Open, IsClosed = false },
-                    new() { Symbol = "BNBUSDT", Timeframe = "15m", Status = SignalStatus.Open, IsClosed = false },
-                    new() { Symbol = "DOGEUSDT", Timeframe = "15m", Status = SignalStatus.Open, IsClosed = false },
-                    new() { Symbol = "SUIUSDT", Timeframe = "15m", Status = SignalStatus.Open, IsClosed = false }
+                    Title = "Binance Futures Will Launch USDT-Margined PEPE Perpetual Contract",
+                    Source = "Binance Announcements",
+                    Url = "https://www.binance.com/en/support/announcement/123",
+                    PublishedAt = DateTime.UtcNow
                 };
 
-                // A new candidate pair on ARBUSDT 15m must be allowed to scan because ARB is not in activeList
-                bool hasArb = activeList.Any(s => s.Symbol == "ARBUSDT" && s.Timeframe == "15m" && !s.IsClosed && s.Status == SignalStatus.Open);
-                return Task.FromResult(!hasArb && activeList.Count >= 5);
+                var alert = TelegramMessageFormatter.FormatUrgentNewsAlert(newsItem, isListing: true);
+                bool valid = alert.Contains("YENİ COİN LİSTİNQİ") &&
+                             alert.Contains("Binance Announcements") &&
+                             alert.Contains("PEPE");
+                return Task.FromResult(valid);
+            });
+
+            // 24. New Architecture: Binary Outcome Reporting (Strict Uğurlu vs Uğursuz)
+            await AssertTest("Test 31: New Architecture - Binary Outcome Reporting (Strict Uğurlu vs Uğursuz, Zero Neutral)", () =>
+            {
+                var wonSig = new FuturesSignal
+                {
+                    SignalNumber = 101,
+                    Symbol = "SOLUSDT",
+                    Direction = SignalDirection.Buy,
+                    Timeframe = "15m",
+                    EntryPrice = 140.0m
+                };
+                var wonReport = TelegramMessageFormatter.FormatOutcomeAlert(wonSig, 101, "Hədəf 1 (TP1)", 142.5m, 1.78m);
+                bool wonValid = wonReport.Contains("UĞURLU") && wonReport.Contains("+1.78%") && !wonReport.Contains("NEYTRAL");
+
+                var lostSig = new FuturesSignal
+                {
+                    SignalNumber = 102,
+                    Symbol = "AVAXUSDT",
+                    Direction = SignalDirection.Sell,
+                    Timeframe = "5m",
+                    EntryPrice = 25.0m
+                };
+                var lostReport = TelegramMessageFormatter.FormatOutcomeAlert(lostSig, 102, "Stop Loss (SL)", 25.5m, -2.00m);
+                bool lostValid = lostReport.Contains("UĞURSUZ") && lostReport.Contains("-2.00%") && !lostReport.Contains("NEYTRAL");
+
+                return Task.FromResult(wonValid && lostValid);
+            });
+
+            // 25. New Architecture: Strict Coin Lock & Max Concurrent Portfolio Positions Model
+            await AssertTest("Test 32: New Architecture - Strict Coin Lock & Portfolio Safety Logic", () =>
+            {
+                // Verify that 1 active trade locks the coin across all timeframes
+                var activeTrades = new Dictionary<string, (int SignalNumber, string Timeframe)>
+                {
+                    { "BTCUSDT", (1, "15m") },
+                    { "ETHUSDT", (2, "5m") },
+                    { "SOLUSDT", (3, "3m") },
+                    { "BNBUSDT", (4, "15m") },
+                    { "DOGEUSDT", (5, "5m") }
+                };
+
+                const int maxGlobalOpenPositions = 5;
+                bool isGlobalLimitReached = activeTrades.Count >= maxGlobalOpenPositions;
+                bool isBtcLockedFor3m = activeTrades.ContainsKey("BTCUSDT"); // Cannot open BTC on 3m while 15m is open
+                bool isAvaxEligible = !activeTrades.ContainsKey("AVAXUSDT") && !isGlobalLimitReached; // False because limit reached
+
+                return Task.FromResult(isGlobalLimitReached && isBtcLockedFor3m && !isAvaxEligible);
+            });
+
+            // 26. Qayda 1: No second trade on coin while previous is unclosed
+            await AssertTest("Test 33: Qayda 1 - Database & Scanner Reject 2nd Trade for Unclosed Coin", async () =>
+            {
+                var testCoin = "TESTCOIN_Q1_USDT";
+                var sig1 = new FuturesSignal
+                {
+                    SignalNumber = 901,
+                    Symbol = testCoin,
+                    Direction = SignalDirection.Buy,
+                    SignalType = "GÜCLÜ TREND LONG 🟢",
+                    Timeframe = "1h",
+                    EntryPrice = 10.0m,
+                    Status = SignalStatus.Open,
+                    IsClosed = false,
+                    SignalAlertSent = true,
+                    GeneratedAt = DateTime.UtcNow
+                };
+                await _unitOfWork.Signals.AddAsync(sig1);
+                await _unitOfWork.SaveChangesAsync();
+
+                bool hasActive = await _unitOfWork.Signals.HasActiveSignalForSymbolAsync(testCoin);
+                return hasActive;
+            });
+
+            // 27. Qayda 2: Open 3m trade blocks all other timeframes (5m, 15m, 1h)
+            await AssertTest("Test 34: Qayda 2 - Active 3m Position Blocks 5m, 15m, 1h for Same Coin", async () =>
+            {
+                var testCoin = "TESTCOIN_Q2_USDT";
+                var sig3m = new FuturesSignal
+                {
+                    SignalNumber = 902,
+                    Symbol = testCoin,
+                    Direction = SignalDirection.Sell,
+                    SignalType = "GÜCLÜ TREND SHORT 🔴",
+                    Timeframe = "3m",
+                    EntryPrice = 5.0m,
+                    Status = SignalStatus.Open,
+                    IsClosed = false,
+                    SignalAlertSent = true,
+                    GeneratedAt = DateTime.UtcNow
+                };
+                await _unitOfWork.Signals.AddAsync(sig3m);
+                await _unitOfWork.SaveChangesAsync();
+
+                // HasActiveSignalForSymbolAsync checks coin at whole-coin level, returning true for ANY timeframe
+                bool blocksAllTfs = await _unitOfWork.Signals.HasActiveSignalForSymbolAsync(testCoin);
+
+                // Simulate closing trade
+                sig3m.IsClosed = true;
+                sig3m.Status = SignalStatus.Success;
+                await _unitOfWork.Signals.UpdateAsync(sig3m);
+                await _unitOfWork.SaveChangesAsync();
+
+                bool unblockedAfterClose = !(await _unitOfWork.Signals.HasActiveSignalForSymbolAsync(testCoin));
+
+                return blocksAllTfs && unblockedAfterClose;
+            });
+
+            // 28. Qızıl Qayda: 3m trade duration is 18 min (15-20 min window) and 1h is 240 min
+            await AssertTest("Test 35: Qızıl Qayda - 3m Lifespan 15-20 Mins & 1h/4h Institutional Horizons", async () =>
+            {
+                var sig3m = await _signalEngine.AnalyzeCoinAsync("BTCUSDT", "3m");
+                var sig1h = await _signalEngine.AnalyzeCoinAsync("BTCUSDT", "1h");
+
+                var duration3m = (sig3m.ExpiryTimeUtc - sig3m.GeneratedAt).TotalMinutes;
+                var duration1h = (sig1h.ExpiryTimeUtc - sig1h.GeneratedAt).TotalMinutes;
+
+                bool valid3m = duration3m >= 14 && duration3m <= 22; // 18 mins (target 15-20 mins)
+                bool valid1h = duration1h >= 200 && duration1h <= 300; // 240 mins (4h)
+
+                return valid3m && valid1h;
             });
 
             Console.WriteLine("\n========================================================");

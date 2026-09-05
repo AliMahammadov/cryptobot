@@ -327,7 +327,8 @@ namespace CryptoSense.Infrastructure.Telegram
             if (!string.IsNullOrEmpty(specificChatId))
             {
                 var settings = GetSettings(specificChatId);
-                var userSigNum = signal.UserSignalNumbers.GetOrAdd(specificChatId, _ => ++settings.AlertCounter);
+                var userSigNum = signal.SignalNumber > 0 ? signal.SignalNumber : signal.UserSignalNumbers.GetOrAdd(specificChatId, _ => ++settings.AlertCounter);
+                settings.AlertCounter = Math.Max(settings.AlertCounter, userSigNum);
                 _signalUserNumberMap[$"{signal.Id}_{specificChatId}"] = userSigNum;
                 SaveSettings();
                 var msg = TelegramMessageFormatter.FormatSignalAlert(signal, userSigNum);
@@ -442,7 +443,8 @@ namespace CryptoSense.Infrastructure.Telegram
                     }
                 }
 
-                var userSigNum = signal.UserSignalNumbers.GetOrAdd(chatId, _ => ++settings.AlertCounter);
+                var userSigNum = signal.SignalNumber > 0 ? signal.SignalNumber : signal.UserSignalNumbers.GetOrAdd(chatId, _ => ++settings.AlertCounter);
+                settings.AlertCounter = Math.Max(settings.AlertCounter, userSigNum);
                 _signalUserNumberMap[$"{signal.Id}_{chatId}"] = userSigNum;
                 signal.SignalAlertSent = true;
                 SaveSettings();
@@ -505,14 +507,82 @@ namespace CryptoSense.Infrastructure.Telegram
                     explicitlyMapped = true;
                 }
 
-                // Strict filter: Only send outcome alert if this user actually received the initial signal alert!
-                if (!explicitlyMapped)
+                // If signal has canonical SignalNumber, all users who received it get notified with this number
+                int userSigNum = signal.SignalNumber > 0 ? signal.SignalNumber : mappedNum;
+
+                // Strict filter: Only send outcome alert if this user actually received the initial signal alert or was mapped
+                if (!explicitlyMapped && signal.SignalAlertSent && !settings.IsActive)
                 {
                     continue;
                 }
 
-                int userSigNum = mappedNum;
+                if (userSigNum == 0 && mappedNum == 0) continue;
+
                 var msg = TelegramMessageFormatter.FormatOutcomeAlert(signal, userSigNum, outcomeType, hitPrice, profitPct);
+                await SendMessageAsync(msg, chatId);
+            }
+        }
+
+        public async Task SendVolatilityRiskAlertAsync(string symbol, decimal currentPrice, decimal priceChange24h, decimal volatilityRatio, string reason)
+        {
+            var msg = TelegramMessageFormatter.FormatVolatilityRiskAlert(symbol, currentPrice, priceChange24h, volatilityRatio, reason);
+
+            using var scope = _serviceProvider.CreateScope();
+            var userManager = scope.ServiceProvider.GetRequiredService<IUserManagerService>();
+            var activeUsers = await userManager.GetAllUsersAsync();
+
+            var targetChatIds = new HashSet<string>();
+            foreach (var user in activeUsers)
+            {
+                if (!string.IsNullOrEmpty(user.TelegramChatId) && user.IsActive)
+                {
+                    targetChatIds.Add(user.TelegramChatId);
+                }
+            }
+            foreach (var kvp in UserPreferences)
+            {
+                if (kvp.Value.IsActive && !string.IsNullOrEmpty(kvp.Key))
+                {
+                    targetChatIds.Add(kvp.Key);
+                }
+            }
+
+            foreach (var chatId in targetChatIds)
+            {
+                var settings = GetSettings(chatId);
+                if (!settings.IsActive) continue;
+                await SendMessageAsync(msg, chatId);
+            }
+        }
+
+        public async Task SendUrgentNewsAlertAsync(CryptoNewsItem newsItem, bool isListing = false)
+        {
+            var msg = TelegramMessageFormatter.FormatUrgentNewsAlert(newsItem, isListing);
+
+            using var scope = _serviceProvider.CreateScope();
+            var userManager = scope.ServiceProvider.GetRequiredService<IUserManagerService>();
+            var activeUsers = await userManager.GetAllUsersAsync();
+
+            var targetChatIds = new HashSet<string>();
+            foreach (var user in activeUsers)
+            {
+                if (!string.IsNullOrEmpty(user.TelegramChatId) && user.IsActive)
+                {
+                    targetChatIds.Add(user.TelegramChatId);
+                }
+            }
+            foreach (var kvp in UserPreferences)
+            {
+                if (kvp.Value.IsActive && !string.IsNullOrEmpty(kvp.Key))
+                {
+                    targetChatIds.Add(kvp.Key);
+                }
+            }
+
+            foreach (var chatId in targetChatIds)
+            {
+                var settings = GetSettings(chatId);
+                if (!settings.IsActive) continue;
                 await SendMessageAsync(msg, chatId);
             }
         }
