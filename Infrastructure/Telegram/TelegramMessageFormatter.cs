@@ -388,7 +388,18 @@ namespace CryptoSense.Infrastructure.Telegram
             sb.AppendLine("ℹ️ <b>CryptoSense Sistem Statusu:</b>");
             sb.AppendLine("-----------------------------------");
             sb.AppendLine("🤖 <b>Skaner Vəziyyəti:</b> İşləyir 🟢 (24/7 Canlı Rejim)");
-            sb.AppendLine("📌 <b>Deploy Versiyası:</b> <code>v2.0 (Commit: e002c4b)</code>");
+            var commitHash = "9e75c26";
+            try
+            {
+                var headFile = System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, ".git", "refs", "heads", "main");
+                if (System.IO.File.Exists(headFile))
+                {
+                    var hash = System.IO.File.ReadAllText(headFile).Trim();
+                    if (hash.Length >= 7) commitHash = hash.Substring(0, 7);
+                }
+            }
+            catch { }
+            sb.AppendLine($"📌 <b>Deploy Versiyası:</b> <code>v2.0 (Commit: {commitHash})</code>");
             var tfDisplay = (settings.Timeframe == "Hamısı" || settings.Timeframe == "Hamisi") ? "15m, 1h, 4h" : settings.Timeframe;
             sb.AppendLine($"⏱ <b>Aktiv Rejim:</b> <code>{tfDisplay}</code>");
             string coinText;
