@@ -270,6 +270,44 @@ namespace CryptoSense.Infrastructure.Telegram
             }
         }
 
+        public async Task<bool> SendDocumentAsync(string filePath, string targetChatId, string caption = "")
+        {
+            if (string.IsNullOrWhiteSpace(_config.TelegramBotToken) || string.IsNullOrWhiteSpace(targetChatId) || !File.Exists(filePath))
+            {
+                return false;
+            }
+
+            try
+            {
+                var url = $"https://api.telegram.org/bot{_config.TelegramBotToken}/sendDocument";
+                using var form = new MultipartFormDataContent();
+                form.Add(new StringContent(targetChatId), "chat_id");
+                if (!string.IsNullOrEmpty(caption))
+                {
+                    form.Add(new StringContent(caption), "caption");
+                    form.Add(new StringContent("HTML"), "parse_mode");
+                }
+
+                using var fileStream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+                using var streamContent = new StreamContent(fileStream);
+                streamContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/octet-stream");
+                form.Add(streamContent, "document", Path.GetFileName(filePath));
+
+                var response = await _httpClient.PostAsync(url, form);
+                if (!response.IsSuccessStatusCode)
+                {
+                    var err = await response.Content.ReadAsStringAsync();
+                    Console.WriteLine($"[TelegramBotService] SendDocument error: {response.StatusCode} - {err}");
+                }
+                return response.IsSuccessStatusCode;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[TelegramBotService] SendDocument error: {ex.Message}");
+                return false;
+            }
+        }
+
         private static List<string> SplitMessage(string text, int maxChunkSize)
         {
             var result = new List<string>();
@@ -880,7 +918,7 @@ namespace CryptoSense.Infrastructure.Telegram
                                      text.StartsWith("🧹") || text.StartsWith("🛑") || text.StartsWith("▶️") || 
                                      text.StartsWith("📰") || text.StartsWith("⬅️") || text.StartsWith("👥") || 
                                      text.StartsWith("🔑") || text.StartsWith("👑") || text.StartsWith("📋") || 
-                                     text.StartsWith("ℹ️") || text == "➕ Öz coini əlavə et" || text == "➕ İstifadəçi Yarat" ||
+                                     text.StartsWith("ℹ️") || text.StartsWith("📥") || text == "➕ Öz coini əlavə et" || text == "➕ İstifadəçi Yarat" ||
                                      text.Contains("Siqnallar") || text.Contains("Menyu") || text.Contains("Statistika") ||
                                      text.StartsWith("/");
 
@@ -1029,8 +1067,30 @@ namespace CryptoSense.Infrastructure.Telegram
                 return;
             }
 
-            if (isAdmin && (text == "➕ İstifadəçi Yarat" || text == "/adduser"))
+            if (isAdmin && (text.StartsWith("/adduser", StringComparison.OrdinalIgnoreCase) || text.StartsWith("/createuser", StringComparison.OrdinalIgnoreCase) || text == "➕ İstifadəçi Yarat"))
             {
+                var parts = text.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                if (parts.Length >= 3 && !text.Equals("➕ İstifadəçi Yarat", StringComparison.OrdinalIgnoreCase))
+                {
+                    _userStates.TryRemove(chatId, out _);
+                    var newUsername = parts[1];
+                    var newPassword = string.Join(" ", parts.Skip(2));
+                    var created = await userManager.CreateUserAsync(newUsername, newPassword);
+                    if (created)
+                    {
+                        var msg = $"✅ <b>İstifadəçi uğurla yaradıldı və bazaya yazıldı!</b>\n\n" +
+                                  $"👤 <b>İstifadəçi Adı:</b> <code>{newUsername}</code>\n" +
+                                  $"🔑 <b>Parol:</b> <code>{newPassword}</code>\n\n" +
+                                  $"<i>İstifadəçiyə bildirin ki, bota daxil olaraq <code>{newUsername} {newPassword}</code> yazsın.</i>";
+                        await SendMessageAsync(msg, chatId, TelegramKeyboards.BuildAdminKeyboard());
+                    }
+                    else
+                    {
+                        await SendMessageAsync($"⚠️ <b>Xəta:</b> <code>{newUsername}</code> adlı istifadəçi artıq mövcuddur!", chatId, TelegramKeyboards.BuildAdminKeyboard());
+                    }
+                    return;
+                }
+
                 _userStates[chatId] = "ADMIN_WAITING_CREATE_USER";
                 var prompt = "➕ <b>Yeni İstifadəçi Yaratmaq</b>\n\n" +
                              "Yaratmaq istədiyiniz <b>İstifadəçi Adını</b> və <b>Parolu</b> aralarında boşluq qoyaraq yazın:\n\n" +
@@ -1047,8 +1107,26 @@ namespace CryptoSense.Infrastructure.Telegram
                 await SendMessageAsync(msg, chatId, TelegramKeyboards.BuildAdminKeyboard());
                 return;
             }
-            if (isAdmin && (text == "🗑 İstifadəçi Sil" || text == "/deleteuser"))
+            if (isAdmin && (text.StartsWith("/deleteuser", StringComparison.OrdinalIgnoreCase) || text == "🗑 İstifadəçi Sil"))
             {
+                var parts = text.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                if (parts.Length >= 2 && !text.Equals("🗑 İstifadəçi Sil", StringComparison.OrdinalIgnoreCase))
+                {
+                    _userStates.TryRemove(chatId, out _);
+                    var userToDelete = parts[1];
+                    var deleted = await userManager.DeleteUserAsync(userToDelete);
+                    if (deleted)
+                    {
+                        await RevokeUserSessionAsync(userToDelete);
+                        await SendMessageAsync($"✅ <b>İstifadəçi '{userToDelete}' sistemdən silindi və bütün prosesləri dayandırıldı!</b>", chatId, TelegramKeyboards.BuildAdminKeyboard());
+                    }
+                    else
+                    {
+                        await SendMessageAsync($"⚠️ <b>'{userToDelete}' tapılmadı və ya silinə bilməz.</b>", chatId, TelegramKeyboards.BuildAdminKeyboard());
+                    }
+                    return;
+                }
+
                 _userStates[chatId] = "ADMIN_WAITING_DELETE_USER";
                 var prompt = "🗑 <b>İstifadəçi Silmək</b>\n\n" +
                              "Sistemdən silmək istədiyiniz istifadəçinin <b>Adını</b> yazın:\n\n" +
@@ -1057,14 +1135,59 @@ namespace CryptoSense.Infrastructure.Telegram
                 await SendMessageAsync(prompt, chatId, TelegramKeyboards.BuildAdminKeyboard());
                 return;
             }
-            if (isAdmin && (text == "🔑 Parolu Dəyiş" || text == "/resetpwd"))
+            if (isAdmin && (text.StartsWith("/resetpwd", StringComparison.OrdinalIgnoreCase) || text == "🔑 Parolu Dəyiş"))
             {
+                var parts = text.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                if (parts.Length >= 3 && !text.Equals("🔑 Parolu Dəyiş", StringComparison.OrdinalIgnoreCase))
+                {
+                    _userStates.TryRemove(chatId, out _);
+                    var uName = parts[1];
+                    var newPwd = string.Join(" ", parts.Skip(2));
+                    var changed = await userManager.ResetPasswordAsync(uName, newPwd);
+                    if (changed)
+                    {
+                        await SendMessageAsync($"✅ <b>'{uName}' üçün yeni parol təyin edildi:</b> <code>{newPwd}</code>", chatId, TelegramKeyboards.BuildAdminKeyboard());
+                    }
+                    else
+                    {
+                        await SendMessageAsync($"⚠️ <b>'{uName}' adlı istifadəçi tapılmadı!</b>", chatId, TelegramKeyboards.BuildAdminKeyboard());
+                    }
+                    return;
+                }
+
                 _userStates[chatId] = "ADMIN_WAITING_RESET_PWD";
                 var prompt = "🔑 <b>İstifadəçi Parolunu Dəyişmək</b>\n\n" +
                              "İstifadəçi adını və yeni parolu aralarında boşluqla yazın:\n\n" +
                              "📌 <b>Məsələn:</b>\n" +
                              "<code>Murad yeni123</code>";
                 await SendMessageAsync(prompt, chatId, TelegramKeyboards.BuildAdminKeyboard());
+                return;
+            }
+
+            if (isAdmin && (text == "/db" || text == "/getdb" || text == "/backup_db" || text == "📥 Bazanı Yüklə" || text.Contains("Bazanı Yüklə") || text.Contains("Bazani Yukle")))
+            {
+                _userStates.TryRemove(chatId, out _);
+                var volumeEnv = Environment.GetEnvironmentVariable("RAILWAY_VOLUME_MOUNT_PATH");
+                var currentDataDir = !string.IsNullOrEmpty(volumeEnv) && Directory.Exists(volumeEnv)
+                    ? volumeEnv
+                    : (Directory.Exists("/app/data") ? "/app/data" : Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "data"));
+                var currentDbPath = Path.Combine(currentDataDir, "cryptosense.db");
+
+                if (File.Exists(currentDbPath))
+                {
+                    var activeUsers = await userManager.GetAllUsersAsync();
+                    var cap = $"💾 <b>CryptoSense SQLite Verilənlər Bazası</b>\n\n" +
+                              $"📁 <b>Fayl:</b> <code>{currentDbPath}</code>\n" +
+                              $"👥 <b>Aktiv İstifadəçi Sayı:</b> <b>{activeUsers.Count} nəfər</b>\n" +
+                              $"📅 <b>Tarix:</b> {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss} UTC\n\n" +
+                              $"<i>Faylı yükləyərək birbaşa DB Browser for SQLite ilə bütün cədvəllərə və istifadəçilərə baxa bilərsiniz.</i>";
+                    await SendMessageAsync("⏳ Baza faylı hazırlanır və çatınıza göndərilir...", chatId);
+                    await SendDocumentAsync(currentDbPath, chatId, cap);
+                }
+                else
+                {
+                    await SendMessageAsync($"⚠️ Baza faylı tapılmadı: <code>{currentDbPath}</code>", chatId);
+                }
                 return;
             }
 

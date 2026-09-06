@@ -225,6 +225,7 @@ namespace CryptoSense.Application.Services
             });
 
             await _unitOfWork.SaveChangesAsync();
+            Console.WriteLine($"[UserManager] User '{username}' successfully created and saved to database.");
             return true;
         }
 

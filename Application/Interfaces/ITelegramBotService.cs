@@ -15,5 +15,6 @@ namespace CryptoSense.Application.Interfaces
         Task RevokeUserSessionAsync(string username);
         Task BroadcastSystemAlertAsync(string message);
         Task SendDailyReportAsync();
+        Task<bool> SendDocumentAsync(string filePath, string targetChatId, string caption = "");
     }
 }
