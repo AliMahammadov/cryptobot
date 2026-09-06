@@ -1399,19 +1399,27 @@ namespace CryptoSense.Infrastructure.Telegram
 
                 // CRITICAL FIX: Evaluate Bütün / Hamısı FIRST before checking 15m/1h/4h
                 string targetTf;
-                if (text.Contains("Bütün") || text.Contains("Hamısı") || text.Contains("Hamisi") || text.Contains("15m, 1h, 4h"))
+                if (text.Contains("Bütün", StringComparison.OrdinalIgnoreCase) || 
+                    text.Contains("Butun", StringComparison.OrdinalIgnoreCase) || 
+                    text.Contains("Hamısı", StringComparison.OrdinalIgnoreCase) || 
+                    text.Contains("Hamisi", StringComparison.OrdinalIgnoreCase) || 
+                    text.Contains("15m, 1h, 4h", StringComparison.OrdinalIgnoreCase))
                 {
                     targetTf = "Hamısı";
                 }
-                else if (text.Contains("15m") || text.Contains("15 Dəqiqə") || text.Contains("15 deqiqe"))
+                else if (text.Contains("15m", StringComparison.OrdinalIgnoreCase) || 
+                         text.Contains("15 Dəqiqə", StringComparison.OrdinalIgnoreCase) || 
+                         text.Contains("15 deqiqe", StringComparison.OrdinalIgnoreCase))
                 {
                     targetTf = "15m";
                 }
-                else if (text.Contains("1h") || text.Contains("1 Saat"))
+                else if (text.Contains("1h", StringComparison.OrdinalIgnoreCase) || 
+                         text.Contains("1 Saat", StringComparison.OrdinalIgnoreCase))
                 {
                     targetTf = "1h";
                 }
-                else if (text.Contains("4h") || text.Contains("4 Saat"))
+                else if (text.Contains("4h", StringComparison.OrdinalIgnoreCase) || 
+                         text.Contains("4 Saat", StringComparison.OrdinalIgnoreCase))
                 {
                     targetTf = "4h";
                 }
@@ -1440,7 +1448,12 @@ namespace CryptoSense.Infrastructure.Telegram
             }
 
             // DIRECT TIMEFRAME PREFERENCE SELECTION
-            if (text == "🌟 Bütün Əsas Zamanlar (15m, 1h, 4h)" || text == "🌟 Bütün Zamanlar (Hamısı)" || text == "Hamisi" || text == "Hamısı")
+            if (text == "🌟 Bütün Əsas Zamanlar (15m, 1h, 4h)" || 
+                text == "🌟 Bütün Zamanlar (Hamısı)" || 
+                text.Equals("Hamisi", StringComparison.OrdinalIgnoreCase) || 
+                text.Equals("Hamısı", StringComparison.OrdinalIgnoreCase) ||
+                text.Equals("Bütün", StringComparison.OrdinalIgnoreCase) ||
+                text.Equals("Butun", StringComparison.OrdinalIgnoreCase))
             {
                 if (userSettings.Coins.Count == 0)
                 {
