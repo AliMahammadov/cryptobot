@@ -11,6 +11,7 @@ namespace CryptoSense.Infrastructure.Persistence
 
         public DbSet<UserAccount> Users => Set<UserAccount>();
         public DbSet<FuturesSignal> Signals => Set<FuturesSignal>();
+        public DbSet<UserSignalDelivery> UserSignalDeliveries => Set<UserSignalDelivery>();
         public DbSet<SignalIndicatorSnapshot> SignalIndicatorSnapshots => Set<SignalIndicatorSnapshot>();
         public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
 
@@ -32,6 +33,13 @@ namespace CryptoSense.Infrastructure.Persistence
                 entity.HasIndex(s => s.SignalNumber);
                 entity.HasIndex(s => s.Status);
                 entity.HasIndex(s => s.GeneratedAt);
+            });
+
+            modelBuilder.Entity<UserSignalDelivery>(entity =>
+            {
+                entity.HasIndex(d => new { d.SignalId, d.TelegramChatId }).IsUnique();
+                entity.HasIndex(d => d.TelegramChatId);
+                entity.HasIndex(d => d.SignalId);
             });
 
             modelBuilder.Entity<SignalIndicatorSnapshot>(entity =>

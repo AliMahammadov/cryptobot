@@ -14,5 +14,6 @@ namespace CryptoSense.Application.Interfaces
         Task NotifySuperAdminUserLoginAsync(string username, string platform);
         Task RevokeUserSessionAsync(string username);
         Task BroadcastSystemAlertAsync(string message);
+        Task SendDailyReportAsync();
     }
 }

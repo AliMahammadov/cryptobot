@@ -65,6 +65,12 @@ namespace CryptoSense.Infrastructure.Telegram
                 sb.AppendLine();
                 sb.AppendLine($"⚠️ <b>Təcili əməliyyatı dayandırın!</b>");
             }
+            else if (outcomeType.Contains("Müddəti") || outcomeType.Contains("Bitdi") || outcomeType.Contains("Tamamlandı"))
+            {
+                var signStr = profitPct >= 0 ? "+" : "";
+                sb.AppendLine($"🎯 <b>#{userSigNum} NƏTİCƏ HESABATI (MÜDDƏT BİTDİ)</b>");
+                sb.AppendLine($"📌 <b>#{userSigNum} nömrəli əməliyyat üzrə: {outcomeType} ({signStr}{profitPct.ToString("F2", CultureInfo.InvariantCulture)}%) ⚪</b>");
+            }
             else
             {
                 var statusText = outcomeType.Contains("✅") ? outcomeType : $"{outcomeType} (UĞURLU OLDU) ✅";
@@ -122,6 +128,14 @@ namespace CryptoSense.Infrastructure.Telegram
                 }
                 sb.AppendLine($"• <b>Ümumi Realizə Olunan Xalis Qazanc:</b> <b>{(profitPct >= 0 ? "+" : "")}{profitPct.ToString("F2", CultureInfo.InvariantCulture)}%</b>");
             }
+            else if (outcomeType.Contains("Müddəti") || outcomeType.Contains("Bitdi"))
+            {
+                sb.AppendLine();
+                sb.AppendLine("⏱️ <b>MÜDDƏT BİTMƏSİ MENECMENTİ:</b>");
+                sb.AppendLine("• Müəyyən olunmuş maksimal gözləmə müddəti tamamlandı.");
+                sb.AppendLine("• TP və ya SL səviyyələrinə çatmadan mövqe cari bazar qiyməti ilə bağlandı.");
+                sb.AppendLine($"• <b>Realizə Olunan Nəticə:</b> <b>{(profitPct >= 0 ? "+" : "")}{profitPct.ToString("F2", CultureInfo.InvariantCulture)}%</b>");
+            }
 
             return sb.ToString();
         }
@@ -130,19 +144,18 @@ namespace CryptoSense.Infrastructure.Telegram
         {
             var cleanSymbol = symbol.Replace("USDT", "");
             var sb = new StringBuilder();
-            sb.AppendLine("⚠️ <b>YÜKSƏK VOLATİLLİK / RİSK BİLDİRİŞİ!</b> ⚡");
+            sb.AppendLine("⚠️ <b>YÜKSƏK VOLATİLLİK / RİSK BİLDİRİŞİ</b> ⚡");
             sb.AppendLine();
             sb.AppendLine($"🪙 <b>Coin:</b> <code>{cleanSymbol} Futures</code>");
             sb.AppendLine($"💵 <b>Cari Qiymət:</b> <code>${currentPrice.ToString(CultureInfo.InvariantCulture)}</code>");
             var sign = priceChange24h >= 0 ? "+" : "";
             sb.AppendLine($"📊 <b>24s Dəyişim:</b> <b>{sign}{priceChange24h.ToString("F2", CultureInfo.InvariantCulture)}%</b>");
-            sb.AppendLine($"🔥 <b>Dalğalanma Nisbəti:</b> <b>{volatilityRatio.ToString("F1", CultureInfo.InvariantCulture)}x Normal ATR/Həcm</b>");
+            sb.AppendLine($"🔥 <b>Dalğalanma Nisbəti:</b> <b>{volatilityRatio.ToString("F1", CultureInfo.InvariantCulture)}x Normal Həcm</b>");
             sb.AppendLine($"📌 <b>Səbəb:</b> <i>{reason}</i>");
             sb.AppendLine();
-            sb.AppendLine("🛡️ <b>TƏHLÜKƏSİZLİK QEYDİ:</b>");
-            sb.AppendLine("• Bu coində fantastik dərəcədə kəskin Long/Short spaykları və yüksək risk aşkarlandı.");
-            sb.AppendLine("• <b>Bot depozitinizi qorumaq üçün bu coində avtomatik əməliyyat açmır.</b>");
-            sb.AppendLine("👉 <i>Zəhmət olmasa coini qrafikdə şəxsən analiz edin və qərarınızı fərdi verin.</i>");
+            sb.AppendLine("🛡️ <b>RİSK MENECMENT QEYDİ:</b>");
+            sb.AppendLine("• Coində kəskin qeyri-sabit dalğalanma aşkarlandığı üçün sistem riskli girişləri məhdudlaşdırır.");
+            sb.AppendLine("• <b>Depozitin qorunması məqsədilə bu coində tələsik əməliyyat açılmır.</b>");
             return sb.ToString();
         }
 
@@ -369,6 +382,65 @@ namespace CryptoSense.Infrastructure.Telegram
             sb.AppendLine();
             sb.AppendLine("💡 <i>Nəticələr hər bir şam tamamlandıqca avtomatik olaraq SQLite bazasında qeyd olunur.</i>");
 
+            return sb.ToString();
+        }
+
+        public static string FormatBotStatus(UserSettings settings, int userOpenPositionsCount, string? lastSignalTime)
+        {
+            var sb = new StringBuilder();
+            sb.AppendLine("ℹ️ <b>CryptoSense Sistem Statusu:</b>");
+            sb.AppendLine("-----------------------------------");
+            sb.AppendLine("🤖 <b>Skaner Vəziyyəti:</b> İşləyir 🟢 (24/7 Canlı Rejim)");
+            sb.AppendLine($"⏱ <b>Aktiv Timeframe:</b> <code>{(settings.Timeframe == "Hamısı" || settings.Timeframe == "Hamisi" ? "Bütün Əsas Zamanlar (15m, 1h, 4h)" : settings.Timeframe)}</code>");
+            sb.AppendLine($"🪙 <b>Seçilmiş Coinlər:</b> {settings.Coins.Count}/10 ədəd");
+            sb.AppendLine($"🟡 <b>Açıq Mövqeləriniz:</b> {userOpenPositionsCount} ədəd (Maksimum limit: 5)");
+            sb.AppendLine($"🔔 <b>Bildiriş Statusu:</b> {(settings.IsActive ? "Aktiv 🟢" : "Dayandırılıb 🔴")}");
+            sb.AppendLine($"🕒 <b>Son Siqnal Vaxtı:</b> {(string.IsNullOrEmpty(lastSignalTime) ? "Hələ siqnal göndərilməyib" : lastSignalTime)}");
+            sb.AppendLine("-----------------------------------");
+            return sb.ToString();
+        }
+
+        public static string FormatNoSignalReason(string reason, int nextCheckMinutes = 30)
+        {
+            var sb = new StringBuilder();
+            sb.AppendLine("ℹ️ <b>Bazar Vəziyyəti (A+ Siqnal İzləməsi):</b>");
+            sb.AppendLine();
+            sb.AppendLine("⚪ <i>Hazırda A+ keyfiyyətli yeni giriş siqnalı formalaşmayıb.</i>");
+            sb.AppendLine($"📌 <b>Səbəb:</b> <code>{reason}</code>");
+            sb.AppendLine($"⏱ <b>Növbəti yoxlama:</b> {nextCheckMinutes} dəqiqə sonra.");
+            return sb.ToString();
+        }
+
+        public static string FormatDailyReport(PerformanceStats stats, List<string> coinsEntered, List<string> coinsFilteredReasons, bool isSuperAdmin)
+        {
+            var sb = new StringBuilder();
+            sb.AppendLine(isSuperAdmin ? "📊 <b>GÜN SONU HESABATI (Qlobal Sistem)</b>" : "📊 <b>GÜN SONU ŞƏXSİ HESABATINIZ</b>");
+            sb.AppendLine($"🕒 <b>Tarix:</b> <code>{DateTime.UtcNow:dd.MM.yyyy}</code>");
+            sb.AppendLine("-----------------------------------");
+            sb.AppendLine($"📌 <b>Ümumi Siqnallar:</b> {stats.TotalSignals} ədəd");
+            sb.AppendLine($"✅ <b>Uğurlu (TP):</b> {stats.SuccessSignals} ədəd");
+            sb.AppendLine($"❌ <b>Uğursuz (SL):</b> {stats.FailedSignals} ədəd");
+            sb.AppendLine($"🎯 <b>Günlük Win Rate:</b> <b>{stats.WinRatePercent.ToString("F1", CultureInfo.InvariantCulture)}%</b>");
+            sb.AppendLine($"📈 <b>Günlük Xalis PnL:</b> <b>{(stats.TotalNetProfitPercent >= 0 ? "+" : "")}{stats.TotalNetProfitPercent.ToString("F2", CultureInfo.InvariantCulture)}%</b>");
+            sb.AppendLine("-----------------------------------");
+            if (coinsEntered.Count > 0)
+            {
+                sb.AppendLine($"🪙 <b>Girilən Coinlər:</b> <code>{string.Join(", ", coinsEntered)}</code>");
+            }
+            else
+            {
+                sb.AppendLine("🪙 <b>Girilən Coinlər:</b> Bu gün yeni əməliyyat açılmayıb.");
+            }
+            if (coinsFilteredReasons.Count > 0)
+            {
+                sb.AppendLine();
+                sb.AppendLine("🛡️ <b>Filtrlənən Coinlərin Səbəbləri:</b>");
+                foreach (var r in coinsFilteredReasons.Take(4))
+                {
+                    sb.AppendLine($"• {r}");
+                }
+            }
+            sb.AppendLine("-----------------------------------");
             return sb.ToString();
         }
     }

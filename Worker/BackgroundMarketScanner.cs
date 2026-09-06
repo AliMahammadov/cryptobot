@@ -34,6 +34,7 @@ namespace CryptoSense.Worker
         private static readonly ConcurrentDictionary<string, byte> _coinActiveLocks = new();
         private static readonly ConcurrentDictionary<string, DateTime> _lastVolatilityAlertSent = new();
         private static readonly SemaphoreSlim _signalDispatchLock = new(1, 1);
+        private static DateTime _lastDailyReportDateUtc = DateTime.MinValue;
 
         public static void ClearLocks()
         {
@@ -702,30 +703,29 @@ namespace CryptoSense.Worker
                                     if (!_lastAlertSent.ContainsKey(alertKey) && !signal.SignalAlertSent)
                                     {
                                         _lastAlertSent[alertKey] = DateTime.UtcNow;
-                                        signal.SignalAlertSent = true;
 
-                                        // Lock coin at whole-coin level (all timeframes blocked until trade closes!)
-                                        _coinActiveLocks.TryAdd(sym, 1);
-
-                                        // Persist immediately to SQLite DB so OutcomeTracker & other threads see it
+                                        // Persist immediately to SQLite DB so it gets an ID before dispatching
                                         if (signal.Id == 0)
                                         {
                                             await uow.Signals.AddAsync(signal);
                                             await uow.SaveChangesAsync(ct);
                                         }
+
+                                        // SendSignalAlertAsync delivers ONLY to matching users (coin, timeframe, limits)
+                                        // and sets signal.SignalAlertSent = true ONLY IF at least one user received it!
+                                        await _telegramService.SendSignalAlertAsync(signal);
+
+                                        if (signal.SignalAlertSent)
+                                        {
+                                            // Lock coin at whole-coin level (all timeframes blocked until trade closes!)
+                                            _coinActiveLocks.TryAdd(sym, 1);
+                                            break; // Dispatched signal for this coin; do NOT check any smaller timeframes!
+                                        }
                                         else
                                         {
-                                            var dbSig = await uow.Signals.GetByIdAsync(signal.Id);
-                                            if (dbSig != null)
-                                            {
-                                                dbSig.SignalAlertSent = true;
-                                                await uow.Signals.UpdateAsync(dbSig);
-                                                await uow.SaveChangesAsync(ct);
-                                            }
+                                            // No user was tracking this coin/timeframe or user daily limits reached.
+                                            _coinActiveLocks.TryRemove(sym, out _);
                                         }
-
-                                        await _telegramService.SendSignalAlertAsync(signal);
-                                        break; // Dispatched signal for this coin; do NOT check any smaller timeframes!
                                     }
                                 }
                                 finally
@@ -741,7 +741,7 @@ namespace CryptoSense.Worker
                 });
             }
 
-            // Periodic Liveness Heartbeat (Every 15 minutes if no signals)
+            // Anti-Spam Hourly Status Heartbeat (Maximum once per 60 minutes with concrete reason)
             var nowUtc = DateTime.UtcNow;
             foreach (var kvp in TelegramBotService.UserPreferences)
             {
@@ -758,13 +758,29 @@ namespace CryptoSense.Worker
                 var minutesSinceSignal = (nowUtc - s.LastSignalSentUtc).TotalMinutes;
                 var minutesSinceHeartbeat = (nowUtc - s.LastHeartbeatSentUtc).TotalMinutes;
 
-                if (minutesSinceSignal >= 15 && minutesSinceHeartbeat >= 15)
+                if (minutesSinceSignal >= 60 && minutesSinceHeartbeat >= 60)
                 {
                     s.LastHeartbeatSentUtc = nowUtc;
-                    var heartbeatMsg = "🟢 <b>Sistem Canlı İzləmədədir (15 Dəqiqəlik Vəziyyət):</b>\n\n" +
-                                       "ℹ️ <i>Son 15 dəqiqə ərzində bazarda 75%+ risk-təsdiqli yeni A+ siqnal formalaşmadı.</i>\n\n" +
-                                       "🎯 <b>Bot 24/7 rejimində bazarı analiz edir.</b> Təsdiqlənmiş yeni şam bağlanan kimi siqnal dərhal sizə göndəriləcək.";
+                    string noSignalReason = _coinActiveLocks.Count >= MaxGlobalOpenPositions
+                        ? "Maksimal açıq mövqe limitinə (5 ədəd) çatılıb"
+                        : "Bazar konsolidasiyadadır (ADX < 20 / Confluence < 75%)";
+
+                    var heartbeatMsg = TelegramMessageFormatter.FormatNoSignalReason(noSignalReason, nextCheckMinutes: 30);
                     await _telegramService.SendMessageAsync(heartbeatMsg, chatId);
+                }
+            }
+
+            // Daily Report Dispatch (Once per day at Baku midnight = 20:00 UTC)
+            if (nowUtc.Date > _lastDailyReportDateUtc && nowUtc.Hour >= 20)
+            {
+                _lastDailyReportDateUtc = nowUtc.Date;
+                try
+                {
+                    await _telegramService.SendDailyReportAsync();
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[BackgroundMarketScanner] Daily Report error: {ex.Message}");
                 }
             }
         }

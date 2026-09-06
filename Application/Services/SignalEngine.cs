@@ -569,6 +569,21 @@ namespace CryptoSense.Application.Services
             return await _unitOfWork.Signals.GetPerformanceStatsAsync(specificTimeframe, userCoins);
         }
 
+        public async Task<PerformanceStats> GetUserPerformanceStatsAsync(string chatId, string? specificTimeframe = null, List<string>? userCoins = null)
+        {
+            return await _unitOfWork.Signals.GetUserPerformanceStatsAsync(chatId, specificTimeframe, userCoins);
+        }
+
+        public async Task<List<FuturesSignal>> GetUserOpenSignalsAsync(string chatId)
+        {
+            return await _unitOfWork.Signals.GetUserOpenSignalsAsync(chatId);
+        }
+
+        public async Task ClearUserHistoryAsync(string chatId)
+        {
+            await _unitOfWork.Signals.ClearUserHistoryAsync(chatId);
+        }
+
         public async Task<List<CryptoSense.Application.DTOs.CoinPerformanceBreakdownDto>> GetCoinPerformanceBreakdownAsync(List<string>? monitoredCoins = null)
         {
             return await _unitOfWork.Signals.GetCoinPerformanceBreakdownAsync(monitoredCoins);

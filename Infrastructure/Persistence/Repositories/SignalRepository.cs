@@ -61,6 +61,14 @@ namespace CryptoSense.Infrastructure.Persistence.Repositories
                 .ToListAsync();
         }
 
+        public async Task<List<FuturesSignal>> GetSignalsSinceAsync(DateTime sinceUtc)
+        {
+            return await _context.Signals
+                .Where(s => s.GeneratedAt >= sinceUtc && s.SignalAlertSent)
+                .OrderByDescending(s => s.GeneratedAt)
+                .ToListAsync();
+        }
+
         public async Task<int> GetMaxSignalNumberAsync()
         {
             return await _context.Signals.MaxAsync(s => (int?)s.SignalNumber) ?? 0;
@@ -245,6 +253,173 @@ namespace CryptoSense.Infrastructure.Persistence.Repositories
             }
 
             return result;
+        }
+
+        public async Task<int> GetUserTodaySignalsCountAsync(string chatId)
+        {
+            var todayUtc = DateTime.UtcNow.Date;
+            return await _context.UserSignalDeliveries
+                .CountAsync(d => d.TelegramChatId == chatId && d.DeliveredAtUtc >= todayUtc);
+        }
+
+        public async Task<int> GetUserOpenSignalsCountAsync(string chatId)
+        {
+            var deliveredSignalIds = await _context.UserSignalDeliveries
+                .Where(d => d.TelegramChatId == chatId)
+                .Select(d => d.SignalId)
+                .ToListAsync();
+
+            return await _context.Signals
+                .CountAsync(s => deliveredSignalIds.Contains(s.Id) && s.Status == SignalStatus.Open && !s.IsClosed);
+        }
+
+        public async Task RecordDeliveryAsync(int signalId, string chatId, int userSignalNumber)
+        {
+            var exists = await _context.UserSignalDeliveries
+                .AnyAsync(d => d.SignalId == signalId && d.TelegramChatId == chatId);
+            if (!exists)
+            {
+                _context.UserSignalDeliveries.Add(new UserSignalDelivery
+                {
+                    SignalId = signalId,
+                    TelegramChatId = chatId,
+                    UserSignalNumber = userSignalNumber,
+                    DeliveredAtUtc = DateTime.UtcNow
+                });
+                await _context.SaveChangesAsync();
+            }
+        }
+
+        public async Task<List<string>> GetDeliveredChatIdsAsync(int signalId)
+        {
+            return await _context.UserSignalDeliveries
+                .Where(d => d.SignalId == signalId)
+                .Select(d => d.TelegramChatId)
+                .ToListAsync();
+        }
+
+        public async Task<int> GetUserSignalNumberAsync(int signalId, string chatId)
+        {
+            var delivery = await _context.UserSignalDeliveries
+                .FirstOrDefaultAsync(d => d.SignalId == signalId && d.TelegramChatId == chatId);
+            return delivery?.UserSignalNumber ?? 0;
+        }
+
+        public async Task ClearUserHistoryAsync(string chatId)
+        {
+            var records = await _context.UserSignalDeliveries
+                .Where(d => d.TelegramChatId == chatId)
+                .ToListAsync();
+            if (records.Count > 0)
+            {
+                _context.UserSignalDeliveries.RemoveRange(records);
+                await _context.SaveChangesAsync();
+            }
+        }
+
+        public async Task<List<FuturesSignal>> GetUserOpenSignalsAsync(string chatId)
+        {
+            var deliveredSignalIds = await _context.UserSignalDeliveries
+                .Where(d => d.TelegramChatId == chatId)
+                .Select(d => d.SignalId)
+                .ToListAsync();
+
+            return await _context.Signals
+                .Where(s => deliveredSignalIds.Contains(s.Id) && s.Status == SignalStatus.Open && !s.IsClosed)
+                .OrderByDescending(s => s.GeneratedAt)
+                .ToListAsync();
+        }
+
+        public async Task<PerformanceStats> GetUserPerformanceStatsAsync(string chatId, string? specificTimeframe = null, List<string>? userCoins = null)
+        {
+            var deliveredSignalIds = await _context.UserSignalDeliveries
+                .Where(d => d.TelegramChatId == chatId)
+                .Select(d => d.SignalId)
+                .ToListAsync();
+
+            if (deliveredSignalIds.Count == 0)
+            {
+                return new PerformanceStats();
+            }
+
+            var query = _context.Signals
+                .Where(s => deliveredSignalIds.Contains(s.Id) && (s.SignalType.Contains("LONG") || s.SignalType.Contains("SHORT")));
+
+            if (!string.IsNullOrEmpty(specificTimeframe) && specificTimeframe != "Hamısı" && specificTimeframe != "Hamisi")
+            {
+                query = query.Where(s => s.Timeframe == specificTimeframe);
+            }
+
+            if (userCoins != null && userCoins.Count > 0)
+            {
+                query = query.Where(s => userCoins.Contains(s.Symbol));
+            }
+
+            var all = await query.ToListAsync();
+            var closed = all.Where(s => s.Status != SignalStatus.Open || s.IsClosed).ToList();
+
+            var stats = new PerformanceStats
+            {
+                TotalSignals = all.Count,
+                OpenSignals = all.Count(s => s.Status == SignalStatus.Open && !s.IsClosed),
+                SuccessSignals = closed.Count(s => s.Status == SignalStatus.Success),
+                FailedSignals = closed.Count(s => s.Status == SignalStatus.Failed),
+                NeutralSignals = closed.Count(s => s.Status == SignalStatus.Neutral)
+            };
+
+            int decisiveTrades = stats.SuccessSignals + stats.FailedSignals;
+            stats.WinRatePercent = decisiveTrades > 0 ? Math.Round(((decimal)stats.SuccessSignals / decisiveTrades) * 100, 1) : (stats.SuccessSignals > 0 ? 100m : 0m);
+
+            var results = closed.Where(s => s.ResultPercent.HasValue).Select(s => s.ResultPercent!.Value).ToList();
+            if (results.Count > 0)
+            {
+                stats.TotalNetProfitPercent = Math.Round(results.Sum(), 2);
+                stats.AvgProfitPerTradePercent = Math.Round(results.Average(), 2);
+                stats.BestTradePercent = Math.Round(results.Max(), 2);
+                stats.WorstTradePercent = Math.Round(results.Min(), 2);
+
+                var grossProfit = results.Where(r => r > 0).Sum();
+                var grossLoss = Math.Abs(results.Where(r => r < 0).Sum());
+                stats.ProfitFactor = grossLoss > 0 ? Math.Round(grossProfit / grossLoss, 2) : (grossProfit > 0 ? 9.99m : 0m);
+
+                var wins = results.Where(r => r > 0).ToList();
+                var losses = results.Where(r => r < 0).ToList();
+                decimal avgWin = wins.Count > 0 ? wins.Average() : 0m;
+                decimal avgLoss = losses.Count > 0 ? Math.Abs(losses.Average()) : 0m;
+                decimal winRate = decisiveTrades > 0 ? (decimal)stats.SuccessSignals / decisiveTrades : 0m;
+                decimal lossRate = decisiveTrades > 0 ? (decimal)stats.FailedSignals / decisiveTrades : 0m;
+
+                if (avgLoss > 0)
+                {
+                    stats.ExpectancyR = Math.Round(((winRate * avgWin) - (lossRate * avgLoss)) / avgLoss, 2);
+                }
+                else
+                {
+                    stats.ExpectancyR = Math.Round(winRate * avgWin, 2);
+                }
+
+                var orderedTrades = closed.Where(s => s.ResultPercent.HasValue).OrderBy(s => s.GeneratedAt).ToList();
+                decimal peakEquity = 0;
+                decimal currentEquity = 0;
+                decimal maxDrawdown = 0;
+                foreach (var trade in orderedTrades)
+                {
+                    currentEquity += trade.ResultPercent!.Value;
+                    if (currentEquity > peakEquity) peakEquity = currentEquity;
+                    decimal dd = peakEquity - currentEquity;
+                    if (dd > maxDrawdown) maxDrawdown = dd;
+                }
+                stats.MaxDrawdownPercent = Math.Round(maxDrawdown, 2);
+            }
+
+            stats.Tp3HitsCount = closed.Count(s => s.OutcomeStatus != null && s.OutcomeStatus.Contains("TP3"));
+            stats.PartialHitsCount = closed.Count(s => s.IsPartial1Closed || (s.OutcomeStatus != null && (s.OutcomeStatus.Contains("Partial") || s.OutcomeStatus.Contains("TP1") || s.OutcomeStatus.Contains("TP2"))));
+            stats.BreakevenHitsCount = closed.Count(s => s.OutcomeStatus != null && s.OutcomeStatus.Contains("Breakeven"));
+            stats.TimeExpiredCount = closed.Count(s => s.OutcomeStatus != null && s.OutcomeStatus.Contains("Müddəti"));
+            stats.Tp3HitRatePercent = decisiveTrades > 0 ? Math.Round(((decimal)stats.Tp3HitsCount / decisiveTrades) * 100, 1) : 0m;
+            stats.TimeExpiredRatePercent = decisiveTrades > 0 ? Math.Round(((decimal)stats.TimeExpiredCount / decisiveTrades) * 100, 1) : 0m;
+
+            return stats;
         }
     }
 }
