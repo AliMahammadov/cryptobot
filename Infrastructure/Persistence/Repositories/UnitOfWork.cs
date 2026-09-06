@@ -32,6 +32,12 @@ namespace CryptoSense.Infrastructure.Persistence.Repositories
         {
             _context.Database.EnsureCreated();
 
+            // Safe auto-migration for newly added Partial Close columns if SQLite table already exists
+            try { _context.Database.ExecuteSqlRaw("ALTER TABLE Signals ADD COLUMN RealizedProfitPercent TEXT NOT NULL DEFAULT '0';"); } catch { }
+            try { _context.Database.ExecuteSqlRaw("ALTER TABLE Signals ADD COLUMN RemainingPositionRatio TEXT NOT NULL DEFAULT '1.0';"); } catch { }
+            try { _context.Database.ExecuteSqlRaw("ALTER TABLE Signals ADD COLUMN IsPartial1Closed INTEGER NOT NULL DEFAULT 0;"); } catch { }
+            try { _context.Database.ExecuteSqlRaw("ALTER TABLE Signals ADD COLUMN IsPartial2Closed INTEGER NOT NULL DEFAULT 0;"); } catch { }
+
             // Safe SuperAdmin initialization: Only add SuperAdmin if missing. NEVER delete or touch existing users!
             bool adminExists = _context.Users.Any(u => u.Username == "Ali" || u.Role == UserRole.Admin);
             if (!adminExists)

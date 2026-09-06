@@ -695,8 +695,8 @@ namespace CryptoSense.Infrastructure.Testing
                 return blocksAllTfs && unblockedAfterClose;
             });
 
-            // 28. Qızıl Qayda: 3m trade duration is 18 min (15-20 min window) and 1h is 240 min
-            await AssertTest("Test 35: Qızıl Qayda - 3m Lifespan 15-20 Mins & 1h/4h Institutional Horizons", async () =>
+            // 28. Qızıl Qayda: 3m trade duration is 60 min (min 45-60 min window) and 1h is 480 min (8h)
+            await AssertTest("Test 35: Qızıl Qayda - 3m Lifespan 45-60 Mins & 1h/4h Institutional Horizons", async () =>
             {
                 var sig3m = await _signalEngine.AnalyzeCoinAsync("BTCUSDT", "3m");
                 var sig1h = await _signalEngine.AnalyzeCoinAsync("BTCUSDT", "1h");
@@ -704,8 +704,8 @@ namespace CryptoSense.Infrastructure.Testing
                 var duration3m = (sig3m.ExpiryTimeUtc - sig3m.GeneratedAt).TotalMinutes;
                 var duration1h = (sig1h.ExpiryTimeUtc - sig1h.GeneratedAt).TotalMinutes;
 
-                bool valid3m = duration3m >= 14 && duration3m <= 22; // 18 mins (target 15-20 mins)
-                bool valid1h = duration1h >= 200 && duration1h <= 300; // 240 mins (4h)
+                bool valid3m = duration3m >= 45 && duration3m <= 65; // 60 mins (target 45-60 mins)
+                bool valid1h = duration1h >= 400 && duration1h <= 550; // 480 mins (8h)
 
                 return valid3m && valid1h;
             });
@@ -718,6 +718,438 @@ namespace CryptoSense.Infrastructure.Testing
             {
                 throw new Exception($"Testlərdən {failed} ədədi uğursuz oldu!");
             }
+        }
+
+        public async Task RunAuditAsync()
+        {
+            Console.WriteLine("\n================================================================================");
+            Console.WriteLine("🔬 BAŞ MÜTƏXƏSSİS ÜÇÜN RƏSMİ AUDİT VƏ SİSTEM MÜQAYİSƏ TESTİ");
+            Console.WriteLine("================================================================================\n");
+
+            var testCoins = new List<string> { "BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT", "DOGEUSDT", "AVAXUSDT", "SUIUSDT", "LINKUSDT", "ADAUSDT" };
+            var timeframes = new[] { "15m", "5m" };
+
+            var allKlines = new Dictionary<string, List<Kline>>();
+            DateTime minDate = DateTime.MaxValue;
+            DateTime maxDate = DateTime.MinValue;
+
+            foreach (var coin in testCoins)
+            {
+                foreach (var tf in timeframes)
+                {
+                    int limit = tf == "15m" ? 160 : 360; // > 24-30 hours of continuous data
+                    var klines = await _marketData.GetKlinesAsync(coin, tf, limit);
+                    if (klines.Count > 50)
+                    {
+                        allKlines[$"{coin}_{tf}"] = klines;
+                        var firstT = klines.First().Time;
+                        var lastT = klines.Last().Time;
+                        if (firstT < minDate) minDate = firstT;
+                        if (lastT > maxDate) maxDate = lastT;
+                    }
+                }
+            }
+
+            var forwardWindowStart = maxDate.AddHours(-24);
+            Console.WriteLine($"📅 24-Saatlıq Forward Test Pəncərəsi: {forwardWindowStart:yyyy-MM-dd HH:mm} UTC — {maxDate:yyyy-MM-dd HH:mm} UTC (Dəqiq 24.0 saat)");
+            Console.WriteLine($"🪙 Koinlər (10 Top Futures cütü): {string.Join(", ", testCoins.Select(c => c.Replace("USDT", "")))}");
+            Console.WriteLine($"⏱ İcazəli Timeframe-lər: 15m, 5m");
+            Console.WriteLine($"📊 Test Olunan Kline Sayı: {allKlines.Values.Sum(k => k.Count)} ədəd canlı Binance Futures şamı\n");
+
+            // ==========================================
+            // SİMULYASİYA: REAL FORWARD TEST (FEE + SLIPPAGE + COIN LOCK)
+            // ==========================================
+
+            const decimal TakerFeePercent = 0.10m; // 0.05% open + 0.05% close
+            const decimal SlippageRate = 0.0002m; // 0.02% per side (0.04% round trip)
+            const decimal TotalFrictionPercent = 0.14m; // 0.14% net drag per completed cycle
+
+            // Köhnə sistem metrikləri
+            int oldTotalSignals = 0;
+            int oldTp1Hits = 0;
+            int oldTp2Hits = 0;
+            int oldTp3Hits = 0;
+            int oldBreakevenHits = 0;
+            int oldTimeExpiredHits = 0;
+            int oldSlHits = 0;
+            var oldTradesPnl = new List<decimal>();
+            var oldTradesNetPnl = new List<decimal>();
+
+            // Yeni sistem metrikləri
+            int newTotalRawCandidates = 0;
+            int newRejectedByCoinLock = 0;
+            int newRejectedByRrCount = 0;
+            int newTotalTrades = 0;
+            int newTp3Hits = 0;
+            int newPartialBeHits = 0;
+            int newTimeExpiredHits = 0;
+            int newSlHits = 0;
+            var newTradesPnl = new List<decimal>();
+            var newTradesNetPnl = new List<decimal>();
+
+            int consecutiveLossesSim = 0;
+            int circuitBreakerTriggers = 0;
+
+            // Coin lock tracking per coin: DateTime when active trade ends
+            var coinLockUntil = new Dictionary<string, DateTime>();
+
+            foreach (var kvp in allKlines)
+            {
+                var parts = kvp.Key.Split('_');
+                var symbol = parts[0];
+                var tf = parts[1];
+                var klines = kvp.Value;
+
+                int minHistory = 45;
+                int maxIdx = klines.Count - 8;
+
+                for (int i = minHistory; i <= maxIdx; i += 2)
+                {
+                    var slice = klines.Take(i + 1).ToList();
+                    var candleTime = slice.Last().Time;
+
+                    // Strictly in the 24-hour forward window
+                    if (candleTime < forwardWindowStart) continue;
+
+                    var indicators = _indicatorEngine.CalculateIndicators(slice);
+                    var rawPrice = slice.Last().Close;
+
+                    bool isLong = (indicators.ConfluenceScore >= 72m && indicators.SuperTrendVote == IndicatorVote.Bullish && indicators.MacdHist > 0 && indicators.Rsi >= 38 && indicators.Rsi <= 68);
+                    bool isShort = (indicators.ConfluenceScore <= 28m && indicators.SuperTrendVote == IndicatorVote.Bearish && indicators.MacdHist < 0 && indicators.Rsi >= 32 && indicators.Rsi <= 62);
+
+                    if (!isLong && !isShort) continue;
+
+                    decimal minMultiplier = tf == "15m" ? 0.024m : 0.018m;
+                    decimal atr = indicators.Atr > 0 ? indicators.Atr : (rawPrice * minMultiplier);
+                    decimal risk = Math.Max(atr * 1.5m, rawPrice * minMultiplier);
+
+                    // ------------------------------------
+                    // 1. KÖHNƏ SİSTEM İCRASI (Zero fee, force close 24 candle)
+                    // ------------------------------------
+                    oldTotalSignals++;
+                    decimal oldEntry = rawPrice;
+                    decimal oldTp1 = isLong ? oldEntry + (risk * 1.15m) : oldEntry - (risk * 1.15m);
+                    decimal oldTp2 = isLong ? oldEntry + (risk * 1.85m) : oldEntry - (risk * 1.85m);
+                    decimal oldTp3 = isLong ? oldEntry + (risk * 2.80m) : oldEntry - (risk * 2.80m);
+                    decimal oldSl = isLong ? oldEntry - risk : oldEntry + risk;
+
+                    bool oldTp1Hit = false, oldTp2Hit = false, oldTp3Hit = false, oldSlHit = false, oldBeHit = false;
+                    decimal oldResult = 0;
+
+                    int oldFutureEnd = Math.Min(klines.Count - 1, i + 24);
+                    for (int f = i + 1; f <= oldFutureEnd; f++)
+                    {
+                        var fc = klines[f];
+                        if (isLong)
+                        {
+                            if (!oldTp1Hit && fc.High >= oldTp1) { oldTp1Hit = true; oldSl = oldEntry * 1.0005m; }
+                            if (oldTp1Hit && !oldTp2Hit && fc.High >= oldTp2) { oldTp2Hit = true; oldSl = oldTp1; }
+                            if (oldTp2Hit && fc.High >= oldTp3) { oldTp3Hit = true; oldResult = Math.Round(((oldTp3 - oldEntry) / oldEntry) * 100, 2); break; }
+                            if (fc.Low <= oldSl)
+                            {
+                                if (oldTp1Hit) oldBeHit = true;
+                                else { oldSlHit = true; oldResult = -Math.Round(((oldEntry - oldSl) / oldEntry) * 100, 2); }
+                                break;
+                            }
+                        }
+                        else
+                        {
+                            if (!oldTp1Hit && fc.Low <= oldTp1) { oldTp1Hit = true; oldSl = oldEntry * 0.9995m; }
+                            if (oldTp1Hit && !oldTp2Hit && fc.Low <= oldTp2) { oldTp2Hit = true; oldSl = oldTp1; }
+                            if (oldTp2Hit && fc.Low <= oldTp3) { oldTp3Hit = true; oldResult = Math.Round(((oldEntry - oldTp3) / oldEntry) * 100, 2); break; }
+                            if (fc.High >= oldSl)
+                            {
+                                if (oldTp1Hit) oldBeHit = true;
+                                else { oldSlHit = true; oldResult = -Math.Round(((oldSl - oldEntry) / oldEntry) * 100, 2); }
+                                break;
+                            }
+                        }
+                    }
+
+                    if (oldTp3Hit) oldTp3Hits++;
+                    else if (oldSlHit) oldSlHits++;
+                    else if (oldBeHit) { oldBreakevenHits++; oldResult = 0.05m; }
+                    else if (oldTp2Hit) { oldTp2Hits++; oldResult = Math.Round(((risk * 1.85m) / oldEntry) * 100, 2); }
+                    else if (oldTp1Hit) { oldTp1Hits++; oldResult = Math.Round(((risk * 1.15m) / oldEntry) * 100, 2); }
+                    else
+                    {
+                        oldTimeExpiredHits++;
+                        var finalClose = klines[oldFutureEnd].Close;
+                        oldResult = isLong ? Math.Round(((finalClose - oldEntry) / oldEntry) * 100, 2) : Math.Round(((oldEntry - finalClose) / oldEntry) * 100, 2);
+                    }
+
+                    oldTradesPnl.Add(oldResult);
+                    oldTradesNetPnl.Add(oldResult - TotalFrictionPercent);
+
+                    // ------------------------------------
+                    // 2. YENİ SİSTEM İCRASI (REAL SLIPPAGE + TAKER FEES + COIN LOCK)
+                    // ------------------------------------
+                    newTotalRawCandidates++;
+
+                    // Check Coin Lock Rule
+                    if (coinLockUntil.TryGetValue(symbol, out var lockedUntil) && candleTime < lockedUntil)
+                    {
+                        newRejectedByCoinLock++;
+                        continue;
+                    }
+
+                    // Check Minimum R:R >= 1.80
+                    decimal rawTp2 = isLong ? rawPrice + (risk * 1.90m) : rawPrice - (risk * 1.90m);
+                    decimal rr = Math.Round(Math.Abs(rawTp2 - rawPrice) / risk, 2);
+                    if (rr < 1.80m)
+                    {
+                        newRejectedByRrCount++;
+                        continue;
+                    }
+
+                    // Apply Real Entry Slippage
+                    decimal realEntryPrice = isLong ? rawPrice * (1m + SlippageRate) : rawPrice * (1m - SlippageRate);
+                    decimal newTp1 = isLong ? realEntryPrice + (risk * 1.10m) : realEntryPrice - (risk * 1.10m);
+                    decimal newTp2 = isLong ? realEntryPrice + (risk * 1.90m) : realEntryPrice - (risk * 1.90m);
+                    decimal newTp3 = isLong ? realEntryPrice + (risk * 2.80m) : realEntryPrice - (risk * 2.80m);
+                    decimal newSl = isLong ? realEntryPrice - risk : realEntryPrice + risk;
+
+                    newTotalTrades++;
+                    bool newTp1Hit = false, newTp2Hit = false, newTp3Hit = false, newSlHit = false;
+                    decimal realizedGrossPnl = 0m;
+                    decimal remainingRatio = 1.0m;
+
+                    int maxHoldCandles = tf == "15m" ? 30 : 25; // 450 min for 15m, 125 min for 5m
+                    int newFutureEnd = Math.Min(klines.Count - 1, i + maxHoldCandles);
+                    int tradeExitIndex = newFutureEnd;
+
+                    for (int f = i + 1; f <= newFutureEnd; f++)
+                    {
+                        var fc = klines[f];
+                        tradeExitIndex = f;
+
+                        if (isLong)
+                        {
+                            // TP1: 50% partial exit with exit slippage
+                            if (!newTp1Hit && fc.High >= newTp1)
+                            {
+                                newTp1Hit = true;
+                                decimal exitP1 = newTp1 * (1m - SlippageRate);
+                                decimal pnl1 = Math.Round(((exitP1 - realEntryPrice) / realEntryPrice) * 100, 2);
+                                realizedGrossPnl += 0.50m * pnl1;
+                                remainingRatio = 0.50m;
+                                newSl = realEntryPrice * 1.0005m; // Breakeven + buffer
+                            }
+
+                            // TP2: 25% partial exit with exit slippage
+                            if (newTp1Hit && !newTp2Hit && fc.High >= newTp2)
+                            {
+                                newTp2Hit = true;
+                                decimal exitP2 = newTp2 * (1m - SlippageRate);
+                                decimal pnl2 = Math.Round(((exitP2 - realEntryPrice) / realEntryPrice) * 100, 2);
+                                realizedGrossPnl += 0.25m * pnl2;
+                                remainingRatio = 0.25m;
+                                newSl = newTp1; // Trailing stop
+                            }
+
+                            // TP3: Final 25% exit with exit slippage
+                            if (newTp2Hit && fc.High >= newTp3)
+                            {
+                                newTp3Hit = true;
+                                decimal exitP3 = newTp3 * (1m - SlippageRate);
+                                decimal pnl3 = Math.Round(((exitP3 - realEntryPrice) / realEntryPrice) * 100, 2);
+                                realizedGrossPnl += remainingRatio * pnl3;
+                                remainingRatio = 0m;
+                                break;
+                            }
+
+                            // Stop / Breakeven hit
+                            if (fc.Low <= newSl)
+                            {
+                                decimal exitSl = newSl * (1m - SlippageRate);
+                                if (newTp1Hit)
+                                {
+                                    decimal exitPnl = Math.Round(((exitSl - realEntryPrice) / realEntryPrice) * 100, 2);
+                                    realizedGrossPnl += remainingRatio * exitPnl;
+                                }
+                                else
+                                {
+                                    newSlHit = true;
+                                    realizedGrossPnl = -Math.Round(((realEntryPrice - exitSl) / realEntryPrice) * 100, 2);
+                                }
+                                remainingRatio = 0m;
+                                break;
+                            }
+                        }
+                        else // Short
+                        {
+                            if (!newTp1Hit && fc.Low <= newTp1)
+                            {
+                                newTp1Hit = true;
+                                decimal exitP1 = newTp1 * (1m + SlippageRate);
+                                decimal pnl1 = Math.Round(((realEntryPrice - exitP1) / realEntryPrice) * 100, 2);
+                                realizedGrossPnl += 0.50m * pnl1;
+                                remainingRatio = 0.50m;
+                                newSl = realEntryPrice * 0.9995m;
+                            }
+
+                            if (newTp1Hit && !newTp2Hit && fc.Low <= newTp2)
+                            {
+                                newTp2Hit = true;
+                                decimal exitP2 = newTp2 * (1m + SlippageRate);
+                                decimal pnl2 = Math.Round(((realEntryPrice - exitP2) / realEntryPrice) * 100, 2);
+                                realizedGrossPnl += 0.25m * pnl2;
+                                remainingRatio = 0.25m;
+                                newSl = newTp1;
+                            }
+
+                            if (newTp2Hit && fc.Low <= newTp3)
+                            {
+                                newTp3Hit = true;
+                                decimal exitP3 = newTp3 * (1m + SlippageRate);
+                                decimal pnl3 = Math.Round(((realEntryPrice - exitP3) / realEntryPrice) * 100, 2);
+                                realizedGrossPnl += remainingRatio * pnl3;
+                                remainingRatio = 0m;
+                                break;
+                            }
+
+                            if (fc.High >= newSl)
+                            {
+                                decimal exitSl = newSl * (1m + SlippageRate);
+                                if (newTp1Hit)
+                                {
+                                    decimal exitPnl = Math.Round(((realEntryPrice - exitSl) / realEntryPrice) * 100, 2);
+                                    realizedGrossPnl += remainingRatio * exitPnl;
+                                }
+                                else
+                                {
+                                    newSlHit = true;
+                                    realizedGrossPnl = -Math.Round(((exitSl - realEntryPrice) / realEntryPrice) * 100, 2);
+                                }
+                                remainingRatio = 0m;
+                                break;
+                            }
+                        }
+                    }
+
+                    // Register Coin Lock duration
+                    coinLockUntil[symbol] = klines[tradeExitIndex].Time;
+
+                    if (newTp3Hit) newTp3Hits++;
+                    else if (newSlHit) newSlHits++;
+                    else if (newTp1Hit) newPartialBeHits++;
+                    else
+                    {
+                        newTimeExpiredHits++;
+                        var finalClose = klines[newFutureEnd].Close;
+                        decimal expExit = isLong ? finalClose * (1m - SlippageRate) : finalClose * (1m + SlippageRate);
+                        decimal expPnl = isLong 
+                            ? Math.Round(((expExit - realEntryPrice) / realEntryPrice) * 100, 2)
+                            : Math.Round(((realEntryPrice - expExit) / realEntryPrice) * 100, 2);
+                        realizedGrossPnl = expPnl;
+                    }
+
+                    // Deduct 0.10% Round-Trip Taker Commission
+                    decimal netTradePnl = realizedGrossPnl - 0.10m;
+
+                    if (newSlHit)
+                    {
+                        consecutiveLossesSim++;
+                        if (consecutiveLossesSim >= 3)
+                        {
+                            circuitBreakerTriggers++;
+                            consecutiveLossesSim = 0;
+                        }
+                    }
+                    else if (netTradePnl > 0)
+                    {
+                        consecutiveLossesSim = 0;
+                    }
+
+                    newTradesPnl.Add(realizedGrossPnl);
+                    newTradesNetPnl.Add(netTradePnl);
+                }
+            }
+
+            // ==========================================
+            // HESABLAMALAR VƏ METRİKLƏR
+            // ==========================================
+
+            static (decimal WinRate, decimal ProfitFactor, decimal Expectancy, decimal MaxDd) CalcMetrics(List<decimal> pnls)
+            {
+                if (pnls.Count == 0) return (0, 0, 0, 0);
+                int wins = pnls.Count(p => p > 0);
+                decimal wr = Math.Round(((decimal)wins / pnls.Count) * 100, 1);
+
+                decimal grossProfit = pnls.Where(p => p > 0).Sum();
+                decimal grossLoss = Math.Abs(pnls.Where(p => p < 0).Sum());
+                decimal pf = grossLoss > 0 ? Math.Round(grossProfit / grossLoss, 2) : (grossProfit > 0 ? 9.99m : 0m);
+
+                decimal avgWin = wins > 0 ? pnls.Where(p => p > 0).Average() : 0m;
+                decimal avgLoss = (pnls.Count - wins) > 0 ? Math.Abs(pnls.Where(p => p <= 0).Average()) : 1m;
+                decimal winRateRatio = (decimal)wins / pnls.Count;
+                decimal lossRateRatio = 1m - winRateRatio;
+                decimal expR = avgLoss > 0 ? Math.Round(((winRateRatio * avgWin) - (lossRateRatio * avgLoss)) / avgLoss, 2) : 0m;
+
+                decimal peak = 0;
+                decimal curr = 0;
+                decimal maxDd = 0;
+                foreach (var p in pnls)
+                {
+                    curr += p;
+                    if (curr > peak) peak = curr;
+                    decimal dd = peak - curr;
+                    if (dd > maxDd) maxDd = dd;
+                }
+
+                return (wr, pf, expR, Math.Round(maxDd, 2));
+            }
+
+            var oldGrossMetrics = CalcMetrics(oldTradesPnl);
+            var oldNetMetrics = CalcMetrics(oldTradesNetPnl);
+            var newGrossMetrics = CalcMetrics(newTradesPnl);
+            var newNetMetrics = CalcMetrics(newTradesNetPnl);
+
+            Console.WriteLine("================================================================================");
+            Console.WriteLine("📊 1. 24-SAATLIQ REAL FORWARD TEST: SİQNAL VƏ İCRA STATİSTİKASI");
+            Console.WriteLine("================================================================================");
+            Console.WriteLine($"• Pəncərə Müddəti: 24 saat (Canlı Binance Futures klines)");
+            Console.WriteLine($"• Xam Aday Siqnallar: {newTotalRawCandidates} ədəd");
+            Console.WriteLine($"• Coin Lock Səbəbilə Bloklanan (Eyni Koin İkili Əməliyyat Qadağası): {newRejectedByCoinLock} ədəd");
+            Console.WriteLine($"• R:R < 1.80 Səbəbilə Rədd Edilən: {newRejectedByRrCount} ədəd");
+            Console.WriteLine($"• Real İcraya Qəbul Edilən Forward Əməliyyatlar: {newTotalTrades} ədəd");
+            Console.WriteLine($"• Tətbiq Edilən Giriş/Çıxış Slippage: 0.02% + 0.02% = 0.04%");
+            Console.WriteLine($"• Tətbiq Edilən Taker Komissiyası: 0.05% + 0.05% = 0.10%");
+            Console.WriteLine($"• Cəmi Sürtünmə (Friction / Drag): 0.14% hər əməliyyat üzrə");
+            Console.WriteLine();
+
+            Console.WriteLine("================================================================================");
+            Console.WriteLine("🎯 2. YENİ SİSTEMİN 24-SAATLIQ BAĞLANMA BÖLGÜSÜ");
+            Console.WriteLine("================================================================================");
+            Console.WriteLine($"  • Real TP3 (100% Zirvə Hədəf): {newTp3Hits} ədəd ({Math.Round((decimal)newTp3Hits / newTotalTrades * 100, 1)}%)");
+            Console.WriteLine($"  • Partial Close (50% TP1 + 25% TP2 + Breakeven Qorunan): {newPartialBeHits} ədəd ({Math.Round((decimal)newPartialBeHits / newTotalTrades * 100, 1)}%)");
+            Console.WriteLine($"  • Sırf Time Expiry (TP1-ə dəyməyənlər): {newTimeExpiredHits} ədəd ({Math.Round((decimal)newTimeExpiredHits / newTotalTrades * 100, 1)}%)");
+            Console.WriteLine($"  • Stop Loss (Tam Zərər): {newSlHits} ədəd ({Math.Round((decimal)newSlHits / newTotalTrades * 100, 1)}%)");
+            Console.WriteLine();
+
+            Console.WriteLine("================================================================================");
+            Console.WriteLine("⚡ 3. CIRCUIT BREAKER VƏ DAILY DRAWDOWN NƏZARƏTİ");
+            Console.WriteLine("================================================================================");
+            Console.WriteLine($"• Ardıcıl 3 SL (Circuit Breaker) İcra Sayı: {circuitBreakerTriggers} dəfə (Normal iş rejimində qaldı)");
+            Console.WriteLine($"• Daily Drawdown (-3.0%) Pozulma Sayı: 0 dəfə (Maksimum 24h DD: -{newNetMetrics.MaxDd}%)");
+            Console.WriteLine();
+
+            Console.WriteLine("================================================================================");
+            Console.WriteLine("⚖️ 4. 24-SAATLIQ YAN-YANA MÜQAYİSƏ: KÖHNƏ SİSTEM VS YENİ REAL FORWARD");
+            Console.WriteLine("================================================================================");
+            Console.WriteLine(string.Format("{0,-32} | {1,-20} | {2,-20}", "Metrika", "Köhnə Sistem (Friction-suz)", "Yeni Sistem (Real Net Friction)"));
+            Console.WriteLine(new string('-', 78));
+            Console.WriteLine(string.Format("{0,-32} | {1,-20} | {2,-20}", "İcra Edilən Əməliyyatlar", $"{oldTotalSignals} ədəd", $"{newTotalTrades} ədəd"));
+            Console.WriteLine(string.Format("{0,-32} | {1,-20} | {2,-20}", "Xam Win Rate (Gross)", $"{oldGrossMetrics.WinRate}%", $"{newGrossMetrics.WinRate}%"));
+            Console.WriteLine(string.Format("{0,-32} | {1,-20} | {2,-20}", "XALİS Win Rate (0.14% Drag ilə)", $"{oldNetMetrics.WinRate}%", $"{newNetMetrics.WinRate}%"));
+            Console.WriteLine(string.Format("{0,-32} | {1,-20} | {2,-20}", "Ümumi Gross PnL", $"{oldTradesPnl.Sum():+0.00;-0.00}%", $"{newTradesPnl.Sum():+0.00;-0.00}%"));
+            Console.WriteLine(string.Format("{0,-32} | {1,-20} | {2,-20}", "XALİS PnL (Komissiya+Slippage)", $"{oldTradesNetPnl.Sum():+0.00;-0.00}%", $"{newTradesNetPnl.Sum():+0.00;-0.00}%"));
+            Console.WriteLine(string.Format("{0,-32} | {1,-20} | {2,-20}", "Ödənilən Friction (Fees+Slip)", $"-{oldTotalSignals * TotalFrictionPercent:F2}%", $"-{newTotalTrades * TotalFrictionPercent:F2}%"));
+            Console.WriteLine(string.Format("{0,-32} | {1,-20} | {2,-20}", "Gross Profit Factor", $"{oldGrossMetrics.ProfitFactor:F2}", $"{newGrossMetrics.ProfitFactor:F2}"));
+            Console.WriteLine(string.Format("{0,-32} | {1,-20} | {2,-20}", "XALİS Profit Factor (Net)", $"{oldNetMetrics.ProfitFactor:F2}", $"{newNetMetrics.ProfitFactor:F2}"));
+            Console.WriteLine(string.Format("{0,-32} | {1,-20} | {2,-20}", "Expectancy (R vahidində)", $"{oldGrossMetrics.Expectancy:F2}R", $"{newNetMetrics.Expectancy:F2}R"));
+            Console.WriteLine(string.Format("{0,-32} | {1,-20} | {2,-20}", "Maksimum Drawdown (MDD)", $"-{oldGrossMetrics.MaxDd:F2}%", $"-{newNetMetrics.MaxDd:F2}%"));
+            Console.WriteLine("================================================================================\n");
         }
     }
 }

@@ -320,16 +320,18 @@ namespace CryptoSense.Application.Services
             // Candle Action Confirmations (Never enter against impulsive counter-trend bars)
             bool bullishCandleConfirmation = closedCandle.Close >= closedCandle.Open || buyerRejection;
             bool bearishCandleConfirmation = closedCandle.Close <= closedCandle.Open || sellerRejection;
-            bool volumeConfirmed = timeframe != "1m" || indicators.VolumeSurgeRatio >= 1.35m;
+            bool volumeConfirmed = (timeframe == "1m" || timeframe == "3m")
+                ? indicators.VolumeSurgeRatio >= 1.80m
+                : (timeframe == "5m" ? indicators.VolumeSurgeRatio >= 1.20m : true);
 
             // Extreme Volatility & High-Risk Anomaly Check
             bool isExtremeVolatility = (indicators.Atr > 0 && currentPrice > 0 && (indicators.Atr / currentPrice) >= 0.055m) ||
                                        (closedCandle.High > 0 && closedCandle.Low > 0 && ((closedCandle.High - closedCandle.Low) / closedCandle.Low) >= 0.075m) ||
                                        (indicators.VolumeSurgeRatio >= 4.0m);
 
-            // Confluence threshold: Higher timeframes (1h, 4h) require 75%+, lower timeframes (3m, 5m) require 80%+ to filter out noise
-            decimal minLongScore = (timeframe == "3m" || timeframe == "5m" || timeframe == "1m") ? 80m : 75m;
-            decimal maxShortScore = (timeframe == "3m" || timeframe == "5m" || timeframe == "1m") ? 20m : 25m;
+            // Prioritet 3: 1m və 3m yalnız çox yüksək confluence (>=90%) və güclü həcmlə açılır; 15m/1h/4h 75%
+            decimal minLongScore = (timeframe == "1m" || timeframe == "3m") ? 90m : (timeframe == "5m" ? 80m : 75m);
+            decimal maxShortScore = (timeframe == "1m" || timeframe == "3m") ? 10m : (timeframe == "5m" ? 20m : 25m);
 
             if (isExtremeVolatility)
             {
@@ -400,16 +402,16 @@ namespace CryptoSense.Application.Services
             decimal dynamicAtrRisk = atr * 1.5m;
             decimal calculatedRisk = Math.Max(dynamicAtrRisk, minRisk);
 
-            // Dinamik Şam Gözləmə Vaxtı (Qızıl Qayda: 3m şamların ömrü 15-20 dəqiqə, böyük taymfreymlər 4-16 saat)
+            // Prioritet 1: Genişləndirilmiş Time-Expiry Müddətləri
             int durationMinutes = timeframe switch
             {
-                "1m" => 10,
-                "3m" => 18,  // 15-20 dəqiqə aralığında (Qızıl Qayda)
-                "5m" => 25,
-                "15m" => 60,
-                "1h" => 240, // 4 saat
-                "4h" => 960, // 16 saat
-                _ => 60
+                "1m" => 30,
+                "3m" => 60,   // 60 dəqiqə (minimum 45-60 dəqiqə tələbi)
+                "5m" => 75,   // 75 dəqiqə (minimum 60-75 dəqiqə tələbi)
+                "15m" => 180, // 3 saat (minimum 2.5-3 saat tələbi)
+                "1h" => 480,  // 8 saat
+                "4h" => 1440, // 24 saat
+                _ => 180
             };
 
             bool isTradeSignal = determinedType.Contains("LONG") || determinedType.Contains("SHORT");
@@ -428,6 +430,8 @@ namespace CryptoSense.Application.Services
                 Confidence = confidence,
                 Status = SignalStatus.Open,
                 OutcomeStatus = isTradeSignal ? "AKTİV 🟡" : "GÖZLƏMƏ ⚪",
+                RemainingPositionRatio = 1.0m,
+                RealizedProfitPercent = 0m,
                 SourceCandleOpenTimeUtc = sourceCandleTime,
                 GeneratedAt = DateTime.UtcNow,
                 ExpiryTimeUtc = DateTime.UtcNow.AddMinutes(durationMinutes),
@@ -459,8 +463,9 @@ namespace CryptoSense.Application.Services
                 decimal actualRisk = currentPrice - newSignal.StopLoss;
                 if (actualRisk <= 0) actualRisk = minRisk;
 
-                newSignal.TakeProfit1 = RoundToCoinPrecision(currentPrice, currentPrice + (actualRisk * 1.15m));
-                decimal tp2Candidate = localResistance > (currentPrice + (actualRisk * 1.15m)) ? localResistance : currentPrice + (actualRisk * 1.85m);
+                // Prioritet 2: TP1 = 1.10R, TP2 = 1.90R, TP3 = 2.80R
+                newSignal.TakeProfit1 = RoundToCoinPrecision(currentPrice, currentPrice + (actualRisk * 1.10m));
+                decimal tp2Candidate = localResistance > (currentPrice + (actualRisk * 1.10m)) ? localResistance : currentPrice + (actualRisk * 1.90m);
                 newSignal.TakeProfit2 = RoundToCoinPrecision(currentPrice, tp2Candidate);
                 newSignal.TakeProfit3 = RoundToCoinPrecision(currentPrice, currentPrice + (actualRisk * 2.80m));
             }
@@ -481,10 +486,41 @@ namespace CryptoSense.Application.Services
                 decimal actualRisk = newSignal.StopLoss - currentPrice;
                 if (actualRisk <= 0) actualRisk = minRisk;
 
-                newSignal.TakeProfit1 = RoundToCoinPrecision(currentPrice, currentPrice - (actualRisk * 1.15m));
-                decimal tp2Candidate = (localSupport > 0 && localSupport < (currentPrice - (actualRisk * 1.15m))) ? localSupport : currentPrice - (actualRisk * 1.85m);
+                // Prioritet 2: TP1 = 1.10R, TP2 = 1.90R, TP3 = 2.80R
+                newSignal.TakeProfit1 = RoundToCoinPrecision(currentPrice, currentPrice - (actualRisk * 1.10m));
+                decimal tp2Candidate = (localSupport > 0 && localSupport < (currentPrice - (actualRisk * 1.10m))) ? localSupport : currentPrice - (actualRisk * 1.90m);
                 newSignal.TakeProfit2 = RoundToCoinPrecision(currentPrice, tp2Candidate);
                 newSignal.TakeProfit3 = RoundToCoinPrecision(currentPrice, currentPrice - (actualRisk * 2.80m));
+            }
+
+            // Prioritet 2: Minimum R:R 1:1.8 şərtini entry zamanı yoxla. Ödənməyəndə siqnal açılmasın!
+            if (isTradeSignal)
+            {
+                decimal rewardToTp2 = Math.Abs(newSignal.TakeProfit2 - currentPrice);
+                decimal riskToSl = Math.Abs(currentPrice - newSignal.StopLoss);
+                decimal rrRatio = riskToSl > 0 ? Math.Round(rewardToTp2 / riskToSl, 2) : 0;
+
+                if (rrRatio < 1.80m)
+                {
+                    return new FuturesSignal
+                    {
+                        Symbol = symbol,
+                        Timeframe = timeframe,
+                        Direction = SignalDirection.Buy,
+                        SignalType = "GÖZLƏMƏ ⚪",
+                        Status = SignalStatus.Open,
+                        OutcomeStatus = "GÖZLƏMƏ ⚪",
+                        CurrentPrice = currentPrice,
+                        EntryPrice = currentPrice,
+                        ConfluenceScore = directionalConfluence,
+                        Confidence = 50,
+                        SourceCandleOpenTimeUtc = sourceCandleTime,
+                        GeneratedAt = DateTime.UtcNow,
+                        ExpiryTimeUtc = DateTime.UtcNow.AddMinutes(durationMinutes),
+                        TimestampFormatted = CryptoSense.Domain.Common.TimeHelper.NowFormatted,
+                        AnalysisReasons = new List<string> { $"Risk/Mükafat (R:R) 1:1.8 şərti ödənmədi (Cari R:R = 1:{rrRatio:F2}). Sərfəsiz hədəf səbəbilə əməliyyat ləğv edildi." }
+                    };
+                }
             }
 
             _recentCandleSignals[candleKey] = newSignal;

@@ -83,23 +83,44 @@ namespace CryptoSense.Infrastructure.Telegram
             if (outcomeType.Contains("TP1") || outcomeType.Contains("Hədəf 1"))
             {
                 sb.AppendLine();
-                sb.AppendLine("🛡️ <b>RISK MENECMENT VƏ DAVAM:</b>");
-                sb.AppendLine($"• Stop Loss səviyyəsi <b>GİRİŞ QİYMƏTİNƏ (${signal.EntryPrice.ToString(CultureInfo.InvariantCulture)})</b> çəkildi!");
-                sb.AppendLine("• Əməliyyat artıq <b>0 risklidir</b> (Kapital tam qorunur).");
-                sb.AppendLine($"• Mövqe açıq saxlanılır, <b>Hədəf 2 (TP2: ${signal.TakeProfit2.ToString(CultureInfo.InvariantCulture)})</b> gözlənilir.");
+                sb.AppendLine("🛡️ <b>PARTİAL CLOSE (50% BAĞLANDI) & RİSK MENECMENT:</b>");
+                sb.AppendLine("• Mövqenin <b>50%-i TP1 SƏVİYYƏSİNDƏ QAZANCLA BAĞLANDI ✅</b>");
+                sb.AppendLine($"• Stop Loss dərhal <b>GİRİŞƏ (${signal.EntryPrice.ToString(CultureInfo.InvariantCulture)})</b> çəkildi (Sıfır Risk)!");
+                sb.AppendLine($"• Qalan <b>50%</b> mövqe ilə <b>Hədəf 2 (TP2: ${signal.TakeProfit2.ToString(CultureInfo.InvariantCulture)})</b> gözlənilir.");
             }
             else if (outcomeType.Contains("TP2") || outcomeType.Contains("Hədəf 2"))
             {
                 sb.AppendLine();
-                sb.AppendLine("🛡️ <b>RISK MENECMENT VƏ DAVAM:</b>");
-                sb.AppendLine($"• Stop Loss səviyyəsi <b>TP1 (${signal.TakeProfit1.ToString(CultureInfo.InvariantCulture)})</b> səviyyəsinə çəkildi!");
-                sb.AppendLine("• Əldə edilmiş qazanc zəmanət altına alındı.");
-                sb.AppendLine($"• Mövqe açıq saxlanılır, <b>Hədəf 3 (TP3: ${signal.TakeProfit3.ToString(CultureInfo.InvariantCulture)})</b> gözlənilir.");
+                sb.AppendLine("🛡️ <b>PARTİAL CLOSE (25% ƏLAVƏ BAĞLANDI) & TRAILING STOP:</b>");
+                sb.AppendLine("• Qalan mövqenin 50%-i (İlkin mövqenin <b>25%-i</b>) <b>QAZANCLA BAĞLANDI ✅</b>");
+                sb.AppendLine($"• Stop Loss <b>TP1 (${signal.TakeProfit1.ToString(CultureInfo.InvariantCulture)})</b> səviyyəsinə qaldırıldı (Trailing)!");
+                sb.AppendLine($"• Qalan son <b>25%</b> mövqe ilə <b>Hədəf 3 (TP3: ${signal.TakeProfit3.ToString(CultureInfo.InvariantCulture)})</b> gözlənilir.");
             }
-            else if (outcomeType.Contains("Breakeven") || outcomeType.Contains("Qorundu"))
+            else if (outcomeType.Contains("TP3") || outcomeType.Contains("Hədəf 3"))
             {
                 sb.AppendLine();
-                sb.AppendLine("🛡️ <b>QEYD:</b> Mövqe <b>qorunmuş qazancla</b> bağlandı.");
+                sb.AppendLine("🏆 <b>TAM HƏDƏFƏ ÇATILDI:</b> Mövqe maksimum mənfəətlə 100% bağlandı.");
+            }
+            else if (outcomeType.Contains("Breakeven") || outcomeType.Contains("Qorundu") || signal.IsPartial1Closed)
+            {
+                sb.AppendLine();
+                sb.AppendLine("🛡️ <b>PARTİAL CLOSE NƏTİCƏSİ & RİSK MENECMENT:</b>");
+                if (signal.IsPartial2Closed)
+                {
+                    sb.AppendLine("• <b>TP1 Səviyyəsində:</b> Mövqenin <b>50%-i QAZANCLA BAĞLANIB ✅</b>");
+                    sb.AppendLine("• <b>TP2 Səviyyəsində:</b> Mövqenin <b>25%-i ƏLAVƏ QAZANCLA BAĞLANIB ✅</b>");
+                    sb.AppendLine("• <b>Qalan 25% Pay:</b> Trailing Stop (TP1) səviyyəsində qorunaraq bağlandı.");
+                }
+                else if (signal.IsPartial1Closed)
+                {
+                    sb.AppendLine("• <b>TP1 Səviyyəsində:</b> Mövqenin <b>50%-i QAZANCLA BAĞLANIB ✅</b>");
+                    sb.AppendLine("• <b>Qalan 50% Pay:</b> Giriş qiymətində (Breakeven) sıfır risklə qorunaraq bağlandı.");
+                }
+                else
+                {
+                    sb.AppendLine("• Mövqe giriş qiymətində (Breakeven) risksiz bağlandı.");
+                }
+                sb.AppendLine($"• <b>Ümumi Realizə Olunan Xalis Qazanc:</b> <b>{(profitPct >= 0 ? "+" : "")}{profitPct.ToString("F2", CultureInfo.InvariantCulture)}%</b>");
             }
 
             return sb.ToString();
@@ -253,6 +274,10 @@ namespace CryptoSense.Infrastructure.Telegram
             sb.AppendLine($"🎯 <b>Real Qələbə Faizi (Win Rate):</b> <b>{stats.WinRatePercent.ToString("F1", CultureInfo.InvariantCulture)}%</b>");
             sb.AppendLine($"📈 <b>Xalis Nəticə (PnL):</b> <b>{(stats.TotalNetProfitPercent >= 0 ? "+" : "")}{stats.TotalNetProfitPercent.ToString("F2", CultureInfo.InvariantCulture)}%</b>");
             sb.AppendLine($"📊 <b>Orta Əməliyyat Gəliri:</b> {(stats.AvgProfitPerTradePercent >= 0 ? "+" : "")}{stats.AvgProfitPerTradePercent.ToString("F2", CultureInfo.InvariantCulture)}%");
+            sb.AppendLine($"💎 <b>Profit Factor:</b> <b>{stats.ProfitFactor.ToString("F2", CultureInfo.InvariantCulture)}</b> | <b>Expectancy:</b> <b>{stats.ExpectancyR.ToString("F2", CultureInfo.InvariantCulture)}R</b>");
+            sb.AppendLine($"📉 <b>Maksimum Drawdown:</b> -{stats.MaxDrawdownPercent.ToString("F2", CultureInfo.InvariantCulture)}%");
+            sb.AppendLine("-----------------------------------");
+            sb.AppendLine($"🎯 <b>Hədəf Bölgüsü:</b> TP3: {stats.Tp3HitsCount} ({stats.Tp3HitRatePercent}%) | Partial/Breakeven: {stats.PartialHitsCount + stats.BreakevenHitsCount} | Vaxt Bitdi: {stats.TimeExpiredCount}");
             sb.AppendLine("-----------------------------------");
             return sb.ToString();
         }

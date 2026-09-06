@@ -86,8 +86,8 @@ builder.Services.AddSingleton<ITelegramBotService>(sp =>
     return new TelegramBotService(client, config, sp);
 });
 
-// If running in test or maintenance mode, we don't start background daemons
-if (!args.Contains("--test") && !args.Contains("--clean-db") && !args.Contains("--reset-db"))
+// If running in test, audit or maintenance mode, we don't start background daemons
+if (!args.Contains("--test") && !args.Contains("--audit") && !args.Contains("--clean-db") && !args.Contains("--reset-db"))
 {
     builder.Services.AddHostedService(sp => (TelegramBotService)sp.GetRequiredService<ITelegramBotService>());
     builder.Services.AddHostedService<BackgroundMarketScanner>();
@@ -123,6 +123,13 @@ using (var scope = app.Services.CreateScope())
     {
         var testSuite = scope.ServiceProvider.GetRequiredService<SystemTestSuite>();
         await testSuite.RunAllTestsAsync();
+        return;
+    }
+
+    if (args.Contains("--audit"))
+    {
+        var testSuite = scope.ServiceProvider.GetRequiredService<SystemTestSuite>();
+        await testSuite.RunAuditAsync();
         return;
     }
 }

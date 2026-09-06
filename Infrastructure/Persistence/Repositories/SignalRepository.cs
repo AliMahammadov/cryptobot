@@ -121,7 +121,50 @@ namespace CryptoSense.Infrastructure.Persistence.Repositories
                 stats.AvgProfitPerTradePercent = Math.Round(results.Average(), 2);
                 stats.BestTradePercent = Math.Round(results.Max(), 2);
                 stats.WorstTradePercent = Math.Round(results.Min(), 2);
+
+                // Prioritet 5: Profit Factor & Expectancy
+                var grossProfit = results.Where(r => r > 0).Sum();
+                var grossLoss = Math.Abs(results.Where(r => r < 0).Sum());
+                stats.ProfitFactor = grossLoss > 0 ? Math.Round(grossProfit / grossLoss, 2) : (grossProfit > 0 ? 9.99m : 0m);
+
+                var wins = results.Where(r => r > 0).ToList();
+                var losses = results.Where(r => r < 0).ToList();
+                decimal avgWin = wins.Count > 0 ? wins.Average() : 0m;
+                decimal avgLoss = losses.Count > 0 ? Math.Abs(losses.Average()) : 0m;
+                decimal winRate = decisiveTrades > 0 ? (decimal)stats.SuccessSignals / decisiveTrades : 0m;
+                decimal lossRate = decisiveTrades > 0 ? (decimal)stats.FailedSignals / decisiveTrades : 0m;
+
+                if (avgLoss > 0)
+                {
+                    stats.ExpectancyR = Math.Round(((winRate * avgWin) - (lossRate * avgLoss)) / avgLoss, 2);
+                }
+                else
+                {
+                    stats.ExpectancyR = Math.Round(winRate * avgWin, 2);
+                }
+
+                // Prioritet 5: Max Drawdown
+                var orderedTrades = closed.Where(s => s.ResultPercent.HasValue).OrderBy(s => s.GeneratedAt).ToList();
+                decimal peakEquity = 0;
+                decimal currentEquity = 0;
+                decimal maxDrawdown = 0;
+                foreach (var trade in orderedTrades)
+                {
+                    currentEquity += trade.ResultPercent!.Value;
+                    if (currentEquity > peakEquity) peakEquity = currentEquity;
+                    decimal dd = peakEquity - currentEquity;
+                    if (dd > maxDrawdown) maxDrawdown = dd;
+                }
+                stats.MaxDrawdownPercent = Math.Round(maxDrawdown, 2);
             }
+
+            // Prioritet 5: Hit Rate Breakdown
+            stats.Tp3HitsCount = closed.Count(s => s.OutcomeStatus != null && s.OutcomeStatus.Contains("TP3"));
+            stats.PartialHitsCount = closed.Count(s => s.IsPartial1Closed || (s.OutcomeStatus != null && (s.OutcomeStatus.Contains("Partial") || s.OutcomeStatus.Contains("TP1") || s.OutcomeStatus.Contains("TP2"))));
+            stats.BreakevenHitsCount = closed.Count(s => s.OutcomeStatus != null && s.OutcomeStatus.Contains("Breakeven"));
+            stats.TimeExpiredCount = closed.Count(s => s.OutcomeStatus != null && s.OutcomeStatus.Contains("Müddəti"));
+            stats.Tp3HitRatePercent = decisiveTrades > 0 ? Math.Round(((decimal)stats.Tp3HitsCount / decisiveTrades) * 100, 1) : 0m;
+            stats.TimeExpiredRatePercent = decisiveTrades > 0 ? Math.Round(((decimal)stats.TimeExpiredCount / decisiveTrades) * 100, 1) : 0m;
 
             return stats;
         }

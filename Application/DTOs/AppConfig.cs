@@ -12,13 +12,13 @@ namespace CryptoSense.Application.DTOs
         public int MinConfidenceThreshold { get; set; } = 78;
         public List<string> SelectedCoins { get; set; } = new();
         public bool AlertAllCoins { get; set; } = true;
-        public string DefaultTimeframe { get; set; } = "3m";
+        public string DefaultTimeframe { get; set; } = "1h";
     }
 
     public class UserSettings
     {
         public bool IsActive { get; set; } = true;
-        public string Timeframe { get; set; } = "3m";
+        public string Timeframe { get; set; } = "1h";
         public List<string> Coins { get; set; } = new(); // Starts completely EMPTY so user selects their own coins
         public System.DateTime LastResumeTime { get; set; } = System.DateTime.UtcNow;
         public System.DateTime LastSignalSentUtc { get; set; } = System.DateTime.UtcNow;

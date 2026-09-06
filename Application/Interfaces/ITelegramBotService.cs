@@ -13,5 +13,6 @@ namespace CryptoSense.Application.Interfaces
         Task SendUrgentNewsAlertAsync(CryptoNewsItem newsItem, bool isListing = false);
         Task NotifySuperAdminUserLoginAsync(string username, string platform);
         Task RevokeUserSessionAsync(string username);
+        Task BroadcastSystemAlertAsync(string message);
     }
 }

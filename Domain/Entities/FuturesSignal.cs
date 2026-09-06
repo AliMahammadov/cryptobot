@@ -74,6 +74,15 @@ namespace CryptoSense.Domain.Entities
         [Column(TypeName = "decimal(8, 4)")]
         public decimal? ResultPercent { get; set; }
         
+        [Column(TypeName = "decimal(8, 4)")]
+        public decimal RealizedProfitPercent { get; set; } = 0;
+
+        [Column(TypeName = "decimal(5, 4)")]
+        public decimal RemainingPositionRatio { get; set; } = 1.0m;
+
+        public bool IsPartial1Closed { get; set; } = false;
+        public bool IsPartial2Closed { get; set; } = false;
+        
         public decimal ProfitPercentAchieved { get; set; } = 0;
         
         public DateTime SourceCandleOpenTimeUtc { get; set; }

@@ -156,7 +156,7 @@ namespace CryptoSense.Infrastructure.Telegram
                             Username = u.Username,
                             TelegramUserId = u.TelegramUserId,
                             IsActive = true,
-                            Timeframe = "3m"
+                            Timeframe = "1h"
                         });
                         s.Username = u.Username;
                         s.TelegramUserId = u.TelegramUserId;
@@ -587,6 +587,36 @@ namespace CryptoSense.Infrastructure.Telegram
             }
         }
 
+        public async Task BroadcastSystemAlertAsync(string message)
+        {
+            using var scope = _serviceProvider.CreateScope();
+            var userManager = scope.ServiceProvider.GetRequiredService<IUserManagerService>();
+            var activeUsers = await userManager.GetAllUsersAsync();
+
+            var targetChatIds = new HashSet<string>();
+            foreach (var user in activeUsers)
+            {
+                if (!string.IsNullOrEmpty(user.TelegramChatId) && user.IsActive)
+                {
+                    targetChatIds.Add(user.TelegramChatId);
+                }
+            }
+            foreach (var kvp in UserPreferences)
+            {
+                if (kvp.Value.IsActive && !string.IsNullOrEmpty(kvp.Key))
+                {
+                    targetChatIds.Add(kvp.Key);
+                }
+            }
+
+            foreach (var chatId in targetChatIds)
+            {
+                var settings = GetSettings(chatId);
+                if (!settings.IsActive) continue;
+                await SendMessageAsync(message, chatId);
+            }
+        }
+
         public async Task NotifySuperAdminUserLoginAsync(string username, string platform)
         {
             if (string.IsNullOrEmpty(SuperAdminChatId)) return;
@@ -778,7 +808,7 @@ namespace CryptoSense.Infrastructure.Telegram
                     var settings = GetSettings(chatId);
                     settings.TelegramUserId = userId;
                     settings.IsActive = true;
-                    settings.Timeframe = "3m";
+                    settings.Timeframe = "1h";
                     settings.LastResumeTime = DateTime.UtcNow;
 
                     if (user.Role == UserRole.Admin || user.Username.Equals("Ali", StringComparison.OrdinalIgnoreCase))
@@ -1492,7 +1522,7 @@ namespace CryptoSense.Infrastructure.Telegram
             {
                 var potentialSym = text.ToUpper();
                 if (!potentialSym.EndsWith("USDT")) potentialSym += "USDT";
-                var tf = (userSettings.Timeframe == "Hamısı" || userSettings.Timeframe == "Hamisi") ? "3m" : userSettings.Timeframe;
+                var tf = (userSettings.Timeframe == "Hamısı" || userSettings.Timeframe == "Hamisi") ? "1h" : userSettings.Timeframe;
                 var sig = await signalEngine.AnalyzeCoinAsync(potentialSym, tf);
                 if (sig.SignalType.Contains("LONG") || sig.SignalType.Contains("SHORT"))
                 {

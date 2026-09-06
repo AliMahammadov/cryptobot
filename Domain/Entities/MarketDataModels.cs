@@ -80,6 +80,17 @@ namespace CryptoSense.Domain.Entities
         public decimal AvgProfitPerTradePercent { get; set; }
         public decimal BestTradePercent { get; set; }
         public decimal WorstTradePercent { get; set; }
+
+        // Prioritet 5: Dərin İnstitusional Metrikalar
+        public decimal ProfitFactor { get; set; } = 0;
+        public decimal ExpectancyR { get; set; } = 0;
+        public decimal MaxDrawdownPercent { get; set; } = 0;
+        public int Tp3HitsCount { get; set; } = 0;
+        public int PartialHitsCount { get; set; } = 0;
+        public int BreakevenHitsCount { get; set; } = 0;
+        public int TimeExpiredCount { get; set; } = 0;
+        public decimal Tp3HitRatePercent { get; set; } = 0;
+        public decimal TimeExpiredRatePercent { get; set; } = 0;
     }
 
     public class MacroMarketOverview
