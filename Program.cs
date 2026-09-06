@@ -58,7 +58,7 @@ if (!File.Exists(dbPath))
     }
 }
 
-var connectionString = $"Data Source={dbPath}";
+var connectionString = $"Data Source={dbPath};Mode=ReadWriteCreate;Cache=Shared;Default Timeout=30;";
 
 builder.Services.AddDbContext<AppDbContext>(options =>
     options.UseSqlite(connectionString));

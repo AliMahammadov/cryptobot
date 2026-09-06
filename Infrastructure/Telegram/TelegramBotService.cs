@@ -1237,7 +1237,7 @@ namespace CryptoSense.Infrastructure.Telegram
                     }
                     else
                     {
-                        int affected = await cmd.ExecuteNonQueryAsync();
+                        int affected = await dbContext.Database.ExecuteSqlRawAsync(query);
                         await SendMessageAsync($"✅ <b>Əməliyyat icra olundu. Təsirlənən sətir sayı: {affected}</b>", chatId);
                     }
                 }

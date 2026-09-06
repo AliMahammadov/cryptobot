@@ -32,6 +32,11 @@ namespace CryptoSense.Infrastructure.Persistence.Repositories
         {
             _context.Database.EnsureCreated();
 
+            // Enable WAL mode and busy timeout for high concurrency without locks
+            try { _context.Database.ExecuteSqlRaw("PRAGMA journal_mode = WAL;"); } catch { }
+            try { _context.Database.ExecuteSqlRaw("PRAGMA busy_timeout = 5000;"); } catch { }
+            try { _context.Database.ExecuteSqlRaw("PRAGMA synchronous = NORMAL;"); } catch { }
+
             // Safe auto-migration for newly added Partial Close columns if SQLite table already exists
             try { _context.Database.ExecuteSqlRaw("ALTER TABLE Signals ADD COLUMN RealizedProfitPercent TEXT NOT NULL DEFAULT '0';"); } catch { }
             try { _context.Database.ExecuteSqlRaw("ALTER TABLE Signals ADD COLUMN RemainingPositionRatio TEXT NOT NULL DEFAULT '1.0';"); } catch { }
