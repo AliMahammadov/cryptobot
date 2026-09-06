@@ -388,12 +388,21 @@ namespace CryptoSense.Infrastructure.Telegram
             sb.AppendLine("ℹ️ <b>CryptoSense Sistem Statusu:</b>");
             sb.AppendLine("-----------------------------------");
             sb.AppendLine("🤖 <b>Skaner Vəziyyəti:</b> İşləyir 🟢 (24/7 Canlı Rejim)");
-            sb.AppendLine("📌 <b>Deploy Versiyası:</b> <code>v2.0 (Commit: 957edd6)</code>");
+            sb.AppendLine("📌 <b>Deploy Versiyası:</b> <code>v2.0 (Commit: e002c4b)</code>");
             var tfDisplay = (settings.Timeframe == "Hamısı" || settings.Timeframe == "Hamisi") ? "15m, 1h, 4h" : settings.Timeframe;
-            sb.AppendLine($"⏱ <b>Aktiv Timeframe:</b> <code>{tfDisplay}</code>");
-            var coinText = settings.Coins.Count > 0 
-                ? $"{settings.Coins.Count} ədəd ({string.Join(", ", settings.Coins.Select(c => c.Replace("USDT", "")))})"
-                : "0 ədəd (Heç bir coin seçilməyib)";
+            sb.AppendLine($"⏱ <b>Aktiv Rejim:</b> <code>{tfDisplay}</code>");
+            string coinText;
+            if (settings.Coins.Count == 0)
+            {
+                coinText = "0/16 (Heç bir coin seçilməyib)";
+            }
+            else
+            {
+                var cleanTickers = string.Join(", ", settings.Coins.Select(c => c.Replace("USDT", "")));
+                coinText = settings.Coins.Count <= 16 
+                    ? $"{settings.Coins.Count}/16 ({cleanTickers})"
+                    : $"{settings.Coins.Count} coin ({cleanTickers})";
+            }
             sb.AppendLine($"🪙 <b>Seçilmiş Coinlər:</b> {coinText}");
             sb.AppendLine($"🟡 <b>Açıq Mövqeləriniz:</b> {userOpenPositionsCount} ədəd (Maksimum limit: 5)");
             sb.AppendLine($"🔔 <b>Bildiriş Statusu:</b> {(settings.IsActive ? "Aktiv 🟢" : "Dayandırılıb 🔴")}");
