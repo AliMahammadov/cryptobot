@@ -391,6 +391,7 @@ namespace CryptoSense.Infrastructure.Telegram
             sb.AppendLine("ℹ️ <b>CryptoSense Sistem Statusu:</b>");
             sb.AppendLine("-----------------------------------");
             sb.AppendLine("🤖 <b>Skaner Vəziyyəti:</b> İşləyir 🟢 (24/7 Canlı Rejim)");
+            sb.AppendLine("📌 <b>Deploy Versiyası:</b> <code>v2.0 (Commit: f052a72)</code>");
             sb.AppendLine($"⏱ <b>Aktiv Timeframe:</b> <code>{(settings.Timeframe == "Hamısı" || settings.Timeframe == "Hamisi" ? "Bütün Əsas Zamanlar (15m, 1h, 4h)" : settings.Timeframe)}</code>");
             sb.AppendLine($"🪙 <b>Seçilmiş Coinlər:</b> {settings.Coins.Count}/10 ədəd");
             sb.AppendLine($"🟡 <b>Açıq Mövqeləriniz:</b> {userOpenPositionsCount} ədəd (Maksimum limit: 5)");

@@ -1404,7 +1404,7 @@ namespace CryptoSense.Infrastructure.Telegram
                 await ScanUserCoinsInstantlyAsync(userSettings, chatId, "Hamısı");
                 return;
             }
-            else if (text.Contains("Status") || text.Contains("Statusu") || text == "/status")
+            else if (text.Contains("Status") || text.Contains("Statusu") || text == "/status" || text == "/version")
             {
                 int openCount = 0;
                 try
