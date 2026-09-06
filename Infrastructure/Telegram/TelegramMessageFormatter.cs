@@ -388,14 +388,23 @@ namespace CryptoSense.Infrastructure.Telegram
             sb.AppendLine("ℹ️ <b>CryptoSense Sistem Statusu:</b>");
             sb.AppendLine("-----------------------------------");
             sb.AppendLine("🤖 <b>Skaner Vəziyyəti:</b> İşləyir 🟢 (24/7 Canlı Rejim)");
-            var commitHash = "9e75c26";
+            var commitHash = "1d817af";
             try
             {
-                var headFile = System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, ".git", "refs", "heads", "main");
-                if (System.IO.File.Exists(headFile))
+                var envSha = Environment.GetEnvironmentVariable("RAILWAY_GIT_COMMIT_SHA")
+                             ?? Environment.GetEnvironmentVariable("GIT_COMMIT_SHA");
+                if (!string.IsNullOrEmpty(envSha) && envSha.Length >= 7)
                 {
-                    var hash = System.IO.File.ReadAllText(headFile).Trim();
-                    if (hash.Length >= 7) commitHash = hash.Substring(0, 7);
+                    commitHash = envSha.Substring(0, 7);
+                }
+                else
+                {
+                    var headFile = System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, ".git", "refs", "heads", "main");
+                    if (System.IO.File.Exists(headFile))
+                    {
+                        var hash = System.IO.File.ReadAllText(headFile).Trim();
+                        if (hash.Length >= 7) commitHash = hash.Substring(0, 7);
+                    }
                 }
             }
             catch { }

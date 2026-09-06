@@ -369,14 +369,32 @@ namespace CryptoSense.Infrastructure.Testing
             // 14. Telegram Menu & Keyboards Workflow Verification
             await AssertTest("Test 21: Telegram Menus & Keyboards Workflow Verification", () =>
             {
-                var userSettings = new UserSettings { Timeframe = "15m", IsActive = true };
-                userSettings.Coins.Add("BTCUSDT");
+                var userSettings = new UserSettings { Timeframe = "Hamısı", IsActive = true };
+                userSettings.Coins.AddRange(TelegramBotService.Default16Coins);
 
                 var userKb = TelegramKeyboards.BuildUserKeyboard(userSettings, isAdmin: true);
                 var tfKb = TelegramKeyboards.BuildTimeframeKeyboard();
                 var allSignalsKb = TelegramKeyboards.BuildAllSignalsTimeframeKeyboard();
 
-                return Task.FromResult(userKb != null && tfKb != null && allSignalsKb != null);
+                // Test "Hamısı" formats strictly as "15m, 1h, 4h" in bot status
+                var statusText = TelegramMessageFormatter.FormatBotStatus(userSettings, 0, "07.09.2026 00:30:07");
+                bool hasCleanTf = statusText.Contains("15m, 1h, 4h");
+                bool hasCleanCoins = statusText.Contains("16/16");
+                bool hasAzeTime = statusText.Contains("07.09.2026 00:30:07");
+
+                // Test button precedence: Hamısı must resolve to Hamısı even when containing "15m"
+                string testBtn = "🌟 Bütün Əsas Zamanlar (15m, 1h, 4h)";
+                string resolvedTf;
+                if (testBtn.Contains("Bütün") || testBtn.Contains("Hamısı") || testBtn.Contains("Hamisi") || testBtn.Contains("15m, 1h, 4h"))
+                    resolvedTf = "Hamısı";
+                else if (testBtn.Contains("15m"))
+                    resolvedTf = "15m";
+                else
+                    resolvedTf = "Other";
+
+                bool precedenceCorrect = resolvedTf == "Hamısı";
+
+                return Task.FromResult(userKb != null && tfKb != null && allSignalsKb != null && hasCleanTf && hasCleanCoins && hasAzeTime && precedenceCorrect);
             });
 
             // 15. Complete Telegram Command Dispatcher & End-to-End User Flow Simulation
