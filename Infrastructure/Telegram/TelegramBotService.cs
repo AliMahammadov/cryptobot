@@ -33,9 +33,10 @@ namespace CryptoSense.Infrastructure.Telegram
         private static readonly ConcurrentDictionary<string, int> _signalUserNumberMap = new();
         private static readonly ConcurrentDictionary<long, DateTime> _processedMessageIds = new();
         private static readonly ConcurrentDictionary<string, (string Text, DateTime Time)> _lastUserAction = new();
-        private static readonly string DataDirectory = Directory.Exists("/app/data")
-            ? "/app/data"
-            : Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "data");
+        private static readonly ConcurrentDictionary<string, bool> _loggedOutChats = new();
+        private static readonly string DataDirectory = !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("RAILWAY_VOLUME_MOUNT_PATH")) && Directory.Exists(Environment.GetEnvironmentVariable("RAILWAY_VOLUME_MOUNT_PATH"))
+            ? Environment.GetEnvironmentVariable("RAILWAY_VOLUME_MOUNT_PATH")!
+            : (Directory.Exists("/app/data") ? "/app/data" : Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "data"));
         private static readonly string SettingsFilePath = Path.Combine(DataDirectory, "user_preferences.json");
         private static readonly string SignalMapFilePath = Path.Combine(DataDirectory, "signal_user_numbers.json");
 
@@ -833,8 +834,9 @@ namespace CryptoSense.Infrastructure.Telegram
             // =========================================================================
             // 0. LOGOUT COMMAND (ALWAYS CLEARS DATABASE & SESSION)
             // =========================================================================
-            if (text == "/logout" || text == "/cixis" || text == "/exit")
+            if (text == "/logout" || text.Equals("/cixis", StringComparison.OrdinalIgnoreCase) || text.Equals("/exit", StringComparison.OrdinalIgnoreCase) || text.Equals("Çıxış", StringComparison.OrdinalIgnoreCase) || text.Equals("Cixis", StringComparison.OrdinalIgnoreCase) || text.Equals("logout", StringComparison.OrdinalIgnoreCase))
             {
+                _loggedOutChats[chatId] = true;
                 UserPreferences.TryRemove(chatId, out _);
                 _userStates.TryRemove(chatId, out _);
                 if (SuperAdminChatId == chatId) SuperAdminChatId = null;
@@ -842,9 +844,9 @@ namespace CryptoSense.Infrastructure.Telegram
                 await userManager.ClearChatBindingAsync(chatId, userId);
 
                 await SendMessageAsync(
-                    "👋 <b>Hesabdan çıxış edildi.</b>\n\n" +
-                    "Yenidən daxil olmaq üçün <b>İstifadəçi Adı</b> və <b>Parolunuzu</b> yazın:\n" +
-                    "<code>[İstifadəçiAdı] [Parol]</code>", 
+                    "👋 <b>Hesabınızdan çıxış edildi!</b>\n\n" +
+                    "Yenidən daxil olmaq üçün <b>İstifadəçi Adınızı</b> və <b>Parolunuzu</b> yazın:\n" +
+                    "💡 <b>Nümunə:</b> <code>Alibay 123456</code>", 
                     chatId, 
                     new { remove_keyboard = true });
                 return;
@@ -855,10 +857,10 @@ namespace CryptoSense.Infrastructure.Telegram
             // =========================================================================
             var currentUser = await userManager.GetUserByChatIdOrTelegramIdAsync(chatId, userId);
 
-            // 👑 AUTO-RECOGNIZE SUPER ADMIN ALI (NEVER PROMPT FOR LOGIN AGAIN)
-            if (currentUser == null && (userId == 1219998176 || (!string.IsNullOrEmpty(telegramUsername) && telegramUsername.Equals("Ali_Mahammadov", StringComparison.OrdinalIgnoreCase))))
+            // 👑 AUTO-RECOGNIZE SUPER ADMIN ALI (NEVER PROMPT FOR LOGIN AGAIN UNLESS EXPLICITLY LOGGED OUT)
+            if (currentUser == null && !_loggedOutChats.ContainsKey(chatId) && (userId == 1219998176 || (!string.IsNullOrEmpty(telegramUsername) && telegramUsername.Equals("Ali_Mahammadov", StringComparison.OrdinalIgnoreCase))))
             {
-                var (validAdmin, adminAcc) = await userManager.ValidateLoginAsync("Ali", "23031999Am", userId, chatId);
+                var (validAdmin, adminAcc) = await userManager.ValidateLoginAsync("Ali", "23031999Am", userId, chatId, telegramUsername);
                 if (validAdmin && adminAcc != null)
                 {
                     currentUser = adminAcc;
@@ -899,10 +901,11 @@ namespace CryptoSense.Infrastructure.Telegram
 
                 _ = DeleteMessageAsync(chatId, messageId);
 
-                var (isValid, user) = await userManager.ValidateLoginAsync(inputUser, inputPass, userId, chatId);
+                var (isValid, user) = await userManager.ValidateLoginAsync(inputUser, inputPass, userId, chatId, telegramUsername);
 
                 if (isValid && user != null)
                 {
+                    _loggedOutChats.TryRemove(chatId, out _);
                     currentUser = user;
                     _userStates.TryRemove(chatId, out _);
                     var settings = GetSettings(chatId);

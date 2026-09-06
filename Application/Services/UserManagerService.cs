@@ -58,23 +58,21 @@ namespace CryptoSense.Application.Services
             }
         }
 
-        public async Task<(bool Success, UserAccount? User)> ValidateLoginAsync(string username, string password, long? telegramUserId = null, string? chatId = null)
+        public async Task<(bool Success, UserAccount? User)> ValidateLoginAsync(string username, string password, long? telegramUserId = null, string? chatId = null, string? telegramUsername = null)
         {
             username = username.Trim();
             password = password.Trim();
 
             // 1. Direct SuperAdmin match
-            bool isAdminAttempt = (username.Equals("Ali", StringComparison.OrdinalIgnoreCase) ||
-                                   username.Equals("Admin", StringComparison.OrdinalIgnoreCase) ||
-                                   username.Equals("Ali Mahammadov", StringComparison.OrdinalIgnoreCase) ||
-                                   username.Equals("Ali_Mahammadov", StringComparison.OrdinalIgnoreCase)) &&
-                                  (password == "23031999Am" || password == "123456789!");
-
-            if (isAdminAttempt)
+            // 1. Super Admin shortcut or database lookup
+            if (username.Equals("Ali", StringComparison.OrdinalIgnoreCase))
             {
-                var adminUser = await _unitOfWork.Users.GetByUsernameAsync("Ali") ??
-                                await _unitOfWork.Users.GetByUsernameAsync("Ali Mahammadov");
+                if (password != "23031999Am")
+                {
+                    return (false, null);
+                }
 
+                var adminUser = await _unitOfWork.Users.GetByUsernameAsync("Ali");
                 if (adminUser == null)
                 {
                     adminUser = new UserAccount
@@ -106,6 +104,7 @@ namespace CryptoSense.Application.Services
                         if (u.Id != adminUser.Id && u.TelegramChatId == chatId)
                         {
                             u.TelegramChatId = "";
+                            u.TelegramUserId = null;
                             await _unitOfWork.Users.UpdateAsync(u);
                         }
                     }
@@ -114,6 +113,7 @@ namespace CryptoSense.Application.Services
                 adminUser.LastLoginAt = DateTime.UtcNow;
                 if (!string.IsNullOrEmpty(chatId)) adminUser.TelegramChatId = chatId;
                 if (telegramUserId.HasValue && telegramUserId.Value > 0) adminUser.TelegramUserId = telegramUserId.Value;
+                if (!string.IsNullOrEmpty(telegramUsername)) adminUser.TelegramUsername = telegramUsername;
 
                 await _unitOfWork.Users.UpdateAsync(adminUser);
                 await _unitOfWork.SaveChangesAsync();
@@ -150,6 +150,7 @@ namespace CryptoSense.Application.Services
                         if (u.Id != user.Id && u.TelegramChatId == chatId)
                         {
                             u.TelegramChatId = "";
+                            u.TelegramUserId = null;
                             await _unitOfWork.Users.UpdateAsync(u);
                         }
                     }
@@ -158,6 +159,7 @@ namespace CryptoSense.Application.Services
                 user.LastLoginAt = DateTime.UtcNow;
                 if (!string.IsNullOrEmpty(chatId)) user.TelegramChatId = chatId;
                 if (telegramUserId.HasValue && telegramUserId.Value > 0) user.TelegramUserId = telegramUserId.Value;
+                if (!string.IsNullOrEmpty(telegramUsername)) user.TelegramUsername = telegramUsername;
 
                 await _unitOfWork.Users.UpdateAsync(user);
                 await _unitOfWork.SaveChangesAsync();
@@ -177,9 +179,19 @@ namespace CryptoSense.Application.Services
             var users = await _unitOfWork.Users.GetAllActiveUsersAsync();
             foreach (var u in users)
             {
+                bool modified = false;
                 if (!string.IsNullOrEmpty(u.TelegramChatId) && u.TelegramChatId == chatId)
                 {
                     u.TelegramChatId = "";
+                    modified = true;
+                }
+                if (telegramUserId.HasValue && telegramUserId.Value > 0 && u.TelegramUserId == telegramUserId.Value)
+                {
+                    u.TelegramUserId = null;
+                    modified = true;
+                }
+                if (modified)
+                {
                     await _unitOfWork.Users.UpdateAsync(u);
                 }
             }

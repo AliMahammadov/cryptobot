@@ -304,7 +304,9 @@ namespace CryptoSense.Infrastructure.Telegram
             int index = 1;
             foreach (var u in users)
             {
-                var tgName = !string.IsNullOrEmpty(u.TelegramUsername) ? $"@{u.TelegramUsername}" : (u.TelegramChatId != null ? $"ID: {u.TelegramChatId}" : "Daxil olmayıb");
+                var tgName = !string.IsNullOrWhiteSpace(u.TelegramUsername) 
+                    ? $"@{u.TelegramUsername}" 
+                    : (!string.IsNullOrWhiteSpace(u.TelegramChatId) ? $"ID: {u.TelegramChatId}" : "⏳ Hələ daxil olmayıb");
                 sb.AppendLine($"{index}. <b>{u.Username}</b> | Rol: <code>{u.Role}</code> | Status: Aktiv 🟢");
                 sb.AppendLine($"   Telegram: <code>{tgName}</code>");
                 index++;

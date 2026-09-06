@@ -60,7 +60,10 @@ namespace CryptoSense.Infrastructure.Persistence.Repositories
             // Full clean slate reset of legacy signals and counters on fresh deploy
             try
             {
-                var flagDir = Directory.Exists("/app/data") ? "/app/data" : Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "data");
+                var volumeEnv = Environment.GetEnvironmentVariable("RAILWAY_VOLUME_MOUNT_PATH");
+                var flagDir = !string.IsNullOrEmpty(volumeEnv) && Directory.Exists(volumeEnv)
+                    ? volumeEnv
+                    : (Directory.Exists("/app/data") ? "/app/data" : Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "data"));
                 if (!Directory.Exists(flagDir)) Directory.CreateDirectory(flagDir);
                 var flagFile = Path.Combine(flagDir, "v5_clean_reset.flag");
 

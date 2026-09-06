@@ -34,9 +34,10 @@ builder.WebHost.UseUrls($"http://0.0.0.0:{port}");
 builder.Services.Configure<AppConfig>(builder.Configuration.GetSection("AppConfig"));
 
 // 2. Persistence Layer (SQLite with EF Core)
-var dataDir = Directory.Exists("/app/data")
-    ? "/app/data"
-    : Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "data");
+var volumeEnv = Environment.GetEnvironmentVariable("RAILWAY_VOLUME_MOUNT_PATH");
+var dataDir = !string.IsNullOrEmpty(volumeEnv) && Directory.Exists(volumeEnv)
+    ? volumeEnv
+    : (Directory.Exists("/app/data") ? "/app/data" : Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "data"));
 
 if (!Directory.Exists(dataDir))
 {
