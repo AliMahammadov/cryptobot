@@ -513,66 +513,32 @@ namespace CryptoSense.Worker
 
             var activeTimeframes = new HashSet<string>();
             var subscribedCoins = new HashSet<string>();
-            bool anyUserWantsAllCoins = false;
             bool anyUserActive = false;
 
             foreach (var s in TelegramBotService.UserPreferences.Values)
             {
-                if (s.IsActive)
+                if (s.IsActive && s.Coins.Count > 0)
                 {
                     anyUserActive = true;
                     if (s.Timeframe == "Hamısı" || s.Timeframe == "Hamisi")
                     {
-                        // Prioritet 3: Default olaraq 15m, 1h və 4h-ə fokuslanılır; 1m və 3m deaktiv edilir
                         activeTimeframes.Add("1h");
                         activeTimeframes.Add("4h");
                         activeTimeframes.Add("15m");
-                        activeTimeframes.Add("5m");
                     }
-                    else if (s.Timeframe != "1m")
+                    else if (!string.IsNullOrWhiteSpace(s.Timeframe))
                     {
                         activeTimeframes.Add(s.Timeframe);
                     }
-                    else
-                    {
-                        // If user previously had 1m, gracefully migrate to 15m/1h
-                        activeTimeframes.Add("15m");
-                    }
 
-                    if (s.Coins.Count == 0)
-                    {
-                        anyUserWantsAllCoins = true;
-                    }
-                    else
-                    {
-                        foreach (var c in s.Coins) subscribedCoins.Add(c);
-                    }
+                    foreach (var c in s.Coins) subscribedCoins.Add(c);
                 }
             }
 
-            if (!anyUserActive)
+            if (!anyUserActive || subscribedCoins.Count == 0)
             {
-                var dbUsers = await unitOfWork.Users.GetAllActiveUsersAsync();
-                if (dbUsers.Any(u => u.IsActive))
-                {
-                    anyUserActive = true;
-                    anyUserWantsAllCoins = true;
-                    activeTimeframes.Add("1h");
-                    activeTimeframes.Add("15m");
-                    activeTimeframes.Add("5m");
-                }
-                else
-                {
-                    return;
-                }
-            }
-
-            if (anyUserWantsAllCoins || subscribedCoins.Count == 0)
-            {
-                var defaultCoins = _config.SelectedCoins != null && _config.SelectedCoins.Count > 0
-                    ? _config.SelectedCoins
-                    : new List<string> { "BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT", "DOGEUSDT", "SUIUSDT", "PEPEUSDT", "AVAXUSDT", "NOTUSDT" };
-                foreach (var c in defaultCoins) subscribedCoins.Add(c);
+                // No active user has chosen coins to trade. Do not scan empty list.
+                return;
             }
 
             if (activeTimeframes.Count == 0)
@@ -761,9 +727,19 @@ namespace CryptoSense.Worker
                 if (minutesSinceSignal >= 60 && minutesSinceHeartbeat >= 60)
                 {
                     s.LastHeartbeatSentUtc = nowUtc;
-                    string noSignalReason = _coinActiveLocks.Count >= MaxGlobalOpenPositions
-                        ? "Maksimal açıq mövqe limitinə (5 ədəd) çatılıb"
-                        : "Bazar konsolidasiyadadır (ADX < 20 / Confluence < 75%)";
+                    string noSignalReason;
+                    if (s.Coins.Count == 0)
+                    {
+                        noSignalReason = "heç bir coin seçilməyib";
+                    }
+                    else if (_coinActiveLocks.Count >= MaxGlobalOpenPositions)
+                    {
+                        noSignalReason = "limit dolu (maksimum 5 açıq mövqe)";
+                    }
+                    else
+                    {
+                        noSignalReason = "ADX < 20 və ya Confluence < 78% (A+ tələbi ödənmir)";
+                    }
 
                     var heartbeatMsg = TelegramMessageFormatter.FormatNoSignalReason(noSignalReason, nextCheckMinutes: 30);
                     await _telegramService.SendMessageAsync(heartbeatMsg, chatId);

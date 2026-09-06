@@ -276,7 +276,7 @@ namespace CryptoSense.Infrastructure.Telegram
             }
             else
             {
-                sb.AppendLine("🌐 <b>Əhatə:</b> <code>Bütün Zamanlar və Bütün Coinlər</code>");
+                sb.AppendLine("🌐 <b>Əhatə:</b> <code>Bütün Əsas Zamanlar (15m, 1h, 4h)</code>");
             }
             sb.AppendLine("-----------------------------------");
             sb.AppendLine($"📌 <b>Ümumi Analizlər:</b> {stats.TotalSignals} ədəd");
@@ -326,7 +326,7 @@ namespace CryptoSense.Infrastructure.Telegram
             if (tradedCoins.Count == 0)
             {
                 sb.AppendLine("ℹ️ <b>Tamamlanmış Əməliyyatlar:</b> 0 ədəd");
-                sb.AppendLine("<i>Hal-hazırda sistem 50 coin üzrə canlı skan edir. Şamlar bağlandıqca və TP/SL hədəfləri vurduqca qələbə faizləri burada canlı toplanacaq.</i>");
+                sb.AppendLine($"<i>Hal-hazırda sistem seçilmiş {monitoredCoins.Count} coin üzrə canlı skan edir. Şamlar bağlandıqca və TP/SL hədəfləri vurduqca qələbə faizləri burada canlı toplanacaq.</i>");
                 sb.AppendLine();
                 if (totalActive > 0)
                 {
@@ -357,12 +357,9 @@ namespace CryptoSense.Infrastructure.Telegram
 
                     var sortedTfs = coin.TimeframeStats.OrderBy(t => t.Key switch
                     {
-                        "1m" => 1,
-                        "3m" => 2,
-                        "5m" => 3,
-                        "15m" => 4,
-                        "1h" => 5,
-                        "4h" => 6,
+                        "15m" => 1,
+                        "1h" => 2,
+                        "4h" => 3,
                         _ => 10
                     });
 
@@ -391,12 +388,16 @@ namespace CryptoSense.Infrastructure.Telegram
             sb.AppendLine("ℹ️ <b>CryptoSense Sistem Statusu:</b>");
             sb.AppendLine("-----------------------------------");
             sb.AppendLine("🤖 <b>Skaner Vəziyyəti:</b> İşləyir 🟢 (24/7 Canlı Rejim)");
-            sb.AppendLine("📌 <b>Deploy Versiyası:</b> <code>v2.0 (Commit: f052a72)</code>");
-            sb.AppendLine($"⏱ <b>Aktiv Timeframe:</b> <code>{(settings.Timeframe == "Hamısı" || settings.Timeframe == "Hamisi" ? "Bütün Əsas Zamanlar (15m, 1h, 4h)" : settings.Timeframe)}</code>");
-            sb.AppendLine($"🪙 <b>Seçilmiş Coinlər:</b> {settings.Coins.Count}/10 ədəd");
+            sb.AppendLine("📌 <b>Deploy Versiyası:</b> <code>v2.0 (Commit: 957edd6)</code>");
+            var tfDisplay = (settings.Timeframe == "Hamısı" || settings.Timeframe == "Hamisi") ? "15m, 1h, 4h" : settings.Timeframe;
+            sb.AppendLine($"⏱ <b>Aktiv Timeframe:</b> <code>{tfDisplay}</code>");
+            var coinText = settings.Coins.Count > 0 
+                ? $"{settings.Coins.Count} ədəd ({string.Join(", ", settings.Coins.Select(c => c.Replace("USDT", "")))})"
+                : "0 ədəd (Heç bir coin seçilməyib)";
+            sb.AppendLine($"🪙 <b>Seçilmiş Coinlər:</b> {coinText}");
             sb.AppendLine($"🟡 <b>Açıq Mövqeləriniz:</b> {userOpenPositionsCount} ədəd (Maksimum limit: 5)");
             sb.AppendLine($"🔔 <b>Bildiriş Statusu:</b> {(settings.IsActive ? "Aktiv 🟢" : "Dayandırılıb 🔴")}");
-            sb.AppendLine($"🕒 <b>Son Siqnal Vaxtı:</b> {(string.IsNullOrEmpty(lastSignalTime) ? "Hələ siqnal göndərilməyib" : lastSignalTime)}");
+            sb.AppendLine($"🕒 <b>Son Siqnal Vaxtı:</b> {(string.IsNullOrEmpty(lastSignalTime) ? "Hələ yoxdur" : lastSignalTime)}");
             sb.AppendLine("-----------------------------------");
             return sb.ToString();
         }
@@ -404,11 +405,9 @@ namespace CryptoSense.Infrastructure.Telegram
         public static string FormatNoSignalReason(string reason, int nextCheckMinutes = 30)
         {
             var sb = new StringBuilder();
-            sb.AppendLine("ℹ️ <b>Bazar Vəziyyəti (A+ Siqnal İzləməsi):</b>");
-            sb.AppendLine();
-            sb.AppendLine("⚪ <i>Hazırda A+ keyfiyyətli yeni giriş siqnalı formalaşmayıb.</i>");
-            sb.AppendLine($"📌 <b>Səbəb:</b> <code>{reason}</code>");
-            sb.AppendLine($"⏱ <b>Növbəti yoxlama:</b> {nextCheckMinutes} dəqiqə sonra.");
+            sb.AppendLine("ℹ️ <b>A+ siqnal yoxdur</b>");
+            sb.AppendLine($"📌 <b>Səbəb:</b> {reason}");
+            sb.AppendLine($"⏱ <b>Növbəti yoxlama:</b> {nextCheckMinutes} dəq");
             return sb.ToString();
         }
 

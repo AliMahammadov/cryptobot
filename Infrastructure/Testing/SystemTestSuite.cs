@@ -549,7 +549,7 @@ namespace CryptoSense.Infrastructure.Testing
                 };
 
                 var formattedGlobal = TelegramMessageFormatter.FormatPerformanceStats(stats, "Hamısı");
-                bool globalValid = formattedGlobal.Contains("Bütün Zamanlar və Bütün Coinlər") &&
+                bool globalValid = (formattedGlobal.Contains("Bütün Zamanlar və Bütün Coinlər") || formattedGlobal.Contains("Bütün Əsas Zamanlar (15m, 1h, 4h)")) &&
                                    formattedGlobal.Contains("90.0%") &&
                                    formattedGlobal.Contains("+38.50%");
 
