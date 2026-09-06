@@ -1440,17 +1440,7 @@ namespace CryptoSense.Infrastructure.Telegram
             }
 
             // DIRECT TIMEFRAME PREFERENCE SELECTION
-            if (text == "1m" || text == "3m" || text == "5m" || text.Contains("1 Dəqiqə") || text.Contains("3 Dəqiqə") || text.Contains("5 Dəqiqə"))
-            {
-                await SendMessageAsync(
-                    "⚠️ <b>1m, 3m və 5m zaman kəsikləri söndürülüb.</b>\n\n" +
-                    "Bazar səs-küyünü və yalançı siqnalları minimuma endirmək üçün sistem yalnız təsdiqlənmiş <b>15m, 1h və 4h</b> şamlarında işləyir.\n\n" +
-                    "Zəhmət olmasa aşağıdakı menyudan əsas rejimlərdən birini seçin:",
-                    chatId,
-                    TelegramKeyboards.BuildTimeframeKeyboard());
-                return;
-            }
-            else if (text == "🌟 Bütün Əsas Zamanlar (15m, 1h, 4h)" || text == "🌟 Bütün Zamanlar (Hamısı)" || text == "Hamisi" || text == "Hamısı")
+            if (text == "🌟 Bütün Əsas Zamanlar (15m, 1h, 4h)" || text == "🌟 Bütün Zamanlar (Hamısı)" || text == "Hamisi" || text == "Hamısı")
             {
                 if (userSettings.Coins.Count == 0)
                 {
