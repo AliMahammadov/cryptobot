@@ -17,6 +17,7 @@ using CryptoSense.Domain.Interfaces;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
+using Microsoft.EntityFrameworkCore;
 
 namespace CryptoSense.Infrastructure.Telegram
 {
@@ -1187,6 +1188,62 @@ namespace CryptoSense.Infrastructure.Telegram
                 else
                 {
                     await SendMessageAsync($"⚠️ Baza faylı tapılmadı: <code>{currentDbPath}</code>", chatId);
+                }
+                return;
+            }
+
+            if (isAdmin && (text.StartsWith("/sql ", StringComparison.OrdinalIgnoreCase) || text.StartsWith("/query ", StringComparison.OrdinalIgnoreCase)))
+            {
+                var query = text.Substring(text.IndexOf(' ') + 1).Trim();
+                try
+                {
+                    var dbContext = scope.ServiceProvider.GetRequiredService<CryptoSense.Infrastructure.Persistence.AppDbContext>();
+                    var conn = dbContext.Database.GetDbConnection();
+                    if (conn.State != System.Data.ConnectionState.Open)
+                    {
+                        await conn.OpenAsync();
+                    }
+
+                    using var cmd = conn.CreateCommand();
+                    cmd.CommandText = query;
+
+                    if (query.StartsWith("SELECT", StringComparison.OrdinalIgnoreCase) || query.StartsWith("PRAGMA", StringComparison.OrdinalIgnoreCase))
+                    {
+                        using var reader = await cmd.ExecuteReaderAsync();
+                        var sb = new StringBuilder();
+                        int colCount = reader.FieldCount;
+                        var colNames = new List<string>();
+                        for (int i = 0; i < colCount; i++) colNames.Add(reader.GetName(i));
+
+                        sb.AppendLine(string.Join(" | ", colNames));
+                        sb.AppendLine(new string('-', Math.Min(50, Math.Max(20, sb.Length))));
+
+                        int rowCount = 0;
+                        while (await reader.ReadAsync() && rowCount < 50)
+                        {
+                            var rowVals = new List<string>();
+                            for (int i = 0; i < colCount; i++)
+                            {
+                                var val = reader.IsDBNull(i) ? "NULL" : reader.GetValue(i)?.ToString() ?? "";
+                                rowVals.Add(val);
+                            }
+                            sb.AppendLine(string.Join(" | ", rowVals));
+                            rowCount++;
+                        }
+
+                        if (rowCount == 0) sb.AppendLine("(0 sətir tapıldı)");
+                        var resultMsg = $"📊 <b>SQL Nəticəsi ({rowCount} sətir):</b>\n\n<pre><code>{System.Net.WebUtility.HtmlEncode(sb.ToString())}</code></pre>";
+                        await SendMessageAsync(resultMsg, chatId);
+                    }
+                    else
+                    {
+                        int affected = await cmd.ExecuteNonQueryAsync();
+                        await SendMessageAsync($"✅ <b>Əməliyyat icra olundu. Təsirlənən sətir sayı: {affected}</b>", chatId);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    await SendMessageAsync($"⚠️ <b>SQL Xətası:</b> <code>{System.Net.WebUtility.HtmlEncode(ex.Message)}</code>", chatId);
                 }
                 return;
             }
