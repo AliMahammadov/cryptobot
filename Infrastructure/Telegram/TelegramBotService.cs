@@ -920,8 +920,8 @@ namespace CryptoSense.Infrastructure.Telegram
                                            $"🚀 <b>Kripto Signals Bot Xidməti AKTİVDİR 🟢</b>\n\n" +
                                            $"📖 <b>Sistemdən Necə İstifadə Etməli?</b>\n" +
                                            $"• <b>⭐ Mənim Coinlərim:</b> Yalnız seçdiyiniz coinlər üzrə istədiyiniz zaman kəsiyində ticarət aparın.\n" +
-                                           $"• <b>⚡ Bütün Siqnallar:</b> Standart institusional 16 coin üzrə canlı skan başladın.\n" +
-                                           $"• <b>⚙️ Coin Seçimi / 🗑 Sil:</b> Şəxsi ticarət siyahınızı (Standart 16 və ya fərdi əlavələr) tənzimləyin.\n" +
+                                           $"• <b>⚙️ Coin Seçimi:</b> Standart 16 coini seçin, yeni coin əlavə edin və ya siyahını tənzimləyin.\n" +
+                                           $"• <b>🗑 Coin Sil:</b> İzləmək istəmədiyiniz coinləri siyahıdan çıxarın.\n" +
                                            $"• <b>🧭 Bitcoin Kompası:</b> Bazarın ümumi trendini və qüvvəsini izləyin.\n" +
                                            $"• <b>📊 Statistika:</b> Şəxsi əməliyyat performansınızı görün.\n" +
                                            $"• <b>📈 Dərin Statistika:</b> Seçilmiş coinlərin şamlar üzrə dərin win-rate və əməliyyat nəticələrinə baxın.\n" +
@@ -942,8 +942,8 @@ namespace CryptoSense.Infrastructure.Telegram
                                             $"🚀 <b>Kripto Signals Bot Xidməti AKTİVDİR 🟢</b>\n\n" +
                                             $"📖 <b>Sistemdən Necə İstifadə Etməli?</b>\n" +
                                             $"• <b>⭐ Mənim Coinlərim:</b> Yalnız seçdiyiniz coinlər üzrə istədiyiniz zaman kəsiyində ticarət aparın.\n" +
-                                            $"• <b>⚡ Bütün Siqnallar:</b> Standart institusional 16 coin üzrə canlı skan başladın.\n" +
-                                            $"• <b>⚙️ Coin Seçimi / 🗑 Sil:</b> Şəxsi ticarət siyahınızı (Standart 16 və ya fərdi əlavələr) tənzimləyin.\n" +
+                                            $"• <b>⚙️ Coin Seçimi:</b> Standart 16 coini seçin, yeni coin əlavə edin və ya siyahını tənzimləyin.\n" +
+                                            $"• <b>🗑 Coin Sil:</b> İzləmək istəmədiyiniz coinləri siyahıdan çıxarın.\n" +
                                             $"• <b>🧭 Bitcoin Kompası:</b> Bazarın ümumi trendini və qüvvəsini izləyin.\n" +
                                             $"• <b>📊 Statistika:</b> Şəxsi əməliyyat performansınızı görün.\n" +
                                             $"• <b>🛑 Dayandır / 🧹 Sıfırla:</b> Bildirişləri dayandırın və ya bütün tarixi sıfırlayın.\n\n" +
@@ -1552,7 +1552,7 @@ namespace CryptoSense.Infrastructure.Telegram
                 var cleanList = string.Join(", ", Default16Coins.Select(c => c.Replace("USDT", "")));
                 var msg = $"✅ <b>Standart 16 institusional coin seçildi (16/16).</b>\n\n" +
                           $"🪙 <b>İzlənən Coinlər:</b>\n<code>{cleanList}</code>\n\n" +
-                          $"📌 İndi menyudan <b>⭐ Mənim Coinlərim</b> və ya <b>⚡ Bütün Siqnallar</b> ilə ticarətə başlaya bilərsiniz.";
+                          $"📌 İndi menyudan <b>⭐ Mənim Coinlərim</b> ilə ticarətə başlaya bilərsiniz.";
                 await SendMessageAsync(msg, chatId, TelegramKeyboards.BuildUserKeyboard(userSettings, isAdmin));
                 return;
             }
@@ -1606,11 +1606,9 @@ namespace CryptoSense.Infrastructure.Telegram
                                $"🔔 <b>Canlı Siqnallar:</b> <b>{(userSettings.IsActive ? "AKTİV 🟢" : "DAYANDIRILIB 🔴")}</b>\n\n" +
                                $"📌 <b>Əsas Funksiyalar:</b>\n" +
                                $"• <b>⭐ Mənim Coinlərim:</b> Yalnız seçdiyiniz coinləri izləyin və ticarətə başlayın.\n" +
-                               $"• <b>🧭 Bitcoin Kompası:</b> Canlı BTC trendi, RSI, EMA və Dominans (BTC.D) təhlili.\n" +
-                               $"• <b>⚡ Bütün Siqnallar:</b> Seçdiyiniz coinlər üzrə canlı A+ siqnalları axtarın.\n" +
-                               $"• <b>⚙️ Coin Seçimi:</b> Standart 16 coini seçin və ya yeni coin əlavə edin.\n" +
-                               $"• <b>➕ Öz coini əlavə et:</b> Binance Futures USDT cütlüyü əlavə edin.\n" +
+                               $"• <b>⚙️ Coin Seçimi:</b> Standart 16 coini seçin, yeni coin əlavə edin və ya siyahını tənzimləyin.\n" +
                                $"• <b>🗑 Coin Sil:</b> İzləmək istəmədiyiniz coinləri siyahıdan çıxarın.\n" +
+                               $"• <b>🧭 Bitcoin Kompası:</b> Canlı BTC trendi, RSI, EMA və Dominans (BTC.D) təhlili.\n" +
                                $"• <b>📊 Statistika:</b> Şəxsi əməliyyat performansınızı görün.\n" +
                                $"• <b>ℹ️ Bot Statusu:</b> Skanerin və bildirişlərinizin canlı vəziyyətinə baxın.\n" +
                                $"• <b>🧹 Siqnalları Sıfırla:</b> Şəxsi sayğacınızı və tarixçənizi təmizləyin.\n\n" +

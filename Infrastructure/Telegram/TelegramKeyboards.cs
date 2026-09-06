@@ -15,8 +15,7 @@ namespace CryptoSense.Infrastructure.Telegram
                     keyboard = new[]
                     {
                         new[] { new { text = "👑 Admin Paneli" }, new { text = "🧭 Bitcoin Kompası" } },
-                        new[] { new { text = "⭐ Mənim Coinlərim" }, new { text = "⚡ Bütün Siqnallar" } },
-                        new[] { new { text = "⚙️ Coin Seçimi" }, new { text = "➕ Öz coini əlavə et" } },
+                        new[] { new { text = "⭐ Mənim Coinlərim" }, new { text = "⚙️ Coin Seçimi" } },
                         new[] { new { text = "🗑 Coin Sil" }, new { text = "ℹ️ Bot Statusu" } },
                         new[] { new { text = "📊 Statistika" }, new { text = "📈 Dərin Statistika" } },
                         new[] { new { text = "📰 Bazar Xəbərləri" }, new { text = "🧹 Siqnalları Sıfırla" } },
@@ -32,8 +31,7 @@ namespace CryptoSense.Infrastructure.Telegram
                 keyboard = new[]
                 {
                     new[] { new { text = "⭐ Mənim Coinlərim" }, new { text = "🧭 Bitcoin Kompası" } },
-                    new[] { new { text = "⚡ Bütün Siqnallar" }, new { text = "⚙️ Coin Seçimi" } },
-                    new[] { new { text = "➕ Öz coini əlavə et" }, new { text = "🗑 Coin Sil" } },
+                    new[] { new { text = "⚙️ Coin Seçimi" }, new { text = "🗑 Coin Sil" } },
                     new[] { new { text = "📊 Statistika" }, new { text = "ℹ️ Bot Statusu" } },
                     new[] { new { text = "📰 Bazar Xəbərləri" }, new { text = "🧹 Siqnalları Sıfırla" } },
                     new[] { new { text = toggleBtn } }
