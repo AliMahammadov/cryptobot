@@ -10,6 +10,7 @@ namespace CryptoSense.Domain.Interfaces
         Task<UserAccount?> GetByUsernameAsync(string username);
         Task<UserAccount?> GetByChatIdOrTelegramUserIdAsync(string chatId, long? telegramUserId);
         Task<List<UserAccount>> GetAllActiveUsersAsync();
+        Task<List<UserAccount>> GetAllUsersAsync();
         Task AddAsync(UserAccount user);
         Task UpdateAsync(UserAccount user);
         Task DeleteAsync(UserAccount user);

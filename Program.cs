@@ -88,7 +88,7 @@ builder.Services.AddSingleton<ITelegramBotService>(sp =>
 });
 
 // If running in test, audit or maintenance mode, we don't start background daemons
-if (!args.Contains("--test") && !args.Contains("--audit") && !args.Contains("--clean-db") && !args.Contains("--reset-db"))
+if (!args.Contains("--test") && !args.Contains("--audit") && !args.Contains("--clean-db") && !args.Contains("--reset-db") && !args.Contains("--sql"))
 {
     builder.Services.AddHostedService(sp => (TelegramBotService)sp.GetRequiredService<ITelegramBotService>());
     builder.Services.AddHostedService<BackgroundMarketScanner>();
@@ -110,6 +110,30 @@ using (var scope = app.Services.CreateScope())
 {
     var unitOfWork = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
     unitOfWork.EnsureDatabaseCreated();
+
+    if (args.Contains("--sql"))
+    {
+        var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var conn = dbContext.Database.GetDbConnection();
+        if (conn.State != System.Data.ConnectionState.Open) await conn.OpenAsync();
+        using var cmd = conn.CreateCommand();
+        var sqlIdx = Array.IndexOf(args, "--sql");
+        var query = sqlIdx < args.Length - 1 ? args[sqlIdx + 1] : "SELECT Username, TelegramChatId, TelegramUserId FROM Users";
+        cmd.CommandText = query;
+        using var reader = await cmd.ExecuteReaderAsync();
+        var colCount = reader.FieldCount;
+        var colNames = new List<string>();
+        for (int i = 0; i < colCount; i++) colNames.Add(reader.GetName(i));
+        Console.WriteLine(string.Join(" | ", colNames));
+        Console.WriteLine(new string('-', 50));
+        while (await reader.ReadAsync())
+        {
+            var vals = new List<string>();
+            for (int i = 0; i < colCount; i++) vals.Add(reader.IsDBNull(i) ? "NULL" : reader.GetValue(i)?.ToString() ?? "");
+            Console.WriteLine(string.Join(" | ", vals));
+        }
+        return;
+    }
 
     if (args.Contains("--clean-db") || args.Contains("--reset-db"))
     {

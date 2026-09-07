@@ -54,6 +54,14 @@ namespace CryptoSense.Infrastructure.Persistence.Repositories
                 .ToListAsync();
         }
 
+        public async Task<List<UserAccount>> GetAllUsersAsync()
+        {
+            return await _context.Users
+                .OrderByDescending(u => u.Role == UserRole.Admin)
+                .ThenBy(u => u.Username)
+                .ToListAsync();
+        }
+
         public async Task AddAsync(UserAccount user)
         {
             await _context.Users.AddAsync(user);

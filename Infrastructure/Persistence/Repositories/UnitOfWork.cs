@@ -37,15 +37,16 @@ namespace CryptoSense.Infrastructure.Persistence.Repositories
             try { _context.Database.ExecuteSqlRaw("PRAGMA busy_timeout = 5000;"); } catch { }
             try { _context.Database.ExecuteSqlRaw("PRAGMA synchronous = NORMAL;"); } catch { }
 
-            // Safe auto-migration for newly added Partial Close columns if SQLite table already exists
+            // Safe auto-migration for newly added Partial Close columns and CloseReason
             try { _context.Database.ExecuteSqlRaw("ALTER TABLE Signals ADD COLUMN RealizedProfitPercent TEXT NOT NULL DEFAULT '0';"); } catch { }
             try { _context.Database.ExecuteSqlRaw("ALTER TABLE Signals ADD COLUMN RemainingPositionRatio TEXT NOT NULL DEFAULT '1.0';"); } catch { }
             try { _context.Database.ExecuteSqlRaw("ALTER TABLE Signals ADD COLUMN IsPartial1Closed INTEGER NOT NULL DEFAULT 0;"); } catch { }
             try { _context.Database.ExecuteSqlRaw("ALTER TABLE Signals ADD COLUMN IsPartial2Closed INTEGER NOT NULL DEFAULT 0;"); } catch { }
+            try { _context.Database.ExecuteSqlRaw("ALTER TABLE Signals ADD COLUMN CloseReason TEXT NULL;"); } catch { }
 
-            // Safe SuperAdmin initialization: Only add SuperAdmin if missing. NEVER delete or touch existing users!
-            bool adminExists = _context.Users.Any(u => u.Username == "Ali" || u.Role == UserRole.Admin);
-            if (!adminExists)
+            // Safe SuperAdmin initialization & validation: Always guarantee TelegramChatId and TelegramUserId are populated
+            var adminUser = _context.Users.FirstOrDefault(u => u.Username == "Ali" || u.Role == UserRole.Admin);
+            if (adminUser == null)
             {
                 var hash = BCrypt.Net.BCrypt.HashPassword("23031999Am");
                 _context.Users.Add(new UserAccount
@@ -55,31 +56,48 @@ namespace CryptoSense.Infrastructure.Persistence.Repositories
                     Role = UserRole.Admin,
                     TelegramUsername = "Ali_Mahammadov",
                     TelegramUserId = 1219998176,
+                    TelegramChatId = "1219998176",
                     IsActive = true,
                     CreatedAtUtc = System.DateTime.UtcNow,
                     LastLoginAt = System.DateTime.UtcNow
                 });
                 _context.SaveChanges();
             }
+            else
+            {
+                bool modified = false;
+                if (string.IsNullOrEmpty(adminUser.TelegramChatId))
+                {
+                    adminUser.TelegramChatId = "1219998176";
+                    modified = true;
+                }
+                if (!adminUser.TelegramUserId.HasValue || adminUser.TelegramUserId <= 0)
+                {
+                    adminUser.TelegramUserId = 1219998176;
+                    modified = true;
+                }
+                if (string.IsNullOrEmpty(adminUser.TelegramUsername))
+                {
+                    adminUser.TelegramUsername = "Ali_Mahammadov";
+                    modified = true;
+                }
+                if (modified)
+                {
+                    _context.SaveChanges();
+                }
+            }
 
-            // Full clean slate reset of legacy signals and counters on fresh deploy
+            // Ensure all passwords in Users table are encrypted with BCrypt (never plaintext)
             try
             {
-                var volumeEnv = Environment.GetEnvironmentVariable("RAILWAY_VOLUME_MOUNT_PATH");
-                var flagDir = !string.IsNullOrEmpty(volumeEnv) && Directory.Exists(volumeEnv)
-                    ? volumeEnv
-                    : (Directory.Exists("/app/data") ? "/app/data" : Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "data"));
-                if (!Directory.Exists(flagDir)) Directory.CreateDirectory(flagDir);
-                var flagFile = Path.Combine(flagDir, "v5_clean_reset.flag");
-
-                if (!File.Exists(flagFile))
+                var unhashedUsers = _context.Users.Where(u => !u.PasswordHash.StartsWith("$2")).ToList();
+                if (unhashedUsers.Count > 0)
                 {
-                    _context.SignalIndicatorSnapshots.RemoveRange(_context.SignalIndicatorSnapshots);
-                    _context.Signals.RemoveRange(_context.Signals);
+                    foreach (var u in unhashedUsers)
+                    {
+                        u.PasswordHash = BCrypt.Net.BCrypt.HashPassword(u.PasswordHash);
+                    }
                     _context.SaveChanges();
-                    Telegram.TelegramBotService.ResetAllAlertCounters();
-                    Application.Services.SignalEngine.ResetSignalCounter();
-                    File.WriteAllText(flagFile, $"Clean reset at {DateTime.UtcNow:O}");
                 }
             }
             catch { }
@@ -102,6 +120,7 @@ namespace CryptoSense.Infrastructure.Persistence.Repositories
                 Role = UserRole.Admin,
                 TelegramUsername = "Ali_Mahammadov",
                 TelegramUserId = 1219998176,
+                TelegramChatId = "1219998176",
                 IsActive = true,
                 CreatedAtUtc = System.DateTime.UtcNow,
                 LastLoginAt = System.DateTime.UtcNow

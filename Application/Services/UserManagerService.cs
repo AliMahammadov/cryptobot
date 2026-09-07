@@ -43,6 +43,7 @@ namespace CryptoSense.Application.Services
                             Role = UserRole.Admin,
                             TelegramUsername = "Ali_Mahammadov",
                             TelegramUserId = 1219998176,
+                            TelegramChatId = "1219998176",
                             IsActive = true,
                             CreatedAtUtc = DateTime.UtcNow,
                             LastLoginAt = DateTime.UtcNow
@@ -95,25 +96,33 @@ namespace CryptoSense.Application.Services
                     adminUser.PasswordHash = BCrypt.Net.BCrypt.HashPassword("23031999Am");
                 }
 
-                // Unbind any other user previously bound to this specific Telegram chat
+                adminUser.LastLoginAt = DateTime.UtcNow;
                 if (!string.IsNullOrEmpty(chatId))
                 {
-                    var existingUsers = await _unitOfWork.Users.GetAllActiveUsersAsync();
-                    foreach (var u in existingUsers)
-                    {
-                        if (u.Id != adminUser.Id && u.TelegramChatId == chatId)
-                        {
-                            u.TelegramChatId = "";
-                            u.TelegramUserId = null;
-                            await _unitOfWork.Users.UpdateAsync(u);
-                        }
-                    }
+                    adminUser.TelegramChatId = chatId;
+                }
+                else if (string.IsNullOrEmpty(adminUser.TelegramChatId))
+                {
+                    adminUser.TelegramChatId = "1219998176";
                 }
 
-                adminUser.LastLoginAt = DateTime.UtcNow;
-                if (!string.IsNullOrEmpty(chatId)) adminUser.TelegramChatId = chatId;
-                if (telegramUserId.HasValue && telegramUserId.Value > 0) adminUser.TelegramUserId = telegramUserId.Value;
-                if (!string.IsNullOrEmpty(telegramUsername)) adminUser.TelegramUsername = telegramUsername;
+                if (telegramUserId.HasValue && telegramUserId.Value > 0)
+                {
+                    adminUser.TelegramUserId = telegramUserId.Value;
+                }
+                else if (!adminUser.TelegramUserId.HasValue || adminUser.TelegramUserId <= 0)
+                {
+                    adminUser.TelegramUserId = 1219998176;
+                }
+
+                if (!string.IsNullOrEmpty(telegramUsername))
+                {
+                    adminUser.TelegramUsername = telegramUsername;
+                }
+                else if (string.IsNullOrEmpty(adminUser.TelegramUsername))
+                {
+                    adminUser.TelegramUsername = "Ali_Mahammadov";
+                }
 
                 await _unitOfWork.Users.UpdateAsync(adminUser);
                 await _unitOfWork.SaveChangesAsync();
@@ -134,28 +143,23 @@ namespace CryptoSense.Application.Services
                 {
                     valid = true;
                 }
+                else if (user.PasswordHash == password)
+                {
+                    user.PasswordHash = BCrypt.Net.BCrypt.HashPassword(password);
+                    valid = true;
+                }
             }
             catch
             {
+                if (user.PasswordHash == password)
+                {
+                    user.PasswordHash = BCrypt.Net.BCrypt.HashPassword(password);
+                    valid = true;
+                }
             }
 
             if (valid)
             {
-                // Unbind any other user previously bound to this specific Telegram chat
-                if (!string.IsNullOrEmpty(chatId))
-                {
-                    var existingUsers = await _unitOfWork.Users.GetAllActiveUsersAsync();
-                    foreach (var u in existingUsers)
-                    {
-                        if (u.Id != user.Id && u.TelegramChatId == chatId)
-                        {
-                            u.TelegramChatId = "";
-                            u.TelegramUserId = null;
-                            await _unitOfWork.Users.UpdateAsync(u);
-                        }
-                    }
-                }
-
                 user.LastLoginAt = DateTime.UtcNow;
                 if (!string.IsNullOrEmpty(chatId)) user.TelegramChatId = chatId;
                 if (telegramUserId.HasValue && telegramUserId.Value > 0) user.TelegramUserId = telegramUserId.Value;
@@ -176,26 +180,14 @@ namespace CryptoSense.Application.Services
 
         public async Task ClearChatBindingAsync(string chatId, long? telegramUserId)
         {
-            var users = await _unitOfWork.Users.GetAllActiveUsersAsync();
-            foreach (var u in users)
+            var user = await _unitOfWork.Users.GetByChatIdOrTelegramUserIdAsync(chatId, telegramUserId);
+            if (user != null)
             {
-                bool modified = false;
-                if (!string.IsNullOrEmpty(u.TelegramChatId) && u.TelegramChatId == chatId)
-                {
-                    u.TelegramChatId = "";
-                    modified = true;
-                }
-                if (telegramUserId.HasValue && telegramUserId.Value > 0 && u.TelegramUserId == telegramUserId.Value)
-                {
-                    u.TelegramUserId = null;
-                    modified = true;
-                }
-                if (modified)
-                {
-                    await _unitOfWork.Users.UpdateAsync(u);
-                }
+                user.TelegramChatId = "";
+                user.TelegramUserId = null;
+                await _unitOfWork.Users.UpdateAsync(user);
+                await _unitOfWork.SaveChangesAsync();
             }
-            await _unitOfWork.SaveChangesAsync();
         }
 
         public async Task<bool> CreateUserAsync(string username, string password, UserRole role = UserRole.User, int? adminUserId = null)
@@ -275,7 +267,7 @@ namespace CryptoSense.Application.Services
 
         public async Task<List<UserAccount>> GetAllUsersAsync()
         {
-            return await _unitOfWork.Users.GetAllActiveUsersAsync();
+            return await _unitOfWork.Users.GetAllUsersAsync();
         }
 
         public void PurgeAndResetDatabase()

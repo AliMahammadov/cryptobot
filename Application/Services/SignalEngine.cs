@@ -304,8 +304,16 @@ namespace CryptoSense.Application.Services
             // F. Macro & Bitcoin Compass Alignment
             bool isAltcoin = symbol != "BTCUSDT";
             bool highBtcDominance = macroOverview.BtcDominance >= 58.0m;
+            bool btcIsBullish = btcCompass.BullishScore >= 50 || 
+                                btcCompass.Trend.Contains("BULL", StringComparison.OrdinalIgnoreCase) || 
+                                btcCompass.Trend.Contains("GÜCLÜ", StringComparison.OrdinalIgnoreCase);
+
             bool btcConfirmsLong = isAltcoin ? (btcCompass.BullishScore >= 45 && !highBtcDominance) : (btcCompass.BullishScore >= 45);
-            bool btcConfirmsShort = isAltcoin ? (btcCompass.BullishScore <= 55 || highBtcDominance) : (btcCompass.BullishScore <= 55);
+            
+            // 🚫 BTC Kompası BULLISH ikən altcoin SHORT-u QƏTİ BLOKLA!
+            bool btcConfirmsShort = isAltcoin 
+                ? (!btcIsBullish && (btcCompass.BullishScore <= 45 || highBtcDominance)) 
+                : (btcCompass.BullishScore <= 55);
 
             // Market Regime & Chop Filter (Minimum ADX required for ANY timeframe to avoid dying in sideways chop)
             decimal minAdxRequired = timeframe switch
@@ -329,9 +337,9 @@ namespace CryptoSense.Application.Services
                                        (closedCandle.High > 0 && closedCandle.Low > 0 && ((closedCandle.High - closedCandle.Low) / closedCandle.Low) >= 0.075m) ||
                                        (indicators.VolumeSurgeRatio >= 4.0m);
 
-            // Prioritet 3: 1m və 3m yalnız çox yüksək confluence (>=90%) və güclü həcmlə açılır; 15m/1h/4h 75%
-            decimal minLongScore = (timeframe == "1m" || timeframe == "3m") ? 90m : (timeframe == "5m" ? 80m : 75m);
-            decimal maxShortScore = (timeframe == "1m" || timeframe == "3m") ? 10m : (timeframe == "5m" ? 20m : 25m);
+            // Confluence tələbi: Confluence < 78% siqnal YASAQ! (15m, 1h, 4h min 78%, 5m 80%, 1m/3m 90%)
+            decimal minLongScore = (timeframe == "1m" || timeframe == "3m") ? 90m : (timeframe == "5m" ? 80m : 78m);
+            decimal maxShortScore = (timeframe == "1m" || timeframe == "3m") ? 10m : (timeframe == "5m" ? 20m : 22m);
 
             if (isExtremeVolatility)
             {
@@ -379,43 +387,60 @@ namespace CryptoSense.Application.Services
                 confidence = 50;
                 if (!hasValidMarketRegime) reasons.Add($"Rejim Filtri: ADX ({indicators.Adx:F1}) < {minAdxRequired:F1} (Bazar zəif/yan konsolidasiyadadır)");
                 if (indicators.SuperTrendVote != IndicatorVote.Bullish && isUptrend) reasons.Add("SuperTrend təsdiqi yoxdur (Trend ziddiyyətlidir)");
+                if (isAltcoin && btcIsBullish && direction == SignalDirection.Sell) reasons.Add("BTC Kompası Bullish olduğu üçün altcoin SHORT-u bloklandı");
             }
 
             decimal directionalConfluence = direction == SignalDirection.Sell 
                 ? Math.Round(100m - indicators.ConfluenceScore, 1) 
                 : Math.Round(indicators.ConfluenceScore, 1);
 
-            // Dinamik Həqiqi Volatillik və Riskin Təyini (Mikro səs-küyün Stop-Loss-u vurmasının qarşısını almaq üçün bufer)
+            // Confluence < 78% siqnal YASAQ (#3 XRP 76.7% kimi hallar üçün qəti qapı)
+            if (directionalConfluence < 78.0m)
+            {
+                determinedType = "GÖZLƏMƏ ⚪";
+                confidence = 50;
+                reasons.Add($"Confluence Filtri: {directionalConfluence:F1}% < 78.0% (Siqnal üçün minimal 78% tələbi ödənmir)");
+            }
+
+            // Dinamik Həqiqi Volatillik və Riskin Təyini (15m-də SL eni max ~0.8–1.2% ATR cap)
             decimal minTfMultiplier = timeframe switch
             {
                 "1m" => 0.012m,
                 "3m" => 0.015m,
                 "5m" => 0.018m,
-                "15m" => 0.024m,
-                "1h" => 0.035m,
-                "4h" => 0.050m,
-                _ => 0.018m
+                "15m" => 0.008m, // 15m minimal risk 0.8%
+                "1h" => 0.025m,
+                "4h" => 0.040m,
+                _ => 0.008m
             };
 
             decimal atr = indicators.Atr > 0 ? indicators.Atr : (currentPrice * minTfMultiplier);
             decimal minRisk = currentPrice * minTfMultiplier;
-            decimal dynamicAtrRisk = atr * 1.5m;
+            decimal dynamicAtrRisk = atr * 1.2m;
             decimal calculatedRisk = Math.Max(dynamicAtrRisk, minRisk);
 
-            // Prioritet 1: Genişləndirilmiş Time-Expiry Müddətləri
+            // 15m SL cap: SL eni max ~0.8–1.2%
+            if (timeframe == "15m")
+            {
+                decimal maxSlRisk15m = currentPrice * 0.012m; // Max 1.2%
+                if (calculatedRisk > maxSlRisk15m) calculatedRisk = maxSlRisk15m;
+            }
+
+            // 15m expiry: TP1 vurulmayıbsa max 90 dəq (6 şam), 180 dəq QADAĞA!
             int durationMinutes = timeframe switch
             {
                 "1m" => 30,
-                "3m" => 60,   // 60 dəqiqə (minimum 45-60 dəqiqə tələbi)
-                "5m" => 75,   // 75 dəqiqə (minimum 60-75 dəqiqə tələbi)
-                "15m" => 180, // 3 saat (minimum 2.5-3 saat tələbi)
+                "3m" => 60,
+                "5m" => 75,
+                "15m" => 90,  // Max 90 dəq (6 şam). 180 dəqiqə QƏTİ QADAĞANDIR!
                 "1h" => 480,  // 8 saat
                 "4h" => 1440, // 24 saat
-                _ => 180
+                _ => 90
             };
 
             bool isTradeSignal = determinedType.Contains("LONG") || determinedType.Contains("SHORT");
             int sigNumber = isTradeSignal ? Interlocked.Increment(ref _nextSignalNumber) : 0;
+            var nowUtc = DateTime.UtcNow;
 
             var newSignal = new FuturesSignal
             {
@@ -433,8 +458,8 @@ namespace CryptoSense.Application.Services
                 RemainingPositionRatio = 1.0m,
                 RealizedProfitPercent = 0m,
                 SourceCandleOpenTimeUtc = sourceCandleTime,
-                GeneratedAt = DateTime.UtcNow,
-                ExpiryTimeUtc = DateTime.UtcNow.AddMinutes(durationMinutes),
+                GeneratedAt = nowUtc,
+                ExpiryTimeUtc = nowUtc.AddMinutes(durationMinutes),
                 TimestampFormatted = CryptoSense.Domain.Common.TimeHelper.NowFormatted,
                 NewsSentimentImpact = newsSummary.Status,
                 AnalysisReasons = reasons,
@@ -462,6 +487,11 @@ namespace CryptoSense.Application.Services
 
                 decimal actualRisk = currentPrice - newSignal.StopLoss;
                 if (actualRisk <= 0) actualRisk = minRisk;
+                if (timeframe == "15m" && actualRisk > currentPrice * 0.012m)
+                {
+                    actualRisk = currentPrice * 0.012m;
+                    newSignal.StopLoss = RoundToCoinPrecision(currentPrice, currentPrice - actualRisk);
+                }
 
                 // Prioritet 2: TP1 = 1.10R, TP2 = 1.90R, TP3 = 2.80R
                 newSignal.TakeProfit1 = RoundToCoinPrecision(currentPrice, currentPrice + (actualRisk * 1.10m));
@@ -485,12 +515,44 @@ namespace CryptoSense.Application.Services
 
                 decimal actualRisk = newSignal.StopLoss - currentPrice;
                 if (actualRisk <= 0) actualRisk = minRisk;
+                if (timeframe == "15m" && actualRisk > currentPrice * 0.012m)
+                {
+                    actualRisk = currentPrice * 0.012m;
+                    newSignal.StopLoss = RoundToCoinPrecision(currentPrice, currentPrice + actualRisk);
+                }
 
                 // Prioritet 2: TP1 = 1.10R, TP2 = 1.90R, TP3 = 2.80R
                 newSignal.TakeProfit1 = RoundToCoinPrecision(currentPrice, currentPrice - (actualRisk * 1.10m));
                 decimal tp2Candidate = (localSupport > 0 && localSupport < (currentPrice - (actualRisk * 1.10m))) ? localSupport : currentPrice - (actualRisk * 1.90m);
                 newSignal.TakeProfit2 = RoundToCoinPrecision(currentPrice, tp2Candidate);
                 newSignal.TakeProfit3 = RoundToCoinPrecision(currentPrice, currentPrice - (actualRisk * 2.80m));
+            }
+
+            // 15m-də TP1 məsafəsi qiymətin 2.0%-i ola bilməz (Məs. BTC 80289 -> 82409 ~2.6% 15m üçün rədd)
+            if (isTradeSignal && timeframe == "15m")
+            {
+                decimal tp1DistPct = Math.Abs(newSignal.TakeProfit1 - currentPrice) / currentPrice;
+                if (tp1DistPct > 0.020m)
+                {
+                    return new FuturesSignal
+                    {
+                        Symbol = symbol,
+                        Timeframe = timeframe,
+                        Direction = SignalDirection.Buy,
+                        SignalType = "GÖZLƏMƏ ⚪",
+                        Status = SignalStatus.Open,
+                        OutcomeStatus = "GÖZLƏMƏ ⚪",
+                        CurrentPrice = currentPrice,
+                        EntryPrice = currentPrice,
+                        ConfluenceScore = directionalConfluence,
+                        Confidence = 50,
+                        SourceCandleOpenTimeUtc = sourceCandleTime,
+                        GeneratedAt = nowUtc,
+                        ExpiryTimeUtc = nowUtc.AddMinutes(durationMinutes),
+                        TimestampFormatted = CryptoSense.Domain.Common.TimeHelper.NowFormatted,
+                        AnalysisReasons = new List<string> { $"15m TP1 Məsafə Filtri: TP1 məsafəsi ({tp1DistPct * 100m:F2}%) > 2.0% (15m üçün həddindən artıq uzaqdır, rədd edildi)" }
+                    };
+                }
             }
 
             // Prioritet 2: Minimum R:R 1:1.8 şərtini entry zamanı yoxla. Ödənməyəndə siqnal açılmasın!

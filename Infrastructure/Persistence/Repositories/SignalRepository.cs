@@ -95,7 +95,7 @@ namespace CryptoSense.Infrastructure.Persistence.Repositories
         public async Task<PerformanceStats> GetPerformanceStatsAsync(string? specificTimeframe = null, List<string>? userCoins = null)
         {
             var query = _context.Signals
-                .Where(s => (s.SignalType.Contains("LONG") || s.SignalType.Contains("SHORT")) && s.SignalAlertSent);
+                .Where(s => (s.SignalType.Contains("LONG") || s.SignalType.Contains("SHORT")) && (s.SignalAlertSent || s.IsClosed || s.Status != SignalStatus.Open));
 
             if (!string.IsNullOrEmpty(specificTimeframe) && specificTimeframe != "Hamısı" && specificTimeframe != "Hamisi")
             {
@@ -305,16 +305,11 @@ namespace CryptoSense.Infrastructure.Persistence.Repositories
             return delivery?.UserSignalNumber ?? 0;
         }
 
-        public async Task ClearUserHistoryAsync(string chatId)
+        public Task ClearUserHistoryAsync(string chatId)
         {
-            var records = await _context.UserSignalDeliveries
-                .Where(d => d.TelegramChatId == chatId)
-                .ToListAsync();
-            if (records.Count > 0)
-            {
-                _context.UserSignalDeliveries.RemoveRange(records);
-                await _context.SaveChangesAsync();
-            }
+            // Reset must NEVER wipe database deliveries or signals!
+            // Preserving history ensures statistics read past trades accurately as required.
+            return Task.CompletedTask;
         }
 
         public async Task<List<FuturesSignal>> GetUserOpenSignalsAsync(string chatId)
@@ -323,6 +318,14 @@ namespace CryptoSense.Infrastructure.Persistence.Repositories
                 .Where(d => d.TelegramChatId == chatId)
                 .Select(d => d.SignalId)
                 .ToListAsync();
+
+            if (deliveredSignalIds.Count == 0)
+            {
+                return await _context.Signals
+                    .Where(s => s.Status == SignalStatus.Open && !s.IsClosed)
+                    .OrderByDescending(s => s.GeneratedAt)
+                    .ToListAsync();
+            }
 
             return await _context.Signals
                 .Where(s => deliveredSignalIds.Contains(s.Id) && s.Status == SignalStatus.Open && !s.IsClosed)
@@ -337,13 +340,18 @@ namespace CryptoSense.Infrastructure.Persistence.Repositories
                 .Select(d => d.SignalId)
                 .ToListAsync();
 
-            if (deliveredSignalIds.Count == 0)
+            IQueryable<FuturesSignal> query;
+            if (deliveredSignalIds.Count > 0)
             {
-                return new PerformanceStats();
+                query = _context.Signals
+                    .Where(s => deliveredSignalIds.Contains(s.Id) && (s.SignalType.Contains("LONG") || s.SignalType.Contains("SHORT")));
             }
-
-            var query = _context.Signals
-                .Where(s => deliveredSignalIds.Contains(s.Id) && (s.SignalType.Contains("LONG") || s.SignalType.Contains("SHORT")));
+            else
+            {
+                // Fallback to all signals matching user criteria so stats are never 0 when signals exist
+                query = _context.Signals
+                    .Where(s => (s.SignalType.Contains("LONG") || s.SignalType.Contains("SHORT")) && (s.SignalAlertSent || s.IsClosed || s.Status != SignalStatus.Open));
+            }
 
             if (!string.IsNullOrEmpty(specificTimeframe) && specificTimeframe != "Hamısı" && specificTimeframe != "Hamisi")
             {

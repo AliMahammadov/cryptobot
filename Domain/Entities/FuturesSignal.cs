@@ -68,6 +68,9 @@ namespace CryptoSense.Domain.Entities
         [MaxLength(100)]
         public string OutcomeStatus { get; set; } = "AKTİV 🟡";
         
+        [MaxLength(50)]
+        public string? CloseReason { get; set; }
+        
         [Column(TypeName = "decimal(18, 8)")]
         public decimal? ClosePrice { get; set; }
         

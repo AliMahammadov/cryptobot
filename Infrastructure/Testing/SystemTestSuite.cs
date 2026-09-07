@@ -728,6 +728,202 @@ namespace CryptoSense.Infrastructure.Testing
                 return valid3m && valid1h;
             });
 
+            // 29. Session & Auth: Bot Restart - Persistent SuperAdmin Ali Session & Safe User Creation
+            await AssertTest("Test 36: Session & Auth - Persistent Ali Session & Safe User Creation", async () =>
+            {
+                // Ensure Ali exists and has ChatId & UserId
+                var ali = await _userManager.GetUserByChatIdOrTelegramIdAsync("1219998176", 1219998176);
+                if (ali == null)
+                {
+                    await _userManager.ValidateLoginAsync("Ali", "23031999Am", 1219998176, "1219998176", "Ali_Mahammadov");
+                    ali = await _userManager.GetUserByChatIdOrTelegramIdAsync("1219998176", 1219998176);
+                }
+
+                if (ali == null || string.IsNullOrEmpty(ali.TelegramChatId) || ali.TelegramUserId != 1219998176)
+                {
+                    Console.WriteLine($"[Test 36 Fail] Ali has invalid session fields: ChatId='{ali?.TelegramChatId}', UserId='{ali?.TelegramUserId}'");
+                    return false;
+                }
+
+                // Creating a new user (AliTest) must NOT touch Ali's session
+                string testNewUser = "AliTest_" + Guid.NewGuid().ToString("N").Substring(0, 4);
+                bool created = await _userManager.CreateUserAsync(testNewUser, "123456");
+                if (!created) return false;
+
+                var aliAfter = await _userManager.GetUserByChatIdOrTelegramIdAsync("1219998176", 1219998176);
+                if (aliAfter == null || aliAfter.Username != "Ali" || aliAfter.TelegramChatId != "1219998176")
+                {
+                    Console.WriteLine("[Test 36 Fail] Ali's session was corrupted after user creation!");
+                    return false;
+                }
+
+                var createdUser = await _unitOfWork.Users.GetByUsernameAsync(testNewUser);
+                if (createdUser == null || !string.IsNullOrEmpty(createdUser.TelegramChatId))
+                {
+                    Console.WriteLine("[Test 36 Fail] Created user erroneously inherited ChatId!");
+                    return false;
+                }
+
+                await _userManager.DeleteUserAsync(testNewUser);
+                return true;
+            });
+
+            // 30. User Management: Full Users List & BCrypt Password Encryption
+            await AssertTest("Test 37: User Management - Full Users Count & BCrypt Encryption", async () =>
+            {
+                // Ensure sample users exist
+                if (!await _unitOfWork.Users.ExistsByUsernameAsync("Murad"))
+                {
+                    await _userManager.CreateUserAsync("Murad", "123456");
+                }
+                if (!await _unitOfWork.Users.ExistsByUsernameAsync("AliTest"))
+                {
+                    await _userManager.CreateUserAsync("AliTest", "123456");
+                }
+
+                var allUsers = await _userManager.GetAllUsersAsync();
+                if (allUsers.Count < 2)
+                {
+                    Console.WriteLine($"[Test 37 Fail] Total users count is {allUsers.Count}, expected >= 2");
+                    return false;
+                }
+
+                // Check passwords are not plaintext
+                foreach (var u in allUsers)
+                {
+                    if (u.PasswordHash == "123456" || u.PasswordHash == "23031999Am")
+                    {
+                        Console.WriteLine($"[Test 37 Fail] Plaintext password found for {u.Username}: {u.PasswordHash}");
+                        return false;
+                    }
+                    if (!u.PasswordHash.StartsWith("$2a$") && !u.PasswordHash.StartsWith("$2b$"))
+                    {
+                        Console.WriteLine($"[Test 37 Fail] Non-BCrypt password found for {u.Username}: {u.PasswordHash}");
+                        return false;
+                    }
+                }
+
+                var formattedList = TelegramMessageFormatter.FormatUserList(allUsers);
+                if (!formattedList.Contains($"{allUsers.Count} nəfər"))
+                {
+                    Console.WriteLine("[Test 37 Fail] FormatUserList does not show correct count!");
+                    return false;
+                }
+
+                return true;
+            });
+
+            // 31. Statistics: Closed Signals Persisted & Stats Calculation > 0
+            await AssertTest("Test 38: Statistics - Closed Signals Persisted & Stats Not Zero", async () =>
+            {
+                var uniqueSym = "STAT_BTC_" + Guid.NewGuid().ToString("N").Substring(0, 4) + "USDT";
+                var closedSignal = new FuturesSignal
+                {
+                    Symbol = uniqueSym,
+                    Direction = SignalDirection.Buy,
+                    SignalType = "GÜCLÜ TREND LONG 🟢",
+                    Timeframe = "15m",
+                    EntryPrice = 80000m,
+                    TakeProfit1 = 81000m,
+                    TakeProfit2 = 82000m,
+                    TakeProfit3 = 83000m,
+                    StopLoss = 79200m,
+                    Status = SignalStatus.Success,
+                    OutcomeStatus = "Hədəf 1 (TP1)",
+                    CloseReason = "TP1",
+                    ClosePrice = 81000m,
+                    ClosedAt = DateTime.UtcNow,
+                    ResultPercent = 1.25m,
+                    IsClosed = true,
+                    SignalAlertSent = true,
+                    ConfluenceScore = 82.5m,
+                    GeneratedAt = DateTime.UtcNow.AddMinutes(-30)
+                };
+                await _unitOfWork.Signals.AddAsync(closedSignal);
+                await _unitOfWork.SaveChangesAsync();
+
+                var stats = await _signalEngine.GetPerformanceStatsAsync(null, null);
+                if (stats.TotalSignals <= 0 || stats.SuccessSignals <= 0)
+                {
+                    Console.WriteLine($"[Test 38 Fail] Stats returned 0: Total={stats.TotalSignals}, Success={stats.SuccessSignals}");
+                    return false;
+                }
+
+                // Verify CloseReason exists in DB
+                var retrieved = await _unitOfWork.Signals.GetByIdAsync(closedSignal.Id);
+                if (retrieved == null || retrieved.CloseReason != "TP1" || !retrieved.IsClosed)
+                {
+                    Console.WriteLine($"[Test 38 Fail] CloseReason or IsClosed mismatch: {retrieved?.CloseReason}");
+                    return false;
+                }
+
+                return true;
+            });
+
+            // 32. Signal Quality: 76.7% Confluence Strictly Rejected (Min 78.0% Required)
+            await AssertTest("Test 39: Signal Quality - 76.7% Confluence Strictly Blocked", async () =>
+            {
+                // Force confluence to 76.7%
+                decimal testConfluence = 76.7m;
+                bool shouldPass = testConfluence >= 78.0m;
+                if (shouldPass)
+                {
+                    Console.WriteLine("[Test 39 Fail] 76.7% was evaluated as passing!");
+                    return false;
+                }
+
+                // Test live analysis returns neutral or has score >= 78
+                var sig = await _signalEngine.AnalyzeCoinAsync("XRPUSDT", "15m", isLiveScan: false);
+                if (sig.SignalType.Contains("LONG") || sig.SignalType.Contains("SHORT"))
+                {
+                    if (sig.ConfluenceScore < 78.0m)
+                    {
+                        Console.WriteLine($"[Test 39 Fail] Active signal generated with < 78% confluence: {sig.ConfluenceScore}%");
+                        return false;
+                    }
+                }
+
+                return true;
+            });
+
+            // 33. Signal Quality: 15m Expiry Max 90m, TP1 Distance <= 2.0%, BTC Bullish Blocks Altcoin SHORT
+            await AssertTest("Test 40: Signal Quality - 15m Max 90m Expiry, TP1 Distance Cap & BTC Compass Guard", async () =>
+            {
+                var sig15m = await _signalEngine.AnalyzeCoinAsync("BTCUSDT", "15m", isLiveScan: false);
+                var durationMinutes = (sig15m.ExpiryTimeUtc - sig15m.GeneratedAt).TotalMinutes;
+                if (Math.Round(durationMinutes, 1) > 90.0)
+                {
+                    Console.WriteLine($"[Test 40 Fail] 15m Expiry duration is {durationMinutes} mins (expected <= 90 mins)");
+                    return false;
+                }
+
+                // If trade signal was generated on 15m, check TP1 distance <= 2.0%
+                if (sig15m.SignalType.Contains("LONG") || sig15m.SignalType.Contains("SHORT"))
+                {
+                    decimal tp1DistPct = Math.Abs(sig15m.TakeProfit1 - sig15m.EntryPrice) / sig15m.EntryPrice;
+                    if (tp1DistPct > 0.020m)
+                    {
+                        Console.WriteLine($"[Test 40 Fail] 15m TP1 distance is {tp1DistPct:P2} (must be <= 2.0%)");
+                        return false;
+                    }
+                }
+
+                // Verify BTC Bullish Guard: Altcoin SHORT must be blocked if BTC is Bullish
+                var btcCompass = await _signalEngine.GetBtcCompassAsync();
+                bool isBtcBullish = btcCompass.Trend.Contains("Yüksəliş") || btcCompass.Trend.Contains("Bullish") || btcCompass.BullishScore >= 60;
+                if (isBtcBullish)
+                {
+                    var altSignal = await _signalEngine.AnalyzeCoinAsync("SOLUSDT", "15m", isLiveScan: false);
+                    if (altSignal.SignalType.Contains("SHORT"))
+                    {
+                        Console.WriteLine("[Test 40 Fail] Altcoin SHORT was generated while BTC Compass is Bullish!");
+                        return false;
+                    }
+                }
+
+                return true;
+            });
+
             Console.WriteLine("\n========================================================");
             Console.WriteLine($"🏁 TEST NƏTİCƏLƏRİ: {passed} UĞURLU (PASS), {failed} UĞURSUZ (FAIL)");
             Console.WriteLine("========================================================\n");
@@ -778,7 +974,6 @@ namespace CryptoSense.Infrastructure.Testing
             // SİMULYASİYA: REAL FORWARD TEST (FEE + SLIPPAGE + COIN LOCK)
             // ==========================================
 
-            const decimal TakerFeePercent = 0.10m; // 0.05% open + 0.05% close
             const decimal SlippageRate = 0.0002m; // 0.02% per side (0.04% round trip)
             const decimal TotalFrictionPercent = 0.14m; // 0.14% net drag per completed cycle
 

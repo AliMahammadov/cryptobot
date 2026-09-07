@@ -201,6 +201,7 @@ namespace CryptoSense.Worker
                             sig.Status = SignalStatus.Success;
                             sig.ClosePrice = currentPrice;
                             sig.ClosedAt = DateTime.UtcNow;
+                            sig.CloseReason = "TP3";
 
                             decimal pnl3 = Math.Round(((sig.TakeProfit3 - sig.EntryPrice) / sig.EntryPrice) * 100, 2);
                             sig.RealizedProfitPercent += (sig.RemainingPositionRatio * pnl3);
@@ -217,6 +218,7 @@ namespace CryptoSense.Worker
                         {
                             sig.Tp2Notified = true;
                             sig.IsPartial2Closed = true;
+                            sig.CloseReason = "TP2";
                             decimal pnl2 = Math.Round(((sig.TakeProfit2 - sig.EntryPrice) / sig.EntryPrice) * 100, 2);
                             sig.RealizedProfitPercent += (0.25m * pnl2);
                             sig.RemainingPositionRatio = 0.25m;
@@ -232,6 +234,7 @@ namespace CryptoSense.Worker
                         {
                             sig.Tp1Notified = true;
                             sig.IsPartial1Closed = true;
+                            sig.CloseReason = "TP1";
                             decimal pnl1 = Math.Round(((sig.TakeProfit1 - sig.EntryPrice) / sig.EntryPrice) * 100, 2);
                             sig.RealizedProfitPercent += (0.50m * pnl1);
                             sig.RemainingPositionRatio = 0.50m;
@@ -253,6 +256,7 @@ namespace CryptoSense.Worker
                             if (sig.Tp1Notified)
                             {
                                 sig.Status = SignalStatus.Success;
+                                sig.CloseReason = "Partial";
                                 decimal exitPnl = sig.Tp2Notified
                                     ? Math.Round(((sig.TakeProfit1 - sig.EntryPrice) / sig.EntryPrice) * 100, 2)
                                     : Math.Round(((sig.StopLoss - sig.EntryPrice) / sig.EntryPrice) * 100, 2);
@@ -269,6 +273,7 @@ namespace CryptoSense.Worker
                             else
                             {
                                 sig.Status = SignalStatus.Failed;
+                                sig.CloseReason = "SL";
                                 sig.OutcomeStatus = "Stop Loss (SL) (UĞURSUZ) ❌";
                                 sig.ResultPercent = Math.Round(((currentPrice - sig.EntryPrice) / sig.EntryPrice) * 100, 2);
 
@@ -285,6 +290,7 @@ namespace CryptoSense.Worker
                             sig.ClosePrice = currentPrice;
                             sig.ClosedAt = DateTime.UtcNow;
                             sig.ResultPercent = currentPnl;
+                            sig.CloseReason = "TimeExpiry";
 
                             if (currentPnl > 0.2m)
                             {
@@ -320,6 +326,7 @@ namespace CryptoSense.Worker
                             sig.Status = SignalStatus.Success;
                             sig.ClosePrice = currentPrice;
                             sig.ClosedAt = DateTime.UtcNow;
+                            sig.CloseReason = "TP3";
 
                             decimal pnl3 = Math.Round(((sig.EntryPrice - sig.TakeProfit3) / sig.EntryPrice) * 100, 2);
                             sig.RealizedProfitPercent += (sig.RemainingPositionRatio * pnl3);
@@ -336,6 +343,7 @@ namespace CryptoSense.Worker
                         {
                             sig.Tp2Notified = true;
                             sig.IsPartial2Closed = true;
+                            sig.CloseReason = "TP2";
                             decimal pnl2 = Math.Round(((sig.EntryPrice - sig.TakeProfit2) / sig.EntryPrice) * 100, 2);
                             sig.RealizedProfitPercent += (0.25m * pnl2);
                             sig.RemainingPositionRatio = 0.25m;
@@ -351,6 +359,7 @@ namespace CryptoSense.Worker
                         {
                             sig.Tp1Notified = true;
                             sig.IsPartial1Closed = true;
+                            sig.CloseReason = "TP1";
                             decimal pnl1 = Math.Round(((sig.EntryPrice - sig.TakeProfit1) / sig.EntryPrice) * 100, 2);
                             sig.RealizedProfitPercent += (0.50m * pnl1);
                             sig.RemainingPositionRatio = 0.50m;
@@ -372,6 +381,7 @@ namespace CryptoSense.Worker
                             if (sig.Tp1Notified)
                             {
                                 sig.Status = SignalStatus.Success;
+                                sig.CloseReason = "Partial";
                                 decimal exitPnl = sig.Tp2Notified
                                     ? Math.Round(((sig.EntryPrice - sig.TakeProfit1) / sig.EntryPrice) * 100, 2)
                                     : Math.Round(((sig.EntryPrice - sig.StopLoss) / sig.EntryPrice) * 100, 2);
@@ -388,6 +398,7 @@ namespace CryptoSense.Worker
                             else
                             {
                                 sig.Status = SignalStatus.Failed;
+                                sig.CloseReason = "SL";
                                 sig.OutcomeStatus = "Stop Loss (SL) (UĞURSUZ) ❌";
                                 var pct = Math.Round(((currentPrice - sig.EntryPrice) / sig.EntryPrice) * 100, 2);
                                 sig.ResultPercent = -Math.Abs(pct);
@@ -405,6 +416,7 @@ namespace CryptoSense.Worker
                             sig.ClosePrice = currentPrice;
                             sig.ClosedAt = DateTime.UtcNow;
                             sig.ResultPercent = currentPnl;
+                            sig.CloseReason = "TimeExpiry";
 
                             if (currentPnl > 0.2m)
                             {
@@ -586,6 +598,7 @@ namespace CryptoSense.Worker
                         using var innerScope = _serviceProvider.CreateScope();
                         var engine = innerScope.ServiceProvider.GetRequiredService<ISignalEngine>();
                         var uow = innerScope.ServiceProvider.GetRequiredService<IUnitOfWork>();
+                        var marketData = innerScope.ServiceProvider.GetRequiredService<IMarketDataProvider>();
 
                         if (await uow.Signals.HasActiveSignalForSymbolAsync(sym))
                         {
@@ -619,7 +632,20 @@ namespace CryptoSense.Worker
                                 {
                                     _lastVolatilityAlertSent[volKey] = DateTime.UtcNow;
                                     var reasonText = signal.AnalysisReasons.Count > 0 ? signal.AnalysisReasons[0] : "Kəskin dalğalanma və spayklar aşkarlandı";
-                                    await _telegramService.SendVolatilityRiskAlertAsync(signal.Symbol, signal.CurrentPrice, 0, 3.5m, reasonText);
+                                    var ticker = await marketData.Get24hTickerAsync(signal.Symbol);
+                                    decimal chg24 = ticker?.PriceChangePercent ?? 0m;
+                                    var ind = signal.Indicators as CryptoSense.Application.DTOs.IndicatorResult;
+                                    decimal volRatio = ind?.VolumeSurgeRatio ?? 0m;
+                                    if (volRatio <= 0 && signal.CurrentPrice > 0 && ind?.Atr > 0)
+                                    {
+                                        volRatio = Math.Round((ind.Atr / (signal.CurrentPrice * 0.012m)), 1);
+                                    }
+
+                                    // Volatillik: 24h = 0.00% ikən 3.5x alarm QADAĞA. Real ATR/volume tələb olunur!
+                                    if (Math.Abs(chg24) > 0.001m && volRatio >= 2.5m)
+                                    {
+                                        await _telegramService.SendVolatilityRiskAlertAsync(signal.Symbol, signal.CurrentPrice, chg24, volRatio, reasonText);
+                                    }
                                 }
                                 break; // High volatility on this coin, skip smaller timeframes
                             }
