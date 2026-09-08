@@ -11,5 +11,6 @@ namespace CryptoSense.Application.Interfaces
         decimal CalculateRsi(List<decimal> prices, int period = 14);
         (decimal Macd, decimal Signal, decimal Hist) CalculateMacd(List<decimal> prices);
         decimal CalculateAtr(List<Kline> klines, int period = 14);
+        (decimal SuperTrend, bool IsBullish) CalculateSuperTrend(List<Kline> klines, int period = 10, decimal multiplier = 3m);
     }
 }

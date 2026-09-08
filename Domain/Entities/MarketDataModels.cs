@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using CryptoSense.Domain.Enums;
 
 namespace CryptoSense.Domain.Entities
 {
@@ -43,7 +44,10 @@ namespace CryptoSense.Domain.Entities
         public decimal SupportLevel { get; set; }
         public decimal ResistanceLevel { get; set; }
         public string Trend { get; set; } = "Neytral";
-        public int BullishScore { get; set; }
+        public BtcMarketRegime Regime { get; set; } = BtcMarketRegime.Ranging;
+        public bool IsSuperTrendBullish { get; set; }
+        public bool HasHigherHighsHigherLows { get; set; }
+        public bool HasLowerHighsLowerLows { get; set; }
         public string Summary { get; set; } = "";
         public string EmaStructure { get; set; } = "";
         public string TimestampFormatted { get; set; } = CryptoSense.Domain.Common.TimeHelper.NowFormatted;

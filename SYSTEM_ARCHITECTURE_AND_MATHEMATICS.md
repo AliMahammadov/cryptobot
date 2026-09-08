@@ -65,9 +65,9 @@ Bazarın impulsunu və aşırı alış/satış zonalarını ölçür.
   $$\text{RSI} = 100 - \left( \frac{100}{1 + RS} \right)$$
   $$RS = \frac{\text{Wilder's Smoothing (Orta Qazanc)}}{\text{Wilder's Smoothing (Orta İtki)}}$$
 - **Sistemdəki Şərtlər:**
-  - $RSI > 55$: Bullish (+1 səs)
-  - $RSI < 45$: Bearish (-1 səs)
-  - $45 \le RSI \le 55$: Neytral (0 səs)
+  - $RSI > 50$: Bullish momentum
+  - $RSI < 50$: Bearish momentum
+  - İnvasiya və çıxışlarda SuperTrend ilə təsdiqlənir (Long: RSI < 50, Short: RSI > 50)
 
 ### B. EMA (Eksponensial Hərəkətli Orta - EMA20, EMA50, EMA200)
 Son qiymətlərə daha böyük çəki verən dinamik trend xətti.

@@ -15,6 +15,12 @@ namespace CryptoSense.Domain.Entities
         
         public int SignalNumber { get; set; }
         
+        [NotMapped]
+        public int Number { get => SignalNumber; set => SignalNumber = value; }
+        
+        [MaxLength(50)]
+        public string NewsSentimentImpact { get; set; } = "Neytral ⚪";
+        
         [Required]
         [MaxLength(20)]
         public string Symbol { get; set; } = "";
@@ -111,9 +117,60 @@ namespace CryptoSense.Domain.Entities
         [NotMapped]
         public object? Indicators { get; set; }
         
-        [MaxLength(100)]
-        public string NewsSentimentImpact { get; set; } = "Neytral";
+        [NotMapped]
+        public string PriceSource { get; set; } = "ws_last";
         
+        [NotMapped]
+        public long ExchangeTsMs { get; set; }
+        
+        [NotMapped]
+        public long DataAgeMs { get; set; }
+        
+        [NotMapped]
+        public DateTime CandleCloseTimeUtc { get; set; }
+        
+        [NotMapped]
+        public decimal SessionHigh { get; set; }
+        
+        [NotMapped]
+        public decimal SessionLow { get; set; }
+        
+        [NotMapped]
+        public decimal GrossResultPercent { get; set; }
+        
+        [NotMapped]
+        public decimal NetResultPercent { get; set; }
+        
+        [NotMapped]
+        public decimal MfePercent { get; set; }
+        
+        [NotMapped]
+        public decimal MaePercent { get; set; }
+
+        [NotMapped]
+        public decimal InitialRiskR { get; set; }
+
+        [NotMapped]
+        public decimal AtrPercent { get; set; }
+
+        [NotMapped]
+        public decimal SignalSwingLow { get; set; }
+
+        [NotMapped]
+        public decimal SignalSwingHigh { get; set; }
+
+        [NotMapped]
+        public bool BreakevenTriggered { get; set; }
+
+        [NotMapped]
+        public decimal TrailPrice { get; set; }
+
+        [NotMapped]
+        public int CandlesObserved { get; set; }
+
+        [NotMapped]
+        public DateTime LastObservedCandleTime { get; set; }
+
         public List<SignalIndicatorSnapshot> IndicatorSnapshots { get; set; } = new();
     }
 }

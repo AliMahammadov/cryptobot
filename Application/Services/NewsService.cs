@@ -158,7 +158,47 @@ namespace CryptoSense.Application.Services
             }
         }
 
-        private static readonly ConcurrentDictionary<string, DateTime> _seenUrgentNews = new();
+        private static readonly ConcurrentDictionary<string, (DateTime FirstSeen, string NormalizedTitle)> _seenNewsCache = new();
+
+        public static string NormalizeNewsTitle(string title)
+        {
+            if (string.IsNullOrWhiteSpace(title)) return "";
+            var lower = title.ToLowerInvariant();
+            var sb = new StringBuilder();
+            foreach (var ch in lower)
+            {
+                if (char.IsLetterOrDigit(ch) || char.IsWhiteSpace(ch))
+                {
+                    sb.Append(ch);
+                }
+            }
+            return Regex.Replace(sb.ToString().Trim(), @"\s+", " ");
+        }
+
+        public static double CalculateTitleDifference(string s1, string s2)
+        {
+            if (string.IsNullOrEmpty(s1) && string.IsNullOrEmpty(s2)) return 0.0;
+            if (string.IsNullOrEmpty(s1)) return 1.0;
+            if (string.IsNullOrEmpty(s2)) return 1.0;
+
+            int n = s1.Length;
+            int m = s2.Length;
+            int[,] d = new int[n + 1, m + 1];
+
+            for (int i = 0; i <= n; i++) d[i, 0] = i;
+            for (int j = 0; j <= m; j++) d[0, j] = j;
+
+            for (int i = 1; i <= n; i++)
+            {
+                for (int j = 1; j <= m; j++)
+                {
+                    int cost = (s2[j - 1] == s1[i - 1]) ? 0 : 1;
+                    d[i, j] = Math.Min(Math.Min(d[i - 1, j] + 1, d[i, j - 1] + 1), d[i - 1, j - 1] + cost);
+                }
+            }
+
+            return (double)d[n, m] / Math.Max(n, m);
+        }
 
         public async Task<List<CryptoNewsItem>> GetUrgentBreakingNewsAndListingsAsync()
         {
@@ -177,9 +217,34 @@ namespace CryptoSense.Application.Services
 
                 if (isListing || isBreaking || Math.Abs(item.SentimentScore) >= 60)
                 {
-                    var newsKey = string.IsNullOrWhiteSpace(item.Url) ? item.Title : item.Url;
-                    if (_seenUrgentNews.TryAdd(newsKey, DateTime.UtcNow))
+                    var normTitle = NormalizeNewsTitle(item.Title);
+                    var newsKey = !string.IsNullOrWhiteSpace(item.Url) ? item.Url.Trim() : normTitle;
+                    var now = DateTime.UtcNow;
+
+                    if (_seenNewsCache.TryGetValue(newsKey, out var existing))
                     {
+                        var ageHours = (now - existing.FirstSeen).TotalHours;
+                        if (ageHours < 12)
+                        {
+                            // 12 saat eyni açar -> göndərmə. YALNIZ normalize başlıq >30% dəyişəndə UPDATE
+                            var diff = CalculateTitleDifference(existing.NormalizedTitle, normTitle);
+                            if (diff > 0.30)
+                            {
+                                _seenNewsCache[newsKey] = (now, normTitle);
+                                item.Title = "🔄 [YENİLƏNMƏ] " + item.Title;
+                                urgentItems.Add(item);
+                            }
+                            continue;
+                        }
+                        else
+                        {
+                            _seenNewsCache[newsKey] = (now, normTitle);
+                            urgentItems.Add(item);
+                        }
+                    }
+                    else
+                    {
+                        _seenNewsCache[newsKey] = (now, normTitle);
                         urgentItems.Add(item);
                     }
                 }

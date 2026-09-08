@@ -18,10 +18,6 @@ namespace CryptoSense.Application.Services
         private readonly INewsService _newsService;
         private readonly IUnitOfWork _unitOfWork;
 
-        private static int _nextSignalNumber = 0;
-        private static bool _initializedNumber = false;
-        private static readonly object _lock = new();
-
         private static BtcMarketCompass? _cachedBtcCompass;
         private static DateTime _btcCompassCacheTime = DateTime.MinValue;
         private static readonly SemaphoreSlim _btcCompassLock = new(1, 1);
@@ -37,26 +33,6 @@ namespace CryptoSense.Application.Services
             _indicatorEngine = indicatorEngine;
             _newsService = newsService;
             _unitOfWork = unitOfWork;
-
-            InitializeHighestSignalNumber();
-        }
-
-        private void InitializeHighestSignalNumber()
-        {
-            if (_initializedNumber) return;
-            lock (_lock)
-            {
-                if (_initializedNumber) return;
-                try
-                {
-                    var maxNum = _unitOfWork.Signals.GetMaxSignalNumberAsync().GetAwaiter().GetResult();
-                    if (maxNum >= _nextSignalNumber) _nextSignalNumber = maxNum;
-                    _initializedNumber = true;
-                }
-                catch
-                {
-                }
-            }
         }
 
         public static decimal RoundToCoinPrecision(decimal basePrice, decimal value)
@@ -65,6 +41,316 @@ namespace CryptoSense.Application.Services
             if (basePrice >= 1m) return Math.Round(value, 4);
             if (basePrice >= 0.01m) return Math.Round(value, 5);
             return Math.Round(value, 8);
+        }
+
+        public record SrTargetResult(
+            bool Success,
+            string? SkipReason,
+            decimal TakeProfit1,
+            decimal TakeProfit2,
+            decimal TakeProfit3,
+            decimal StopLoss,
+            decimal InitialRiskR,
+            decimal AtrPercent,
+            decimal SignalSwingLow,
+            decimal SignalSwingHigh,
+            List<decimal> Clusters
+        );
+
+        public static decimal CalculatePearsonCorrelation(List<decimal> series1, List<decimal> series2)
+        {
+            int n = Math.Min(series1.Count, series2.Count);
+            if (n < 5) return 0m;
+
+            var s1 = series1.TakeLast(n).ToList();
+            var s2 = series2.TakeLast(n).ToList();
+
+            decimal avg1 = s1.Average();
+            decimal avg2 = s2.Average();
+
+            decimal sum1 = 0m, sum2 = 0m, sumProduct = 0m;
+            for (int i = 0; i < n; i++)
+            {
+                decimal diff1 = s1[i] - avg1;
+                decimal diff2 = s2[i] - avg2;
+                sumProduct += diff1 * diff2;
+                sum1 += diff1 * diff1;
+                sum2 += diff2 * diff2;
+            }
+
+            decimal denom = (decimal)Math.Sqrt((double)(sum1 * sum2));
+            if (denom == 0m) return 0m;
+            return sumProduct / denom;
+        }
+
+        public static SrTargetResult CalculateSrTargetsAndStops(
+            List<Kline> closedKlines,
+            SignalDirection direction,
+            decimal calculationRefPrice,
+            decimal atr14,
+            decimal vwap)
+        {
+            var fail = new SrTargetResult(false, null, 0, 0, 0, 0, 0, 0, 0, 0, new List<decimal>());
+            if (closedKlines == null || closedKlines.Count < 10 || calculationRefPrice <= 0)
+            {
+                return fail with { SkipReason = "SKIP_INSUFFICIENT_DATA" };
+            }
+
+            // 1. 50 closed 15m candles
+            var k50 = closedKlines.TakeLast(Math.Min(50, closedKlines.Count)).ToList();
+
+            // 2. Swing fractal ±2
+            var swingHighs = new List<decimal>();
+            var swingLows = new List<decimal>();
+            for (int i = 2; i < k50.Count - 2; i++)
+            {
+                if (k50[i].High > k50[i - 1].High && k50[i].High > k50[i - 2].High &&
+                    k50[i].High > k50[i + 1].High && k50[i].High > k50[i + 2].High)
+                {
+                    swingHighs.Add(k50[i].High);
+                }
+
+                if (k50[i].Low < k50[i - 1].Low && k50[i].Low < k50[i - 2].Low &&
+                    k50[i].Low < k50[i + 1].Low && k50[i].Low < k50[i + 2].Low)
+                {
+                    swingLows.Add(k50[i].Low);
+                }
+            }
+
+            decimal signalSwingLow = swingLows.LastOrDefault(l => l < calculationRefPrice);
+            if (signalSwingLow == 0) signalSwingLow = k50.Min(k => k.Low);
+
+            decimal signalSwingHigh = swingHighs.LastOrDefault(h => h > calculationRefPrice);
+            if (signalSwingHigh == 0) signalSwingHigh = k50.Max(k => k.High);
+
+            // 3. Previous day high/low
+            var yesterdayUtc = DateTime.UtcNow.Date.AddDays(-1);
+            var prevDayKlines = closedKlines.Where(k => k.Time.Date == yesterdayUtc).ToList();
+            decimal prevDayHigh = prevDayKlines.Count > 0 ? prevDayKlines.Max(k => k.High) : 0m;
+            decimal prevDayLow = prevDayKlines.Count > 0 ? prevDayKlines.Min(k => k.Low) : 0m;
+
+            // 4. UTC VWAP
+            decimal utcVwap = vwap;
+
+            // 5. Gather raw levels: swing fractal ±2, prev day high/low, UTC VWAP. Başqa səviyyə yox.
+            var rawLevels = new List<decimal>();
+            rawLevels.AddRange(swingHighs);
+            rawLevels.AddRange(swingLows);
+            if (prevDayHigh > 0) rawLevels.Add(prevDayHigh);
+            if (prevDayLow > 0) rawLevels.Add(prevDayLow);
+            if (utcVwap > 0) rawLevels.Add(utcVwap);
+
+            // 6. Cluster 0.15%
+            var clusters = new List<decimal>();
+            if (rawLevels.Count > 0)
+            {
+                var sorted = rawLevels.OrderBy(x => x).ToList();
+                var currentCluster = new List<decimal> { sorted[0] };
+
+                for (int i = 1; i < sorted.Count; i++)
+                {
+                    decimal clusterAvg = currentCluster.Average();
+                    if (clusterAvg > 0 && Math.Abs(sorted[i] - clusterAvg) / clusterAvg <= 0.0015m)
+                    {
+                        currentCluster.Add(sorted[i]);
+                    }
+                    else
+                    {
+                        clusters.Add(currentCluster.Average());
+                        currentCluster = new List<decimal> { sorted[i] };
+                    }
+                }
+                if (currentCluster.Count > 0)
+                {
+                    clusters.Add(currentCluster.Average());
+                }
+            }
+
+            // 7. Offset = clamp(0.15*ATR%, 0.05%, 0.20%)
+            decimal atrPct = (atr14 > 0 && calculationRefPrice > 0) ? (atr14 / calculationRefPrice) * 100m : 1.0m;
+            decimal offsetPct = Math.Clamp(0.15m * atrPct, 0.05m, 0.20m);
+            decimal offsetDist = calculationRefPrice * (offsetPct / 100m);
+
+            fail = new SrTargetResult(false, null, 0, 0, 0, 0, 0, atrPct, signalSwingLow, signalSwingHigh, clusters);
+
+            if (direction == SignalDirection.Buy) // LONG
+            {
+                // LONG TP1 = nearest resistance - offset
+                var resistances = clusters.Where(c => c > calculationRefPrice).OrderBy(c => c).ToList();
+                if (resistances.Count == 0)
+                {
+                    return fail with { SkipReason = "SKIP_TP_FAR (Müqavimət klasteri tapılmadı)" };
+                }
+
+                decimal nearestResistance = resistances[0];
+                decimal srDistPct = ((nearestResistance - calculationRefPrice) / calculationRefPrice) * 100m;
+                if (srDistPct > 2.5m)
+                {
+                    return fail with { SkipReason = $"SKIP_TP_FAR (S/R məsafəsi {srDistPct:F2}% > 2.5% tavan)" };
+                }
+
+                decimal rawTp1 = nearestResistance - offsetDist;
+                decimal distPct = ((rawTp1 - calculationRefPrice) / calculationRefPrice) * 100m;
+
+                // TP1 dist = clamp(dist, 0.6*ATR%, 1.8*ATR%) sonra <= 2.5%
+                distPct = Math.Clamp(distPct, 0.6m * atrPct, 1.8m * atrPct);
+                if (distPct > 2.5m)
+                {
+                    return fail with { SkipReason = $"SKIP_TP_FAR (TP1 dist {distPct:F2}% > 2.5% tavan)" };
+                }
+                decimal tp1 = calculationRefPrice * (1m + distPct / 100m);
+
+                // SL = invalidation swing - offset, <= 1.8%, böyükdürsə SKIP_SL_FAR
+                decimal rawSl = signalSwingLow - offsetDist;
+                decimal slDistPct = ((calculationRefPrice - rawSl) / calculationRefPrice) * 100m;
+                if (slDistPct > 1.8m)
+                {
+                    return fail with { SkipReason = $"SKIP_SL_FAR (SL məsafəsi {slDistPct:F2}% > 1.8% tavan)" };
+                }
+                if (slDistPct <= 0m)
+                {
+                    slDistPct = Math.Max(0.5m, offsetPct);
+                    rawSl = calculationRefPrice * (1m - slDistPct / 100m);
+                }
+                decimal sl = rawSl;
+                decimal riskR = calculationRefPrice - sl;
+
+                // S/R < 0.45% və TP1 < 0.8R -> SKIP_RR; R yalnız filter: TP1 >= 0.8R
+                decimal rrRatio = slDistPct > 0 ? (distPct / slDistPct) : 0m;
+                if (srDistPct < 0.45m && rrRatio < 0.8m)
+                {
+                    return fail with { SkipReason = $"SKIP_RR (S/R < 0.45% və R:R {rrRatio:F2} < 0.8R)" };
+                }
+                if (rrRatio < 0.8m)
+                {
+                    return fail with { SkipReason = $"SKIP_RR (R:R {rrRatio:F2} < 0.8R)" };
+                }
+
+                // TP2 / TP3 = növbəti klaster. Yoxdursa TP2 = TP1 + 1*ATR% (tavan içində) və ya TP2 olmasın. 4.5-6.7% qadağan.
+                var nextClusters = resistances.Where(c => c > tp1).OrderBy(c => c).ToList();
+                decimal tp2 = 0m;
+                if (nextClusters.Count > 0 && ((nextClusters[0] - calculationRefPrice) / calculationRefPrice * 100m) <= 2.5m)
+                {
+                    tp2 = nextClusters[0] - offsetDist;
+                }
+                else
+                {
+                    decimal candidateTp2Dist = distPct + (1.0m * atrPct);
+                    if (candidateTp2Dist <= 2.5m)
+                    {
+                        tp2 = calculationRefPrice * (1m + candidateTp2Dist / 100m);
+                    }
+                }
+
+                decimal tp3 = 0m;
+                if (nextClusters.Count > 1 && ((nextClusters[1] - calculationRefPrice) / calculationRefPrice * 100m) <= 2.5m)
+                {
+                    tp3 = nextClusters[1] - offsetDist;
+                }
+
+                return new SrTargetResult(
+                    Success: true,
+                    SkipReason: null,
+                    TakeProfit1: tp1,
+                    TakeProfit2: tp2,
+                    TakeProfit3: tp3,
+                    StopLoss: sl,
+                    InitialRiskR: riskR,
+                    AtrPercent: atrPct,
+                    SignalSwingLow: signalSwingLow,
+                    SignalSwingHigh: signalSwingHigh,
+                    Clusters: clusters
+                );
+            }
+            else // SHORT
+            {
+                // SHORT TP1 = nearest support + offset
+                var supports = clusters.Where(c => c < calculationRefPrice).OrderByDescending(c => c).ToList();
+                if (supports.Count == 0)
+                {
+                    return fail with { SkipReason = "SKIP_TP_FAR (Dəstək klasteri tapılmadı)" };
+                }
+
+                decimal nearestSupport = supports[0];
+                decimal srDistPct = ((calculationRefPrice - nearestSupport) / calculationRefPrice) * 100m;
+                if (srDistPct > 2.5m)
+                {
+                    return fail with { SkipReason = $"SKIP_TP_FAR (S/R məsafəsi {srDistPct:F2}% > 2.5% tavan)" };
+                }
+
+                decimal rawTp1 = nearestSupport + offsetDist;
+                decimal distPct = ((calculationRefPrice - rawTp1) / calculationRefPrice) * 100m;
+
+                // TP1 dist = clamp(dist, 0.6*ATR%, 1.8*ATR%) sonra <= 2.5%
+                distPct = Math.Clamp(distPct, 0.6m * atrPct, 1.8m * atrPct);
+                if (distPct > 2.5m)
+                {
+                    return fail with { SkipReason = $"SKIP_TP_FAR (TP1 dist {distPct:F2}% > 2.5% tavan)" };
+                }
+                decimal tp1 = calculationRefPrice * (1m - distPct / 100m);
+
+                // SL = invalidation swing + offset, <= 1.8%, böyükdürsə SKIP_SL_FAR
+                decimal rawSl = signalSwingHigh + offsetDist;
+                decimal slDistPct = ((rawSl - calculationRefPrice) / calculationRefPrice) * 100m;
+                if (slDistPct > 1.8m)
+                {
+                    return fail with { SkipReason = $"SKIP_SL_FAR (SL məsafəsi {slDistPct:F2}% > 1.8% tavan)" };
+                }
+                if (slDistPct <= 0m)
+                {
+                    slDistPct = Math.Max(0.5m, offsetPct);
+                    rawSl = calculationRefPrice * (1m + slDistPct / 100m);
+                }
+                decimal sl = rawSl;
+                decimal riskR = sl - calculationRefPrice;
+
+                // S/R < 0.45% və TP1 < 0.8R -> SKIP_RR; R yalnız filter: TP1 >= 0.8R
+                decimal rrRatio = slDistPct > 0 ? (distPct / slDistPct) : 0m;
+                if (srDistPct < 0.45m && rrRatio < 0.8m)
+                {
+                    return fail with { SkipReason = $"SKIP_RR (S/R < 0.45% və R:R {rrRatio:F2} < 0.8R)" };
+                }
+                if (rrRatio < 0.8m)
+                {
+                    return fail with { SkipReason = $"SKIP_RR (R:R {rrRatio:F2} < 0.8R)" };
+                }
+
+                // TP2 / TP3 = növbəti klaster. Yoxdursa TP2 = TP1 + 1*ATR% (tavan içində) və ya TP2 olmasın. 4.5-6.7% qadağan.
+                var nextClusters = supports.Where(c => c < tp1).OrderByDescending(c => c).ToList();
+                decimal tp2 = 0m;
+                if (nextClusters.Count > 0 && ((calculationRefPrice - nextClusters[0]) / calculationRefPrice * 100m) <= 2.5m)
+                {
+                    tp2 = nextClusters[0] + offsetDist;
+                }
+                else
+                {
+                    decimal candidateTp2Dist = distPct + (1.0m * atrPct);
+                    if (candidateTp2Dist <= 2.5m)
+                    {
+                        tp2 = calculationRefPrice * (1m - candidateTp2Dist / 100m);
+                    }
+                }
+
+                decimal tp3 = 0m;
+                if (nextClusters.Count > 1 && ((calculationRefPrice - nextClusters[1]) / calculationRefPrice * 100m) <= 2.5m)
+                {
+                    tp3 = nextClusters[1] + offsetDist;
+                }
+
+                return new SrTargetResult(
+                    Success: true,
+                    SkipReason: null,
+                    TakeProfit1: tp1,
+                    TakeProfit2: tp2,
+                    TakeProfit3: tp3,
+                    StopLoss: sl,
+                    InitialRiskR: riskR,
+                    AtrPercent: atrPct,
+                    SignalSwingLow: signalSwingLow,
+                    SignalSwingHigh: signalSwingHigh,
+                    Clusters: clusters
+                );
+            }
         }
 
         public async Task<BtcMarketCompass> GetBtcCompassAsync()
@@ -82,22 +368,11 @@ namespace CryptoSense.Application.Services
                     return _cachedBtcCompass;
                 }
 
-                var btcKlines = await _marketData.GetKlinesAsync("BTCUSDT", "15m", 60);
-                if (btcKlines.Count == 0)
-                {
-                    btcKlines = await _marketData.GetKlinesAsync("BTCUSDT", "3m", 60);
-                }
-                if (btcKlines.Count == 0)
-                {
-                    btcKlines = await _marketData.GetKlinesAsync("BTCUSDT", "1m", 60);
-                }
-
                 var compass = new BtcMarketCompass
                 {
                     TimestampFormatted = CryptoSense.Domain.Common.TimeHelper.NowFormatted
                 };
 
-                // 1. Live 24h Ticker & Dominance (always ensures live price even if klines lag)
                 try
                 {
                     var btcTicker = await _marketData.Get24hTickerAsync("BTCUSDT");
@@ -117,53 +392,73 @@ namespace CryptoSense.Application.Services
                 }
                 catch { }
 
-                if (btcKlines.Count > 0)
+                // BTC 1h SuperTrend + HH/HL = rejim (Problem 8)
+                var btc1hKlines = await _marketData.GetKlinesAsync("BTCUSDT", "1h", 60);
+                if (btc1hKlines.Count < 20)
                 {
-                    var currentPrice = btcKlines.Last().Close;
+                    btc1hKlines = await _marketData.GetKlinesAsync("BTCUSDT", "15m", 60);
+                }
+
+                if (btc1hKlines.Count > 0)
+                {
+                    var closed1h = btc1hKlines.Count >= 2 ? btc1hKlines.Take(btc1hKlines.Count - 1).ToList() : btc1hKlines;
+                    var currentPrice = closed1h.Last().Close;
                     if (compass.Price == 0) compass.Price = currentPrice;
 
-                    if (compass.Change24h == 0)
+                    // SuperTrend(10, 3) on BTC 1h
+                    var (superTrendVal, isSuperTrendBullish) = _indicatorEngine.CalculateSuperTrend(closed1h, 10, 3.0m);
+                    compass.SuperTrend = superTrendVal;
+                    compass.IsSuperTrendBullish = isSuperTrendBullish;
+
+                    // HH/HL on BTC 1h (fractal ±2)
+                    var shList = new List<decimal>();
+                    var slList = new List<decimal>();
+                    for (int i = 2; i < closed1h.Count - 2; i++)
                     {
-                        var openPrice = btcKlines.First().Open;
-                        compass.Change24h = openPrice > 0 ? Math.Round(((currentPrice - openPrice) / openPrice) * 100, 2) : 0;
-                        compass.High24h = btcKlines.Max(k => k.High);
-                        compass.Low24h = btcKlines.Min(k => k.Low);
-                        compass.VolumeQuote = btcKlines.Sum(k => k.Volume * k.Close);
+                        if (closed1h[i].High > closed1h[i - 1].High && closed1h[i].High > closed1h[i - 2].High &&
+                            closed1h[i].High > closed1h[i + 1].High && closed1h[i].High > closed1h[i + 2].High)
+                            shList.Add(closed1h[i].High);
+
+                        if (closed1h[i].Low < closed1h[i - 1].Low && closed1h[i].Low < closed1h[i - 2].Low &&
+                            closed1h[i].Low < closed1h[i + 1].Low && closed1h[i].Low < closed1h[i + 2].Low)
+                            slList.Add(closed1h[i].Low);
                     }
 
-                    var indicators = _indicatorEngine.CalculateIndicators(btcKlines);
-                    compass.Rsi15m = indicators.Rsi;
-                    compass.EmaStructure = indicators.EmaTrend;
-                    compass.Ema20 = indicators.Ema20;
-                    compass.Ema50 = indicators.Ema50;
-                    compass.MacdHist = indicators.MacdHist;
-                    compass.SuperTrend = indicators.SuperTrend;
-                    compass.SupportLevel = indicators.SupportLevel;
-                    compass.ResistanceLevel = indicators.ResistanceLevel;
+                    bool hasHhHl = shList.Count >= 2 && slList.Count >= 2 &&
+                                   shList[^1] > shList[^2] && slList[^1] > slList[^2];
+                    bool hasLhLl = shList.Count >= 2 && slList.Count >= 2 &&
+                                   shList[^1] < shList[^2] && slList[^1] < slList[^2];
 
-                    int score = 50;
-                    if (indicators.Ema20 > indicators.Ema50) score += 20;
-                    else score -= 20;
-                    if (indicators.MacdHist > 0) score += 15;
-                    else score -= 15;
-                    if (indicators.Rsi >= 50 && indicators.Rsi <= 68) score += 15;
-                    else if (indicators.Rsi < 48) score -= 15;
+                    compass.HasHigherHighsHigherLows = hasHhHl;
+                    compass.HasLowerHighsLowerLows = hasLhLl;
 
-                    compass.BullishScore = Math.Clamp(score, 5, 95);
-                    if (compass.BullishScore >= 60)
+                    var ind1h = _indicatorEngine.CalculateIndicators(closed1h);
+                    compass.SupportLevel = ind1h.SupportLevel;
+                    compass.ResistanceLevel = ind1h.ResistanceLevel;
+                    compass.Ema20 = ind1h.Ema20;
+                    compass.Ema50 = ind1h.Ema50;
+                    compass.Rsi15m = ind1h.Rsi;
+                    compass.MacdHist = ind1h.MacdHist;
+                    compass.EmaStructure = ind1h.EmaTrend;
+
+                    // Rejim təyini: BTC 1h SuperTrend + HH/HL = rejim (Problem 8)
+                    if (isSuperTrendBullish && hasHhHl)
                     {
+                        compass.Regime = BtcMarketRegime.Bullish;
                         compass.Trend = "YÜKSƏLİŞ (BULLISH) 🟢";
-                        compass.Summary = "Bitcoin 15m/1h strukturu güclüdür və dinamik dəstək səviyyəsi üzərindədir. Long əməliyyatlarına üstünlük verilir.";
+                        compass.Summary = "Bitcoin 1h SuperTrend və HH/HL strukturu yüksəlişdədir (Bullish rejim).";
                     }
-                    else if (compass.BullishScore <= 40)
+                    else if (!isSuperTrendBullish && hasLhLl)
                     {
+                        compass.Regime = BtcMarketRegime.Bearish;
                         compass.Trend = "ENİŞ (BEARISH) 🔴";
-                        compass.Summary = "Bitcoin satış təzyiqi altındadır və EMA xətlərinin altındadır. Short əməliyyatlarına üstünlük verilir.";
+                        compass.Summary = "Bitcoin 1h SuperTrend və LH/LL strukturu enişdədir (Bearish rejim).";
                     }
                     else
                     {
+                        compass.Regime = BtcMarketRegime.Ranging;
                         compass.Trend = "NEYTRAL (YAN HƏRƏKƏT) ⚪";
-                        compass.Summary = "Bitcoin yan hərəkətdədir (konsolidasiya). Qısa scalping və dəqiq Stop-Loss tövsiyə olunur.";
+                        compass.Summary = "Bitcoin 1h strukturu yan hərəkətdədir / konsolidasiyadadır (Ranging rejim).";
                     }
                 }
 
@@ -193,10 +488,12 @@ namespace CryptoSense.Application.Services
                 return new FuturesSignal { Symbol = symbol, Timeframe = timeframe, SignalType = "MƏLUMAT AZDIR" };
             }
 
-            // Closed candle evaluation to prevent flickering
-            var closedCandle = klines.Count >= 2 ? klines[klines.Count - 2] : klines.Last();
+            // Closed candle evaluation to prevent flickering (forming candle excluded from indicator array)
+            var closedKlines = klines.Count >= 2 ? klines.Take(klines.Count - 1).ToList() : klines;
+            var closedCandle = closedKlines.Last();
             var sourceCandleTime = closedCandle.Time;
-            var currentPrice = klines.Last().Close;
+            var calculationRefPrice = closedCandle.Close;
+            decimal currentPrice = calculationRefPrice;
 
             // Live Freshness Guard: In live scanning, a signal is ONLY valid if its closed candle just finished!
             // If the candle closed minutes or hours ago, it is historical/stale and must not generate live trades.
@@ -207,12 +504,12 @@ namespace CryptoSense.Application.Services
                 var maxLiveDelay = timeframe switch
                 {
                     "1m" => TimeSpan.FromSeconds(90),
-                    "3m" => TimeSpan.FromMinutes(3),
-                    "5m" => TimeSpan.FromMinutes(4),
-                    "15m" => TimeSpan.FromMinutes(8),
+                    "3m" => TimeSpan.FromSeconds(90),
+                    "5m" => TimeSpan.FromSeconds(90),
+                    "15m" => TimeSpan.FromSeconds(90),
                     "1h" => TimeSpan.FromMinutes(15),
                     "4h" => TimeSpan.FromMinutes(30),
-                    _ => TimeSpan.FromMinutes(3)
+                    _ => TimeSpan.FromSeconds(90)
                 };
 
                 if (candleAge > maxLiveDelay)
@@ -225,8 +522,8 @@ namespace CryptoSense.Application.Services
                         SignalType = "NEYTRAL (GÖZLƏMƏ) ⚪",
                         Status = SignalStatus.Open,
                         OutcomeStatus = "GÖZLƏMƏ ⚪",
-                        CurrentPrice = currentPrice,
-                        EntryPrice = currentPrice,
+                        CurrentPrice = calculationRefPrice,
+                        EntryPrice = 0,
                         ConfluenceScore = 50,
                         Confidence = 50,
                         SourceCandleOpenTimeUtc = sourceCandleTime,
@@ -244,20 +541,20 @@ namespace CryptoSense.Application.Services
             var existingSignal = await _unitOfWork.Signals.GetExistingCandleSignalAsync(symbol, timeframe, sourceCandleTime);
             if (existingSignal != null)
             {
-                existingSignal.CurrentPrice = currentPrice;
+                existingSignal.CurrentPrice = calculationRefPrice;
                 _recentCandleSignals.TryAdd(candleKey, existingSignal);
                 return existingSignal;
             }
 
             if (_recentCandleSignals.TryGetValue(candleKey, out var cachedSig))
             {
-                cachedSig.CurrentPrice = currentPrice;
+                cachedSig.CurrentPrice = calculationRefPrice;
                 return cachedSig;
             }
 
             var btcCompass = await GetBtcCompassAsync();
             var macroOverview = await _marketData.GetMacroMarketOverviewAsync();
-            var indicators = _indicatorEngine.CalculateIndicators(klines, btcCompass);
+            var indicators = _indicatorEngine.CalculateIndicators(closedKlines, btcCompass);
             var newsSummary = await _newsService.GetNewsAndSentimentAsync();
 
             var reasons = new List<string>();
@@ -265,11 +562,8 @@ namespace CryptoSense.Application.Services
             // 1. Core Technical Indicators (EMA, MA, MACD, SuperTrend)
             reasons.Add($"EMA (20/50): ${indicators.Ema20} / ${indicators.Ema50} ({indicators.EmaTrend})");
             reasons.Add($"MA / SMA (20/50): ${indicators.Sma20} / ${indicators.Sma50} ({indicators.SmaTrend})");
-            reasons.Add($"MACD (12,26,9): Hist={indicators.MacdHist:F4} ({indicators.MacdStatus})");
-            reasons.Add($"SuperTrend: ${indicators.SuperTrend} ({indicators.SuperTrendDirection})");
-
-            // 2. Macro Dominance & BTC Compass
-            reasons.Add($"Bitcoin Kompası: {btcCompass.Trend} ({btcCompass.BullishScore}%)");
+            reasons.Add($"MACD (12,26,9): Hist={indicators.MacdHist:F4} ({indicators.MacdStatus})");            // 2. Macro Dominance & BTC Compass (Problem 8)
+            reasons.Add($"Bitcoin Kompası: {btcCompass.Trend} ({btcCompass.Regime})");
             reasons.Add($"Dominasiya: BTC.D {macroOverview.BtcDominance}% | USDT.D {macroOverview.UsdtDominance}%");
 
             // 3. Institutional Retest & Pullback Decision Logic
@@ -301,19 +595,85 @@ namespace CryptoSense.Application.Services
             bool rsiAllowsLong = indicators.Rsi >= 38 && indicators.Rsi <= 68;
             bool rsiAllowsShort = indicators.Rsi >= 32 && indicators.Rsi <= 62;
 
-            // F. Macro & Bitcoin Compass Alignment
+            // F. Macro & Bitcoin Alignment (Problem 8 - BTC 1h SuperTrend + HH/HL = rejim)
             bool isAltcoin = symbol != "BTCUSDT";
-            bool highBtcDominance = macroOverview.BtcDominance >= 58.0m;
-            bool btcIsBullish = btcCompass.BullishScore >= 50 || 
-                                btcCompass.Trend.Contains("BULL", StringComparison.OrdinalIgnoreCase) || 
-                                btcCompass.Trend.Contains("GÜCLÜ", StringComparison.OrdinalIgnoreCase);
+            decimal altBtcCorr = 0m;
+            decimal altRs = 0m;
 
-            bool btcConfirmsLong = isAltcoin ? (btcCompass.BullishScore >= 45 && !highBtcDominance) : (btcCompass.BullishScore >= 45);
-            
-            // 🚫 BTC Kompası BULLISH ikən altcoin SHORT-u QƏTİ BLOKLA!
-            bool btcConfirmsShort = isAltcoin 
-                ? (!btcIsBullish && (btcCompass.BullishScore <= 45 || highBtcDominance)) 
-                : (btcCompass.BullishScore <= 55);
+            var altSwingHighs = new List<decimal>();
+            var altSwingLows = new List<decimal>();
+            int evalBars = Math.Min(closedKlines.Count, 50);
+            var evalSubset = closedKlines.TakeLast(evalBars).ToList();
+            for (int i = 2; i < evalSubset.Count - 2; i++)
+            {
+                if (evalSubset[i].High > evalSubset[i - 1].High && evalSubset[i].High > evalSubset[i - 2].High &&
+                    evalSubset[i].High > evalSubset[i + 1].High && evalSubset[i].High > evalSubset[i + 2].High)
+                    altSwingHighs.Add(evalSubset[i].High);
+
+                if (evalSubset[i].Low < evalSubset[i - 1].Low && evalSubset[i].Low < evalSubset[i - 2].Low &&
+                    evalSubset[i].Low < evalSubset[i + 1].Low && evalSubset[i].Low < evalSubset[i + 2].Low)
+                    altSwingLows.Add(evalSubset[i].Low);
+            }
+
+            // Lower High + Close below swing low (Breakdown)
+            bool hasLowerHigh = altSwingHighs.Count >= 2 && altSwingHighs[^1] < altSwingHighs[^2];
+            decimal recentAltSwingLow = altSwingLows.Count > 0 ? altSwingLows[^1] : 0m;
+            bool isStructuralBreakdown = hasLowerHigh && (recentAltSwingLow > 0 && closedCandle.Close < recentAltSwingLow);
+
+            // Higher Low + Close above swing high (Breakout)
+            bool hasHigherLow = altSwingLows.Count >= 2 && altSwingLows[^1] > altSwingLows[^2];
+            decimal recentAltSwingHigh = altSwingHighs.Count > 0 ? altSwingHighs[^1] : 0m;
+            bool isStructuralBreakout = hasHigherLow && (recentAltSwingHigh > 0 && closedCandle.Close > recentAltSwingHigh);
+
+            if (isAltcoin && closedKlines.Count >= 10)
+            {
+                try
+                {
+                    var btcKlines15m = await _marketData.GetKlinesAsync("BTCUSDT", "15m", closedKlines.Count);
+                    var closedBtc15m = btcKlines15m.Count >= 2 ? btcKlines15m.Take(btcKlines15m.Count - 1).ToList() : btcKlines15m;
+                    if (closedBtc15m.Count >= 10)
+                    {
+                        var altCloses = closedKlines.Select(k => k.Close).ToList();
+                        var btcCloses = closedBtc15m.Select(k => k.Close).ToList();
+                        altBtcCorr = CalculatePearsonCorrelation(altCloses, btcCloses);
+
+                        var lastAlt = closedKlines.Last();
+                        var lastBtc = closedBtc15m.Last();
+                        decimal altChg = lastAlt.Open > 0 ? (lastAlt.Close - lastAlt.Open) / lastAlt.Open : 0m;
+                        decimal btcChg = lastBtc.Open > 0 ? (lastBtc.Close - lastBtc.Open) / lastBtc.Open : 0m;
+                        altRs = altChg - btcChg;
+                    }
+                }
+                catch { }
+            }
+
+            bool btcConfirmsLong = true;
+            bool btcConfirmsShort = true;
+            if (isAltcoin)
+            {
+                bool isHighCorr = altBtcCorr > 0.7m;
+                bool altRsPositive = altRs > 0m;
+
+                // BTC 1h bullish VƏ alt-BTC 15m corr>0.7 VƏ alt RS müsbət → alt SHORT yalnız struktur breakdown (lower high + close below swing). Mean-reversion SHORT yox.
+                if (btcCompass.Regime == BtcMarketRegime.Bullish && isHighCorr && altRsPositive)
+                {
+                    btcConfirmsShort = isStructuralBreakdown;
+                    if (!btcConfirmsShort)
+                    {
+                        reasons.Add("BTC 1h Bullish, corr>0.7 və alt RS müsbət: Altcoin SHORT yalnız struktur breakdown olduqda açıla bilər (Mean-reversion SHORT bloklandı)");
+                    }
+                }
+
+                // BTC 1h bearish VƏ alt-BTC 15m corr>0.7 VƏ alt RS mənfi → alt LONG yalnız struktur breakout.
+                if (btcCompass.Regime == BtcMarketRegime.Bearish && isHighCorr && !altRsPositive)
+                {
+                    btcConfirmsLong = isStructuralBreakout;
+                    if (!btcConfirmsLong)
+                    {
+                        reasons.Add("BTC 1h Bearish, corr>0.7 və alt RS mənfi: Altcoin LONG yalnız struktur breakout olduqda açıla bilər (Mean-reversion LONG bloklandı)");
+                    }
+                }
+            }
 
             // Market Regime & Chop Filter (Minimum ADX required for ANY timeframe to avoid dying in sideways chop)
             decimal minAdxRequired = timeframe switch
@@ -387,7 +747,7 @@ namespace CryptoSense.Application.Services
                 confidence = 50;
                 if (!hasValidMarketRegime) reasons.Add($"Rejim Filtri: ADX ({indicators.Adx:F1}) < {minAdxRequired:F1} (Bazar zəif/yan konsolidasiyadadır)");
                 if (indicators.SuperTrendVote != IndicatorVote.Bullish && isUptrend) reasons.Add("SuperTrend təsdiqi yoxdur (Trend ziddiyyətlidir)");
-                if (isAltcoin && btcIsBullish && direction == SignalDirection.Sell) reasons.Add("BTC Kompası Bullish olduğu üçün altcoin SHORT-u bloklandı");
+                if (isAltcoin && !btcConfirmsShort && direction == SignalDirection.Sell) reasons.Add("BTC rejim struktur uyğunsuzluğu səbəbilə altcoin SHORT-u bloklandı");
             }
 
             decimal directionalConfluence = direction == SignalDirection.Sell 
@@ -414,15 +774,15 @@ namespace CryptoSense.Application.Services
                 _ => 0.008m
             };
 
-            decimal atr = indicators.Atr > 0 ? indicators.Atr : (currentPrice * minTfMultiplier);
-            decimal minRisk = currentPrice * minTfMultiplier;
+            decimal atr = indicators.Atr > 0 ? indicators.Atr : (calculationRefPrice * minTfMultiplier);
+            decimal minRisk = calculationRefPrice * minTfMultiplier;
             decimal dynamicAtrRisk = atr * 1.2m;
             decimal calculatedRisk = Math.Max(dynamicAtrRisk, minRisk);
 
             // 15m SL cap: SL eni max ~0.8–1.2%
             if (timeframe == "15m")
             {
-                decimal maxSlRisk15m = currentPrice * 0.012m; // Max 1.2%
+                decimal maxSlRisk15m = calculationRefPrice * 0.012m; // Max 1.2%
                 if (calculatedRisk > maxSlRisk15m) calculatedRisk = maxSlRisk15m;
             }
 
@@ -439,7 +799,7 @@ namespace CryptoSense.Application.Services
             };
 
             bool isTradeSignal = determinedType.Contains("LONG") || determinedType.Contains("SHORT");
-            int sigNumber = isTradeSignal ? Interlocked.Increment(ref _nextSignalNumber) : 0;
+            int sigNumber = 0; // Number is assigned strictly upon send-success in BackgroundMarketScanner
             var nowUtc = DateTime.UtcNow;
 
             var newSignal = new FuturesSignal
@@ -449,8 +809,8 @@ namespace CryptoSense.Application.Services
                 Direction = isTradeSignal ? direction : SignalDirection.Buy,
                 SignalType = determinedType,
                 Timeframe = timeframe,
-                EntryPrice = currentPrice,
-                CurrentPrice = currentPrice,
+                EntryPrice = 0, // Live WebSocket last price is assigned strictly upon emit/send-success
+                CurrentPrice = calculationRefPrice,
                 ConfluenceScore = directionalConfluence,
                 Confidence = confidence,
                 Status = SignalStatus.Open,
@@ -467,122 +827,53 @@ namespace CryptoSense.Application.Services
                 BtcCompass = btcCompass
             };
 
-            // Lokal Dəstək və Müqavimət Səviyyələri üzrə TP və SL Təyini
-            decimal localSupport = indicators.SupportLevel > 0 ? indicators.SupportLevel : (currentPrice - calculatedRisk);
-            decimal localResistance = indicators.ResistanceLevel > 0 ? indicators.ResistanceLevel : (currentPrice + calculatedRisk);
-
-            if (direction == SignalDirection.Buy)
+            if (isTradeSignal)
             {
-                decimal lowBound = buyerRejection ? closedCandle.Low : (currentPrice * 0.9985m);
-                newSignal.EntryLow = RoundToCoinPrecision(currentPrice, lowBound);
-                newSignal.EntryHigh = RoundToCoinPrecision(currentPrice, currentPrice * 1.0010m);
-
-                // Stop-Loss: Minimum risk buferi və struktur dəstəyi ilə qorunmuş SL
-                decimal slTarget = currentPrice - calculatedRisk;
-                if (localSupport > 0 && localSupport < currentPrice && (currentPrice - localSupport) >= minRisk && (currentPrice - localSupport) <= calculatedRisk * 1.4m)
-                {
-                    slTarget = localSupport * 0.9985m;
-                }
-                newSignal.StopLoss = RoundToCoinPrecision(currentPrice, slTarget);
-
-                decimal actualRisk = currentPrice - newSignal.StopLoss;
-                if (actualRisk <= 0) actualRisk = minRisk;
-                if (timeframe == "15m" && actualRisk > currentPrice * 0.012m)
-                {
-                    actualRisk = currentPrice * 0.012m;
-                    newSignal.StopLoss = RoundToCoinPrecision(currentPrice, currentPrice - actualRisk);
-                }
-
-                // Prioritet 2: TP1 = 1.10R, TP2 = 1.90R, TP3 = 2.80R
-                newSignal.TakeProfit1 = RoundToCoinPrecision(currentPrice, currentPrice + (actualRisk * 1.10m));
-                decimal tp2Candidate = localResistance > (currentPrice + (actualRisk * 1.10m)) ? localResistance : currentPrice + (actualRisk * 1.90m);
-                newSignal.TakeProfit2 = RoundToCoinPrecision(currentPrice, tp2Candidate);
-                newSignal.TakeProfit3 = RoundToCoinPrecision(currentPrice, currentPrice + (actualRisk * 2.80m));
-            }
-            else // SHORT
-            {
-                decimal highBound = sellerRejection ? closedCandle.High : (currentPrice * 1.0015m);
-                newSignal.EntryLow = RoundToCoinPrecision(currentPrice, currentPrice * 0.9990m);
-                newSignal.EntryHigh = RoundToCoinPrecision(currentPrice, highBound);
-
-                // Stop-Loss: Minimum risk buferi və struktur müqaviməti ilə qorunmuş SL
-                decimal slTarget = currentPrice + calculatedRisk;
-                if (localResistance > currentPrice && (localResistance - currentPrice) >= minRisk && (localResistance - currentPrice) <= calculatedRisk * 1.4m)
-                {
-                    slTarget = localResistance * 1.0015m;
-                }
-                newSignal.StopLoss = RoundToCoinPrecision(currentPrice, slTarget);
-
-                decimal actualRisk = newSignal.StopLoss - currentPrice;
-                if (actualRisk <= 0) actualRisk = minRisk;
-                if (timeframe == "15m" && actualRisk > currentPrice * 0.012m)
-                {
-                    actualRisk = currentPrice * 0.012m;
-                    newSignal.StopLoss = RoundToCoinPrecision(currentPrice, currentPrice + actualRisk);
-                }
-
-                // Prioritet 2: TP1 = 1.10R, TP2 = 1.90R, TP3 = 2.80R
-                newSignal.TakeProfit1 = RoundToCoinPrecision(currentPrice, currentPrice - (actualRisk * 1.10m));
-                decimal tp2Candidate = (localSupport > 0 && localSupport < (currentPrice - (actualRisk * 1.10m))) ? localSupport : currentPrice - (actualRisk * 1.90m);
-                newSignal.TakeProfit2 = RoundToCoinPrecision(currentPrice, tp2Candidate);
-                newSignal.TakeProfit3 = RoundToCoinPrecision(currentPrice, currentPrice - (actualRisk * 2.80m));
-            }
-
-            // 15m-də TP1 məsafəsi qiymətin 2.0%-i ola bilməz (Məs. BTC 80289 -> 82409 ~2.6% 15m üçün rədd)
-            if (isTradeSignal && timeframe == "15m")
-            {
-                decimal tp1DistPct = Math.Abs(newSignal.TakeProfit1 - currentPrice) / currentPrice;
-                if (tp1DistPct > 0.020m)
+                // S/R Target and Exit calculation (Problem 2)
+                var srResult = CalculateSrTargetsAndStops(closedKlines, direction, calculationRefPrice, indicators.Atr, indicators.Vwap);
+                if (!srResult.Success)
                 {
                     return new FuturesSignal
                     {
                         Symbol = symbol,
                         Timeframe = timeframe,
-                        Direction = SignalDirection.Buy,
+                        Direction = direction,
                         SignalType = "GÖZLƏMƏ ⚪",
                         Status = SignalStatus.Open,
                         OutcomeStatus = "GÖZLƏMƏ ⚪",
-                        CurrentPrice = currentPrice,
-                        EntryPrice = currentPrice,
+                        CurrentPrice = calculationRefPrice,
+                        EntryPrice = 0,
                         ConfluenceScore = directionalConfluence,
                         Confidence = 50,
                         SourceCandleOpenTimeUtc = sourceCandleTime,
                         GeneratedAt = nowUtc,
                         ExpiryTimeUtc = nowUtc.AddMinutes(durationMinutes),
                         TimestampFormatted = CryptoSense.Domain.Common.TimeHelper.NowFormatted,
-                        AnalysisReasons = new List<string> { $"15m TP1 Məsafə Filtri: TP1 məsafəsi ({tp1DistPct * 100m:F2}%) > 2.0% (15m üçün həddindən artıq uzaqdır, rədd edildi)" }
+                        AnalysisReasons = new List<string> { $"S/R Filter: {srResult.SkipReason}" }
                     };
                 }
-            }
 
-            // Prioritet 2: Minimum R:R 1:1.8 şərtini entry zamanı yoxla. Ödənməyəndə siqnal açılmasın!
-            if (isTradeSignal)
-            {
-                decimal rewardToTp2 = Math.Abs(newSignal.TakeProfit2 - currentPrice);
-                decimal riskToSl = Math.Abs(currentPrice - newSignal.StopLoss);
-                decimal rrRatio = riskToSl > 0 ? Math.Round(rewardToTp2 / riskToSl, 2) : 0;
-
-                if (rrRatio < 1.80m)
+                if (direction == SignalDirection.Buy)
                 {
-                    return new FuturesSignal
-                    {
-                        Symbol = symbol,
-                        Timeframe = timeframe,
-                        Direction = SignalDirection.Buy,
-                        SignalType = "GÖZLƏMƏ ⚪",
-                        Status = SignalStatus.Open,
-                        OutcomeStatus = "GÖZLƏMƏ ⚪",
-                        CurrentPrice = currentPrice,
-                        EntryPrice = currentPrice,
-                        ConfluenceScore = directionalConfluence,
-                        Confidence = 50,
-                        SourceCandleOpenTimeUtc = sourceCandleTime,
-                        GeneratedAt = DateTime.UtcNow,
-                        ExpiryTimeUtc = DateTime.UtcNow.AddMinutes(durationMinutes),
-                        TimestampFormatted = CryptoSense.Domain.Common.TimeHelper.NowFormatted,
-                        AnalysisReasons = new List<string> { $"Risk/Mükafat (R:R) 1:1.8 şərti ödənmədi (Cari R:R = 1:{rrRatio:F2}). Sərfəsiz hədəf səbəbilə əməliyyat ləğv edildi." }
-                    };
+                    decimal lowBound = buyerRejection ? closedCandle.Low : (calculationRefPrice * 0.9985m);
+                    newSignal.EntryLow = RoundToCoinPrecision(calculationRefPrice, lowBound);
+                    newSignal.EntryHigh = RoundToCoinPrecision(calculationRefPrice, calculationRefPrice * 1.0010m);
                 }
+                else
+                {
+                    decimal highBound = sellerRejection ? closedCandle.High : (calculationRefPrice * 1.0015m);
+                    newSignal.EntryLow = RoundToCoinPrecision(calculationRefPrice, calculationRefPrice * 0.9990m);
+                    newSignal.EntryHigh = RoundToCoinPrecision(calculationRefPrice, highBound);
+                }
+
+                newSignal.TakeProfit1 = RoundToCoinPrecision(calculationRefPrice, srResult.TakeProfit1);
+                newSignal.TakeProfit2 = srResult.TakeProfit2 > 0 ? RoundToCoinPrecision(calculationRefPrice, srResult.TakeProfit2) : 0m;
+                newSignal.TakeProfit3 = srResult.TakeProfit3 > 0 ? RoundToCoinPrecision(calculationRefPrice, srResult.TakeProfit3) : 0m;
+                newSignal.StopLoss = RoundToCoinPrecision(calculationRefPrice, srResult.StopLoss);
+                newSignal.InitialRiskR = srResult.InitialRiskR;
+                newSignal.AtrPercent = srResult.AtrPercent;
+                newSignal.SignalSwingLow = srResult.SignalSwingLow;
+                newSignal.SignalSwingHigh = srResult.SignalSwingHigh;
             }
 
             _recentCandleSignals[candleKey] = newSignal;
@@ -599,19 +890,6 @@ namespace CryptoSense.Application.Services
                 new() { IndicatorName = "OBV", Value = indicators.Obv, Vote = indicators.ObvVote, Weight = 0.40m },
                 new() { IndicatorName = "VWAP", Value = indicators.Vwap, Vote = indicators.VwapVote, Weight = 0.30m }
             };
-
-            if (isLiveScan && (determinedType.Contains("LONG") || determinedType.Contains("SHORT")))
-            {
-                try
-                {
-                    await _unitOfWork.Signals.AddAsync(newSignal);
-                    await _unitOfWork.SaveChangesAsync();
-                }
-                catch (Exception ex)
-                {
-                    Console.WriteLine($"DB Persist warning: {ex.Message}");
-                }
-            }
 
             return newSignal;
         }
@@ -655,20 +933,12 @@ namespace CryptoSense.Application.Services
         {
             await _unitOfWork.Signals.ClearAllSignalsAsync();
             _recentCandleSignals.Clear();
-            lock (_lock)
-            {
-                _nextSignalNumber = 0;
-                _initializedNumber = true;
-            }
+            CryptoSense.Worker.BackgroundMarketScanner.ResetSignalCounter();
         }
 
         public static void ResetSignalCounter()
         {
-            lock (_lock)
-            {
-                _nextSignalNumber = 0;
-                _initializedNumber = true;
-            }
+            CryptoSense.Worker.BackgroundMarketScanner.ResetSignalCounter();
         }
     }
 }

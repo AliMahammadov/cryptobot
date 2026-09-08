@@ -36,4 +36,24 @@ namespace CryptoSense.Domain.Enums
         Bearish,
         Neutral
     }
+
+    public enum SignalCloseReason
+    {
+        TP1,
+        TP2,
+        TP3,
+        SL,
+        BE,
+        TRAIL,
+        INVALIDATION,
+        TIME,
+        NO_EDGE
+    }
+
+    public enum BtcMarketRegime
+    {
+        Bullish,
+        Bearish,
+        Ranging
+    }
 }

@@ -394,7 +394,7 @@ namespace CryptoSense.Infrastructure.Telegram
             }
         }
 
-        public async Task SendSignalAlertAsync(FuturesSignal signal, string? specificChatId = null)
+        public async Task<bool> SendSignalAlertAsync(FuturesSignal signal, string? specificChatId = null)
         {
             using var scope = _serviceProvider.CreateScope();
             var uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
@@ -426,7 +426,7 @@ namespace CryptoSense.Infrastructure.Telegram
                     }
                     catch { }
                 }
-                return;
+                return sent;
             }
 
             var userManager = scope.ServiceProvider.GetRequiredService<IUserManagerService>();
@@ -544,6 +544,8 @@ namespace CryptoSense.Infrastructure.Telegram
                 }
                 catch { }
             }
+
+            return anyDelivered;
         }
 
         public async Task SendOutcomeAlertAsync(FuturesSignal signal, string outcomeType, decimal hitPrice, decimal profitPct)

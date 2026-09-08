@@ -24,7 +24,13 @@ namespace CryptoSense.Infrastructure.Telegram
             sb.AppendLine($"🪙 <b>Coin:</b> {cleanSymbol} Futures ({signal.Timeframe})");
             sb.AppendLine($"🕒 <b>Verilmə Tarixi:</b> {signal.TimestampFormatted}");
             sb.AppendLine($"🎯 <b>Confluence Razılaşma Balı:</b> <b>{signal.ConfluenceScore.ToString("F1", CultureInfo.InvariantCulture)}%</b> (İndiqatorların razılığı)");
-            sb.AppendLine($"💵 <b>Cari Giriş Qiyməti:</b> ${signal.CurrentPrice.ToString(CultureInfo.InvariantCulture)}");
+            sb.AppendLine($"💵 <b>Giriş (Entry):</b> ${signal.EntryPrice.ToString(CultureInfo.InvariantCulture)}");
+            sb.AppendLine($"📡 <b>Mənbə:</b> <code>{signal.PriceSource}</code>");
+            sb.AppendLine($"⏱️ <b>ExchangeTs:</b> {signal.ExchangeTsMs} (DataAge: {signal.DataAgeMs}ms)");
+            if (signal.CandleCloseTimeUtc != default)
+            {
+                sb.AppendLine($"🕯️ <b>Şam bağlandı:</b> {signal.CandleCloseTimeUtc:HH:mm:ss} UTC");
+            }
             sb.AppendLine($"📰 <b>Xəbər Sentimenti:</b> {sentimentText}");
             sb.AppendLine("-----------------------------------");
             sb.AppendLine($"📍 <b>Giriş Zonası:</b> ${signal.EntryLow.ToString(CultureInfo.InvariantCulture)} - ${signal.EntryHigh.ToString(CultureInfo.InvariantCulture)}");
@@ -81,8 +87,13 @@ namespace CryptoSense.Infrastructure.Telegram
             sb.AppendLine();
             sb.AppendLine($"🪙 <b>Cütlük:</b> {cleanSymbol} Futures ({directionStr} - {signal.Timeframe})");
             sb.AppendLine($"📍 <b>İlkin Giriş Qiyməti:</b> ${signal.EntryPrice.ToString(CultureInfo.InvariantCulture)}");
-            sb.AppendLine($"💵 <b>Bağlanış / Cari Qiymət:</b> ${hitPrice.ToString(CultureInfo.InvariantCulture)}");
-            sb.AppendLine($"📈 <b>Xalis Nəticə (PnL):</b> <b>{(profitPct >= 0 ? "+" : "")}{profitPct.ToString("F2", CultureInfo.InvariantCulture)}%</b>");
+            sb.AppendLine($"💵 <b>Bağlanış / Last:</b> ${hitPrice.ToString(CultureInfo.InvariantCulture)}");
+            decimal netPnl = signal.NetResultPercent != 0 ? signal.NetResultPercent : profitPct;
+            decimal grossPnl = signal.GrossResultPercent != 0 ? signal.GrossResultPercent : (netPnl + 0.10m);
+            sb.AppendLine($"📊 <b>Gross PnL:</b> {(grossPnl >= 0 ? "+" : "")}{grossPnl.ToString("F2", CultureInfo.InvariantCulture)}%");
+            sb.AppendLine($"💰 <b>Net PnL (fee -0.10%):</b> {(netPnl >= 0 ? "+" : "")}{netPnl.ToString("F2", CultureInfo.InvariantCulture)}%");
+            sb.AppendLine($"📈 <b>MFE:</b> +{signal.MfePercent.ToString("F2", CultureInfo.InvariantCulture)}% | <b>MAE:</b> -{Math.Abs(signal.MaePercent).ToString("F2", CultureInfo.InvariantCulture)}%");
+            sb.AppendLine($"🏷️ <b>Səbəb:</b> {signal.CloseReason ?? outcomeType}");
             sb.AppendLine($"🕒 <b>Siqnal Vaxtı:</b> {signal.TimestampFormatted}");
             sb.AppendLine($"🕒 <b>Yenilənmə Vaxtı:</b> {CryptoSense.Domain.Common.TimeHelper.NowFormatted}");
 

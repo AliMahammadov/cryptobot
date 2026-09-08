@@ -309,8 +309,8 @@ namespace CryptoSense.Application.Services
             decimal mtfFactor = 1.0m;
             if (btcCompass != null)
             {
-                if (rawScore > 0 && btcCompass.BullishScore >= 55) mtfFactor = 1.0m;
-                else if (rawScore < 0 && btcCompass.BullishScore <= 45) mtfFactor = 1.0m;
+                if (rawScore > 0 && btcCompass.Regime == BtcMarketRegime.Bullish) mtfFactor = 1.0m;
+                else if (rawScore < 0 && btcCompass.Regime == BtcMarketRegime.Bearish) mtfFactor = 1.0m;
                 else mtfFactor = 0.85m;
             }
             res.MtfFactor = mtfFactor;

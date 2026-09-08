@@ -127,17 +127,37 @@ namespace CryptoSense.Infrastructure.MarketData
             return klines;
         }
 
-        public async Task<List<CoinTicker>> GetTopFuturesTickersAsync(int topCount = 35)
-        {
-            bool tryFutures = DateTime.UtcNow >= _futuresCoolDownUntil;
+        private static List<CoinTicker> _cachedTop80 = new();
+        private static DateTime _lastTop80Fetch = DateTime.MinValue;
+        private static readonly object _top80Lock = new();
 
+        public async Task<List<CoinTicker>> GetTopFuturesTickersAsync(int topCount = 80)
+        {
+            lock (_top80Lock)
+            {
+                if (_cachedTop80.Count > 0 && (DateTime.UtcNow - _lastTop80Fetch).TotalMinutes < 10)
+                {
+                    return _cachedTop80.Take(topCount).ToList();
+                }
+            }
+
+            bool tryFutures = DateTime.UtcNow >= _futuresCoolDownUntil;
             if (tryFutures)
             {
                 try
                 {
                     var response = await _httpClient.GetStringAsync("/fapi/v1/ticker/24hr");
-                    var list = ParseTickers(response);
-                    if (list.Count > 0) return list.OrderByDescending(t => t.VolumeQuote).Take(topCount).ToList();
+                    var list = ParseTopVolumeSymbols(response);
+                    if (list.Count > 0)
+                    {
+                        var top = list.Take(80).ToList();
+                        lock (_top80Lock)
+                        {
+                            _cachedTop80 = top;
+                            _lastTop80Fetch = DateTime.UtcNow;
+                        }
+                        return top.Take(topCount).ToList();
+                    }
                 }
                 catch (HttpRequestException ex) when (ex.StatusCode == System.Net.HttpStatusCode.TooManyRequests || (int?)ex.StatusCode == 418 || (int?)ex.StatusCode == 451)
                 {
@@ -148,26 +168,91 @@ namespace CryptoSense.Infrastructure.MarketData
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine($"[BinanceMarketDataProvider] Error fetching 24hr tickers: {ex.Message}");
+                    Console.WriteLine($"[BinanceMarketDataProvider] Error fetching 24hr volume rank: {ex.Message}");
                 }
             }
 
-            // Fallback to Official Binance Public Spot APIs
+            // Fallback to cached if available
+            lock (_top80Lock)
+            {
+                if (_cachedTop80.Count > 0) return _cachedTop80.Take(topCount).ToList();
+            }
+
+            // Fallback to Official Binance Public Spot APIs for volume ranking only
             try
             {
                 var response = await FetchFromPublicSpotAsync("/api/v3/ticker/24hr");
                 if (!string.IsNullOrEmpty(response))
                 {
-                    var list = ParseTickers(response);
-                    if (list.Count > 0) return list.OrderByDescending(t => t.VolumeQuote).Take(topCount).ToList();
+                    var list = ParseTopVolumeSymbols(response);
+                    if (list.Count > 0)
+                    {
+                        var top = list.Take(80).ToList();
+                        lock (_top80Lock)
+                        {
+                            _cachedTop80 = top;
+                            _lastTop80Fetch = DateTime.UtcNow;
+                        }
+                        return top.Take(topCount).ToList();
+                    }
                 }
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[BinanceMarketDataProvider] Spot ticker fallback error: {ex.Message}");
+                Console.WriteLine($"[BinanceMarketDataProvider] Spot volume ranking fallback error: {ex.Message}");
             }
 
             return new List<CoinTicker>();
+        }
+
+        private static List<CoinTicker> ParseTopVolumeSymbols(string json)
+        {
+            var list = new List<CoinTicker>();
+            using var doc = JsonDocument.Parse(json);
+            foreach (var item in doc.RootElement.EnumerateArray())
+            {
+                var symbol = item.GetProperty("symbol").GetString() ?? "";
+                if (!symbol.EndsWith("USDT")) continue;
+                if (!decimal.TryParse(item.GetProperty("quoteVolume").GetString(), NumberStyles.Any, CultureInfo.InvariantCulture, out var quoteVol)) continue;
+
+                // Price is strictly 0 here: volume rank only, lastPrice does NOT enter price path
+                list.Add(new CoinTicker
+                {
+                    Symbol = symbol,
+                    Price = 0,
+                    VolumeQuote = quoteVol
+                });
+            }
+            list.Sort((a, b) => b.VolumeQuote.CompareTo(a.VolumeQuote));
+            return list;
+        }
+
+        public async Task<(decimal Price, long ExchangeTsMs)?> GetLastAggTradeAsync(string symbol)
+        {
+            var cleanSym = symbol.ToUpper();
+            if (cleanSym == "PEPEUSDT") cleanSym = "1000PEPEUSDT";
+            else if (cleanSym == "SHIBUSDT") cleanSym = "1000SHIBUSDT";
+
+            try
+            {
+                var response = await _httpClient.GetStringAsync($"/fapi/v1/aggTrades?symbol={cleanSym}&limit=1");
+                using var doc = JsonDocument.Parse(response);
+                var arr = doc.RootElement;
+                if (arr.GetArrayLength() > 0)
+                {
+                    var trade = arr[0];
+                    if (decimal.TryParse(trade.GetProperty("p").GetString(), NumberStyles.Any, CultureInfo.InvariantCulture, out var price) &&
+                        trade.TryGetProperty("T", out var tProp))
+                    {
+                        return (price, tProp.GetInt64());
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[BinanceMarketDataProvider] GetLastAggTrade error for {symbol}: {ex.Message}");
+            }
+            return null;
         }
 
         public async Task<CoinTicker?> Get24hTickerAsync(string symbol)

@@ -10,5 +10,6 @@ namespace CryptoSense.Application.Interfaces
         Task<List<CoinTicker>> GetTopFuturesTickersAsync(int topCount = 35);
         Task<CoinTicker?> Get24hTickerAsync(string symbol);
         Task<MacroMarketOverview> GetMacroMarketOverviewAsync();
+        Task<(decimal Price, long ExchangeTsMs)?> GetLastAggTradeAsync(string symbol);
     }
 }
