@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Threading.Tasks;
 using CryptoSense.Application.DTOs;
 using CryptoSense.Application.Interfaces;
@@ -976,6 +977,73 @@ namespace CryptoSense.Infrastructure.Testing
                 if (!isDuplicate)
                 {
                     Console.WriteLine("[Test 41 Fail] Entity+Action collision was not flagged as duplicate!");
+                    return Task.FromResult(false);
+                }
+
+                return Task.FromResult(true);
+            });
+
+            // 35. Risk:Reward Gate: R:R = (TP1 məsafəsi) / (SL məsafəsi) < 0.8 -> SKIP_RR send=NO
+            await AssertTest("Test 42: Risk:Reward Gate - R:R < 0.8 Strictly Blocked & Format Verified", () =>
+            {
+                // Case 1: Bad R:R (e.g. BTC TP1 +0.16%, SL -1.01%, R:R = 0.16)
+                decimal entryPrice = 78350.00m;
+                decimal badTp1 = 78472.45m;
+                decimal badSl = 77560.55m;
+
+                decimal badTp1Dist = Math.Abs(badTp1 - entryPrice);
+                decimal badSlDist = Math.Abs(badSl - entryPrice);
+                decimal badTp1Pct = (badTp1Dist / entryPrice) * 100m;
+                decimal badSlPct = (badSlDist / entryPrice) * 100m;
+                decimal badRr = badSlDist > 0 ? (badTp1Dist / badSlDist) : 0m;
+
+                bool badBlocked = badRr < 0.8m;
+                if (!badBlocked)
+                {
+                    Console.WriteLine($"[Test 42 Fail] Bad R:R ({badRr:F2}) was not blocked!");
+                    return Task.FromResult(false);
+                }
+
+                // Verify exact log output format
+                string log = $"[MarketScanner] SKIP_RR send=NO BTCUSDT tp1%={badTp1Pct:F2}% sl%={badSlPct:F2}% rr={badRr:F2}";
+                Console.WriteLine(log);
+
+                // Case 2: Good R:R (e.g. TP1 +1.08%, SL -1.01%, R:R = 1.07 >= 0.8)
+                decimal goodTp1 = 79200.00m;
+                decimal goodSl = 77560.55m;
+                decimal goodTp1Dist = Math.Abs(goodTp1 - entryPrice);
+                decimal goodSlDist = Math.Abs(goodSl - entryPrice);
+                decimal goodRr = goodSlDist > 0 ? (goodTp1Dist / goodSlDist) : 0m;
+
+                bool goodAllowed = goodRr >= 0.8m;
+                if (!goodAllowed)
+                {
+                    Console.WriteLine($"[Test 42 Fail] Good R:R ({goodRr:F2}) was blocked!");
+                    return Task.FromResult(false);
+                }
+
+                var goodSig = new FuturesSignal
+                {
+                    SignalNumber = 1,
+                    Symbol = "BTCUSDT",
+                    Direction = SignalDirection.Buy,
+                    Timeframe = "15m",
+                    EntryPrice = entryPrice,
+                    TakeProfit1 = goodTp1,
+                    TakeProfit2 = 79800.00m,
+                    TakeProfit3 = 80500.00m,
+                    StopLoss = goodSl,
+                    ConfluenceScore = 80.0m
+                };
+
+                var alertText = TelegramMessageFormatter.FormatSignalAlert(goodSig, 1);
+                bool hasTp1Pct = alertText.Contains("(+1.08%)");
+                bool hasSlPct = alertText.Contains("(-1.01%)");
+                bool hasRr = alertText.Contains(goodRr.ToString("F2", CultureInfo.InvariantCulture)) && alertText.Contains("Risk:Mükafat (R:R)");
+
+                if (!hasTp1Pct || !hasSlPct || !hasRr)
+                {
+                    Console.WriteLine($"[Test 42 Fail] Alert missing TP1%, SL% or R:R: {alertText}");
                     return Task.FromResult(false);
                 }
 

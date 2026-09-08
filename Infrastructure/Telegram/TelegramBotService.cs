@@ -488,6 +488,15 @@ namespace CryptoSense.Infrastructure.Telegram
                     continue;
                 }
 
+                // Strict R:R Gate: R:R = (TP1 məsafəsi) / (SL məsafəsi). R:R < 0.8 isə send=NO
+                decimal tp1Dist = Math.Abs(signal.TakeProfit1 - signal.EntryPrice);
+                decimal slDist = Math.Abs(signal.StopLoss - signal.EntryPrice);
+                decimal rr = slDist > 0 ? (tp1Dist / slDist) : 0m;
+                if (rr < 0.8m)
+                {
+                    continue;
+                }
+
                 // Strict User Coin Filter: User only receives signals if they have explicitly selected coins.
                 if (settings.Coins.Count == 0 || !settings.Coins.Contains(signal.Symbol)) continue;
 

@@ -1076,6 +1076,19 @@ namespace CryptoSense.Worker
 
                                 _livePriceCache.ResetSession(signal.Symbol);
 
+                                // (6) Risk:Reward Gate: R:R = (TP1 məsafəsi) / (SL məsafəsi). R:R < 0.8 isə send=NO
+                                decimal tp1Dist = Math.Abs(signal.TakeProfit1 - signal.EntryPrice);
+                                decimal slDist = Math.Abs(signal.StopLoss - signal.EntryPrice);
+                                decimal tp1Pct = signal.EntryPrice > 0 ? (tp1Dist / signal.EntryPrice) * 100m : 0m;
+                                decimal slPct = signal.EntryPrice > 0 ? (slDist / signal.EntryPrice) * 100m : 0m;
+                                decimal rr = slDist > 0 ? (tp1Dist / slDist) : 0m;
+
+                                if (rr < 0.8m)
+                                {
+                                    Console.WriteLine($"[MarketScanner] SKIP_RR send=NO {signal.Symbol} tp1%={tp1Pct:F2}% sl%={slPct:F2}% rr={rr:F2}");
+                                    continue;
+                                }
+
                                 await _sendSemaphore.WaitAsync(ct);
                                 try
                                 {
