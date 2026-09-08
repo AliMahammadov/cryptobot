@@ -387,6 +387,9 @@ namespace CryptoSense.Application.Services
 
                     var macro = await _marketData.GetMacroMarketOverviewAsync();
                     compass.BtcDominance = macro.BtcDominance;
+                    compass.BtcDominanceThreshold = macro.DynamicDominanceThreshold > 0 
+                        ? macro.DynamicDominanceThreshold 
+                        : (macro.BtcDominance > 0 ? Math.Round(macro.BtcDominance * 0.98m, 2) : 56.5m);
                     compass.UsdtDominance = macro.UsdtDominance;
                     compass.MarketCapChange24h = macro.MarketCapChange24h;
                 }

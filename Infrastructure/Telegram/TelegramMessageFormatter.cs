@@ -227,11 +227,12 @@ namespace CryptoSense.Infrastructure.Telegram
             sb.AppendLine("📊 <b>QOBAL BAZAR DOMİNANTLIĞI:</b>");
             if (compass.BtcDominance > 0)
             {
-                sb.AppendLine($"• <b>Bitcoin Dominantlığı (BTC.D):</b> <b>{compass.BtcDominance.ToString("F2", CultureInfo.InvariantCulture)}%</b>");
+                var threshold = compass.BtcDominanceThreshold > 0 ? compass.BtcDominanceThreshold : 56.5m;
+                sb.AppendLine($"• <b>Bitcoin Dominantlığı (BTC.D):</b> <b>{compass.BtcDominance.ToString("F2", CultureInfo.InvariantCulture)}%</b> (Dinamik Hədd: <b>{threshold.ToString("F2", CultureInfo.InvariantCulture)}%</b>)");
                 sb.AppendLine($"• <b>Tether Dominantlığı (USDT.D):</b> <b>{compass.UsdtDominance.ToString("F2", CultureInfo.InvariantCulture)}%</b>");
-                var altImpact = compass.BtcDominance >= 58.0m 
-                    ? "⚠️ <i>BTC.D yüksəkdir — Altcoinlərdə ehtiyatlı olun.</i>"
-                    : "✅ <i>BTC.D stabildir — Altcoinlərdə ticarət üçün əlverişlidir.</i>";
+                var altImpact = compass.BtcDominance >= threshold 
+                    ? $"⚠️ <i>BTC.D dinamik həddən ({threshold.ToString("F2", CultureInfo.InvariantCulture)}%) yüksəkdir — Altcoinlərdə ehtiyatlı olun.</i>"
+                    : $"✅ <i>BTC.D dinamik həddən ({threshold.ToString("F2", CultureInfo.InvariantCulture)}%) stabildir — Altcoinlərdə ticarət üçün əlverişlidir.</i>";
                 sb.AppendLine($"• <b>Altcoinlərə Təsiri:</b> {altImpact}");
             }
             else
@@ -435,17 +436,17 @@ namespace CryptoSense.Infrastructure.Telegram
             string coinText;
             if (settings.Coins.Count == 0)
             {
-                coinText = "0/16 (Heç bir coin seçilməyib)";
+                coinText = "0/40 (Heç bir coin seçilməyib)";
             }
             else
             {
                 var cleanTickers = string.Join(", ", settings.Coins.Select(c => c.Replace("USDT", "")));
-                coinText = settings.Coins.Count <= 16 
-                    ? $"{settings.Coins.Count}/16 ({cleanTickers})"
+                coinText = settings.Coins.Count <= 40 
+                    ? $"{settings.Coins.Count}/40 ({cleanTickers})"
                     : $"{settings.Coins.Count} coin ({cleanTickers})";
             }
             sb.AppendLine($"🪙 <b>Seçilmiş Coinlər:</b> {coinText}");
-            sb.AppendLine($"🟡 <b>Açıq Mövqeləriniz:</b> {userOpenPositionsCount} ədəd (Maksimum limit: 5)");
+            sb.AppendLine($"🟡 <b>Açıq Mövqeləriniz:</b> {userOpenPositionsCount} ədəd (Maksimum limit: 20)");
             sb.AppendLine($"🔔 <b>Bildiriş Statusu:</b> {(settings.IsActive ? "Aktiv 🟢" : "Dayandırılıb 🔴")}");
             sb.AppendLine($"🕒 <b>Son Siqnal Vaxtı:</b> {(string.IsNullOrEmpty(lastSignalTime) ? "Hələ yoxdur" : lastSignalTime)}");
             sb.AppendLine("-----------------------------------");

@@ -437,8 +437,17 @@ namespace CryptoSense.Infrastructure.MarketData
                     overview.MarketCapChange24h = Math.Round(change24h.GetDecimal(), 2);
                 }
 
+                if (overview.BtcDominance > 0)
+                {
+                    // Dinamik Dominasiya Həddi: Makro bazar kapitallaşması və 24h dalğalanmasına görə canlı hesablanır
+                    decimal dynamicDelta = overview.MarketCapChange24h * 0.12m;
+                    overview.DynamicDominanceThreshold = Math.Round(overview.BtcDominance - dynamicDelta, 2);
+                    if (overview.DynamicDominanceThreshold < 50.0m) overview.DynamicDominanceThreshold = 50.0m;
+                    if (overview.DynamicDominanceThreshold > 65.0m) overview.DynamicDominanceThreshold = 65.0m;
+                }
+
                 overview.FetchedAtUtc = DateTime.UtcNow;
-                overview.Summary = $"BTC.D: {overview.BtcDominance}% | USDT.D: {overview.UsdtDominance}% | 24h: {overview.MarketCapChange24h:+0.00;-0.00}%";
+                overview.Summary = $"BTC.D: {overview.BtcDominance}% (Hədd: {overview.DynamicDominanceThreshold}%) | USDT.D: {overview.UsdtDominance}% | 24h: {overview.MarketCapChange24h:+0.00;-0.00}%";
 
                 lock (_macroLock)
                 {
@@ -475,8 +484,9 @@ namespace CryptoSense.Infrastructure.MarketData
                     {
                         // Normalize against broader crypto market (~65% of top 15 cap is total cap)
                         overview.BtcDominance = Math.Round((btcCap / totalTopCap) * 78.5m, 2);
+                        overview.DynamicDominanceThreshold = Math.Round(overview.BtcDominance * 0.98m, 2);
                         overview.UsdtDominance = Math.Round((usdtCap / totalTopCap) * 12.0m, 2);
-                        overview.Summary = $"BTC.D (Dinamik): {overview.BtcDominance}% | USDT.D: {overview.UsdtDominance}%";
+                        overview.Summary = $"BTC.D (Dinamik): {overview.BtcDominance}% (Hədd: {overview.DynamicDominanceThreshold}%) | USDT.D: {overview.UsdtDominance}%";
                         overview.FetchedAtUtc = DateTime.UtcNow;
                         lock (_macroLock) { _cachedMacro = overview; _lastMacroFetch = DateTime.UtcNow; }
                         return overview;

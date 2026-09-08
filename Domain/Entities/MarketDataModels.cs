@@ -34,6 +34,7 @@ namespace CryptoSense.Domain.Entities
         public decimal Low24h { get; set; }
         public decimal VolumeQuote { get; set; }
         public decimal BtcDominance { get; set; }
+        public decimal BtcDominanceThreshold { get; set; }
         public decimal UsdtDominance { get; set; }
         public decimal MarketCapChange24h { get; set; }
         public decimal Ema20 { get; set; }
@@ -101,6 +102,7 @@ namespace CryptoSense.Domain.Entities
     public class MacroMarketOverview
     {
         public decimal BtcDominance { get; set; } = 59.0m;
+        public decimal DynamicDominanceThreshold { get; set; } = 56.5m;
         public decimal UsdtDominance { get; set; } = 6.8m;
         public decimal TotalMarketCapUsd { get; set; } = 2.65e12m;
         public decimal MarketCapChange24h { get; set; } = 0m;

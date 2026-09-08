@@ -47,7 +47,7 @@ namespace CryptoSense.Infrastructure.Telegram
             {
                 keyboard = new[]
                 {
-                    new[] { new { text = "📋 Standart 16 Coini Seç" } },
+                    new[] { new { text = "📋 Standart 40 Coini Seç" } },
                     new[] { new { text = "➕ Öz coini əlavə et" }, new { text = "🗑 Coin Sil" } },
                     new[] { new { text = "⬅️ Əsas Menyu" } }
                 },

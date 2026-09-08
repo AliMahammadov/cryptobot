@@ -41,12 +41,18 @@ namespace CryptoSense.Infrastructure.Telegram
         private static readonly string SettingsFilePath = Path.Combine(DataDirectory, "user_preferences.json");
         private static readonly string SignalMapFilePath = Path.Combine(DataDirectory, "signal_user_numbers.json");
 
-        public static readonly List<string> Default16Coins = new()
+        public static readonly List<string> Default40Coins = new()
         {
             "BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT", "DOGEUSDT", 
             "LINKUSDT", "AVAXUSDT", "NEARUSDT", "DOTUSDT", "ADAUSDT", "ATOMUSDT", 
-            "ARBUSDT", "OPUSDT", "SUIUSDT", "LTCUSDT"
+            "ARBUSDT", "OPUSDT", "SUIUSDT", "LTCUSDT",
+            "UNIUSDT", "AAVEUSDT", "FILUSDT", "APTUSDT", "BCHUSDT", "TRXUSDT", 
+            "TONUSDT", "INJUSDT", "SEIUSDT", "TIAUSDT", "WLDUSDT", "ENAUSDT", 
+            "HYPEUSDT", "POLUSDT", "HBARUSDT", "XLMUSDT", "ETCUSDT", "LDOUSDT", 
+            "RENDERUSDT", "FETUSDT", "TAOUSDT", "ONDOUSDT", "PENDLEUSDT", "1000PEPEUSDT"
         };
+
+        public static readonly List<string> Default16Coins = Default40Coins;
 
         public static readonly List<string> OptionalCoins = new()
         {
@@ -55,11 +61,12 @@ namespace CryptoSense.Infrastructure.Telegram
 
         public static readonly HashSet<string> Supported50Coins = new(StringComparer.OrdinalIgnoreCase)
         {
-            "BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT", "DOGEUSDT", "SUIUSDT", "PEPEUSDT", "AVAXUSDT", "NOTUSDT",
+            "BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT", "DOGEUSDT", "SUIUSDT", "PEPEUSDT", "1000PEPEUSDT", "AVAXUSDT", "NOTUSDT",
             "TONUSDT", "ADAUSDT", "LINKUSDT", "NEARUSDT", "APTUSDT", "TIAUSDT", "INJUSDT", "OPUSDT", "ARBUSDT", "RENDERUSDT",
             "FETUSDT", "TAOUSDT", "WIFUSDT", "FTMUSDT", "DOTUSDT", "LTCUSDT", "BCHUSDT", "UNIUSDT", "SEIUSDT", "JUPUSDT",
             "WLDUSDT", "SHIBUSDT", "BONKUSDT", "FLOKIUSDT", "ATOMUSDT", "XLMUSDT", "FILUSDT", "ETCUSDT", "ALGOUSDT", "ICPUSDT",
-            "STXUSDT", "PYTHUSDT", "GALAUSDT", "SANDUSDT", "MANAUSDT", "AAVEUSDT", "CRVUSDT", "DYDXUSDT", "MKRUSDT", "PENDLEUSDT"
+            "STXUSDT", "PYTHUSDT", "GALAUSDT", "SANDUSDT", "MANAUSDT", "AAVEUSDT", "CRVUSDT", "DYDXUSDT", "MKRUSDT", "PENDLEUSDT",
+            "TRXUSDT", "ENAUSDT", "HYPEUSDT", "POLUSDT", "HBARUSDT", "LDOUSDT", "ONDOUSDT"
         };
 
         static TelegramBotService()
@@ -195,7 +202,7 @@ namespace CryptoSense.Infrastructure.Telegram
         {
             var settings = UserPreferences.GetOrAdd(chatId, _ => new UserSettings
             {
-                Coins = new List<string>(Default16Coins),
+                Coins = new List<string>(Default40Coins),
                 Timeframe = "Hamısı",
                 IsActive = true
             });
@@ -1006,7 +1013,7 @@ namespace CryptoSense.Infrastructure.Telegram
                                            $"🚀 <b>Kripto Signals Bot Xidməti AKTİVDİR 🟢</b>\n\n" +
                                            $"📖 <b>Sistemdən Necə İstifadə Etməli?</b>\n" +
                                            $"• <b>⭐ Mənim Coinlərim:</b> Yalnız seçdiyiniz coinlər üzrə istədiyiniz zaman kəsiyində ticarət aparın.\n" +
-                                           $"• <b>⚙️ Coin Seçimi:</b> Standart 16 coini seçin, yeni coin əlavə edin və ya siyahını tənzimləyin.\n" +
+                                           $"• <b>⚙️ Coin Seçimi:</b> Standart 40 coini seçin, yeni coin əlavə edin və ya siyahını tənzimləyin.\n" +
                                            $"• <b>🗑 Coin Sil:</b> İzləmək istəmədiyiniz coinləri siyahıdan çıxarın.\n" +
                                            $"• <b>🧭 Bitcoin Kompası:</b> Bazarın ümumi trendini və qüvvəsini izləyin.\n" +
                                            $"• <b>📊 Statistika:</b> Şəxsi əməliyyat performansınızı görün.\n" +
@@ -1028,7 +1035,7 @@ namespace CryptoSense.Infrastructure.Telegram
                                             $"🚀 <b>Kripto Signals Bot Xidməti AKTİVDİR 🟢</b>\n\n" +
                                             $"📖 <b>Sistemdən Necə İstifadə Etməli?</b>\n" +
                                             $"• <b>⭐ Mənim Coinlərim:</b> Yalnız seçdiyiniz coinlər üzrə istədiyiniz zaman kəsiyində ticarət aparın.\n" +
-                                            $"• <b>⚙️ Coin Seçimi:</b> Standart 16 coini seçin, yeni coin əlavə edin və ya siyahını tənzimləyin.\n" +
+                                            $"• <b>⚙️ Coin Seçimi:</b> Standart 40 coini seçin, yeni coin əlavə edin və ya siyahını tənzimləyin.\n" +
                                             $"• <b>🗑 Coin Sil:</b> İzləmək istəmədiyiniz coinləri siyahıdan çıxarın.\n" +
                                             $"• <b>🧭 Bitcoin Kompası:</b> Bazarın ümumi trendini və qüvvəsini izləyin.\n" +
                                             $"• <b>📊 Statistika:</b> Şəxsi əməliyyat performansınızı görün.\n" +
@@ -1295,11 +1302,11 @@ namespace CryptoSense.Infrastructure.Telegram
             if (isAdmin && (text == "🌐 Bütün Coinlərin Siyahısı" || text == "/all_coins"))
             {
                 _userStates.TryRemove(chatId, out _);
-                var monitored = Default16Coins;
+                var monitored = Default40Coins;
 
                 var cleanCoins = monitored.Select(c => c.Replace("USDT", "")).Distinct().ToList();
                 var msg = "🌐 <b>Sistemin Canlı İzlədiyi Bütün Coinlər və Zamanlar</b>\n\n" +
-                          $"📊 <b>Ümumi Coin Sayı:</b> <b>{cleanCoins.Count} ədəd (Standart İnstitusional 16)</b>\n" +
+                          $"📊 <b>Ümumi Coin Sayı:</b> <b>{cleanCoins.Count} ədəd (Standart İnstitusional 40)</b>\n" +
                           $"🪙 <b>İzlənən Coinlər:</b>\n<code>{string.Join(", ", cleanCoins)}</code>\n\n" +
                           "⏱ <b>Dövri Olaraq Analiz Olunan Şamlar:</b>\n" +
                           "• <b>15 Dəqiqə (15m)</b> — Yüksək dəqiqlikli standart trend\n" +
@@ -1476,6 +1483,7 @@ namespace CryptoSense.Infrastructure.Telegram
                     return;
                 }
 
+                if (normalized == "PEPE") normalized = "1000PEPE";
                 var targetSymbol = normalized + "USDT";
 
                 if (userSettings.Coins.Contains(targetSymbol))
@@ -1540,6 +1548,7 @@ namespace CryptoSense.Infrastructure.Telegram
                     if (raw.EndsWith("USDT") && raw.Length > 4) raw = raw.Substring(0, raw.Length - 4);
                     if (raw.Length < 2 || raw.Length > 12 || !System.Text.RegularExpressions.Regex.IsMatch(raw, @"^[A-Z0-9]+$")) continue;
 
+                    if (raw == "PEPE") raw = "1000PEPE";
                     var target = raw + "USDT";
                     if (userSettings.Coins.Contains(target))
                     {
@@ -1772,12 +1781,12 @@ namespace CryptoSense.Infrastructure.Telegram
                 await ScanUserCoinsInstantlyAsync(userSettings, chatId, "4h");
                 return;
             }
-            else if (text == "📋 Standart 16 Coini Seç")
+            else if (text == "📋 Standart 40 Coini Seç" || text == "📋 Standart 16 Coini Seç")
             {
-                userSettings.Coins = new List<string>(Default16Coins);
+                userSettings.Coins = new List<string>(Default40Coins);
                 SaveSettings();
-                var cleanList = string.Join(", ", Default16Coins.Select(c => c.Replace("USDT", "")));
-                var msg = $"✅ <b>Standart 16 institusional coin seçildi (16/16).</b>\n\n" +
+                var cleanList = string.Join(", ", Default40Coins.Select(c => c.Replace("USDT", "")));
+                var msg = $"✅ <b>Standart 40 institusional coin seçildi (40/40).</b>\n\n" +
                           $"🪙 <b>İzlənən Coinlər:</b>\n<code>{cleanList}</code>\n\n" +
                           $"📌 İndi menyudan <b>⭐ Mənim Coinlərim</b> ilə ticarətə başlaya bilərsiniz.";
                 await SendMessageAsync(msg, chatId, TelegramKeyboards.BuildUserKeyboard(userSettings, isAdmin));
@@ -1833,7 +1842,7 @@ namespace CryptoSense.Infrastructure.Telegram
                                $"🔔 <b>Canlı Siqnallar:</b> <b>{(userSettings.IsActive ? "AKTİV 🟢" : "DAYANDIRILIB 🔴")}</b>\n\n" +
                                $"📌 <b>Əsas Funksiyalar:</b>\n" +
                                $"• <b>⭐ Mənim Coinlərim:</b> Yalnız seçdiyiniz coinləri izləyin və ticarətə başlayın.\n" +
-                               $"• <b>⚙️ Coin Seçimi:</b> Standart 16 coini seçin, yeni coin əlavə edin və ya siyahını tənzimləyin.\n" +
+                               $"• <b>⚙️ Coin Seçimi:</b> Standart 40 coini seçin, yeni coin əlavə edin və ya siyahını tənzimləyin.\n" +
                                $"• <b>🗑 Coin Sil:</b> İzləmək istəmədiyiniz coinləri siyahıdan çıxarın.\n" +
                                $"• <b>🧭 Bitcoin Kompası:</b> Canlı BTC trendi, RSI, EMA və Dominans (BTC.D) təhlili.\n" +
                                $"• <b>📊 Statistika:</b> Şəxsi əməliyyat performansınızı görün.\n" +

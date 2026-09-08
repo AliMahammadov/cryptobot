@@ -256,6 +256,8 @@ namespace CryptoSense.Infrastructure.Testing
                 var formatted = TelegramMessageFormatter.FormatBtcCompass(compass);
                 return formatted.Contains("Bitcoin Makro Bazar Kompası") && 
                        formatted.Contains("CANLI QİYMƏT") && 
+                       formatted.Contains("Dinamik Hədd") &&
+                       compass.BtcDominanceThreshold > 0 &&
                        compass.Price > 0;
             });
 
@@ -381,7 +383,7 @@ namespace CryptoSense.Infrastructure.Testing
                 // Test "Hamısı" formats strictly as "15m, 1h, 4h" in bot status
                 var statusText = TelegramMessageFormatter.FormatBotStatus(userSettings, 0, "07.09.2026 00:30:07");
                 bool hasCleanTf = statusText.Contains("15m, 1h, 4h");
-                bool hasCleanCoins = statusText.Contains("16/16");
+                bool hasCleanCoins = statusText.Contains("40/40");
                 bool hasAzeTime = statusText.Contains("07.09.2026 00:30:07");
 
                 // Test button precedence: Hamısı must resolve to Hamısı even when containing "15m"
@@ -639,19 +641,15 @@ namespace CryptoSense.Infrastructure.Testing
             // 25. New Architecture: Strict Coin Lock & Max Concurrent Portfolio Positions Model
             await AssertTest("Test 32: New Architecture - Strict Coin Lock & Portfolio Safety Logic", () =>
             {
-                // Verify that 1 active trade locks the coin across all timeframes
-                var activeTrades = new Dictionary<string, (int SignalNumber, string Timeframe)>
+                var activeTrades = new Dictionary<string, (int SignalNumber, string Timeframe)>();
+                for (int i = 1; i <= 20; i++)
                 {
-                    { "BTCUSDT", (1, "15m") },
-                    { "ETHUSDT", (2, "5m") },
-                    { "SOLUSDT", (3, "3m") },
-                    { "BNBUSDT", (4, "15m") },
-                    { "DOGEUSDT", (5, "5m") }
-                };
+                    activeTrades[$"COIN_{i}_USDT"] = (i, "15m");
+                }
 
-                const int maxGlobalOpenPositions = 5;
+                const int maxGlobalOpenPositions = 20;
                 bool isGlobalLimitReached = activeTrades.Count >= maxGlobalOpenPositions;
-                bool isBtcLockedFor3m = activeTrades.ContainsKey("BTCUSDT"); // Cannot open BTC on 3m while 15m is open
+                bool isBtcLockedFor3m = activeTrades.ContainsKey("COIN_1_USDT");
                 bool isAvaxEligible = !activeTrades.ContainsKey("AVAXUSDT") && !isGlobalLimitReached; // False because limit reached
 
                 return Task.FromResult(isGlobalLimitReached && isBtcLockedFor3m && !isAvaxEligible);
@@ -1048,6 +1046,47 @@ namespace CryptoSense.Infrastructure.Testing
                 }
 
                 return Task.FromResult(true);
+            });
+
+            // 36. News Sentiment: Negation & Halting Detection (Strategy Halted Buys is strictly Bearish)
+            await AssertTest("Test 43: News Sentiment - Negation & Halting Detection (Strategy Halted Buys is Bearish)", () =>
+            {
+                var title = "Strategy Halted Its Bitcoin Buys Again Last Week";
+                var (sentiment, score) = CryptoSense.Application.Services.NewsService.AnalyzeTextSentiment(title);
+                
+                bool isBearish = sentiment.Contains("BEARISH") || sentiment.Contains("MƏNFİ") || score < 0;
+                bool isNotBullish = !sentiment.Contains("BULLISH") && score <= -50;
+
+                var pauseTitle = "Tesla Paused Bitcoin Payments";
+                var (pauseSentiment, pauseScore) = CryptoSense.Application.Services.NewsService.AnalyzeTextSentiment(pauseTitle);
+                bool pauseIsBearish = pauseScore < 0;
+
+                var normalBuy = "Company Buys 500 Bitcoin";
+                var (buySentiment, buyScore) = CryptoSense.Application.Services.NewsService.AnalyzeTextSentiment(normalBuy);
+                bool buyIsBullish = buyScore > 0;
+
+                return Task.FromResult(isBearish && isNotBullish && pauseIsBearish && buyIsBullish);
+            });
+
+            // 37. 40 Coins Universe & Max 20 Positions Limit Verification
+            await AssertTest("Test 44: 40 Coins Universe & Max 20 Limit Verification", () =>
+            {
+                var coins40 = TelegramBotService.Default40Coins;
+                bool has40 = coins40.Count == 40;
+                
+                var requiredCoins = new[]
+                {
+                    "UNIUSDT", "AAVEUSDT", "FILUSDT", "APTUSDT", "BCHUSDT", "TRXUSDT", 
+                    "TONUSDT", "INJUSDT", "SEIUSDT", "TIAUSDT", "WLDUSDT", "ENAUSDT", 
+                    "HYPEUSDT", "POLUSDT", "HBARUSDT", "XLMUSDT", "ETCUSDT", "LDOUSDT", 
+                    "RENDERUSDT", "FETUSDT", "TAOUSDT", "ONDOUSDT", "PENDLEUSDT", "1000PEPEUSDT"
+                };
+
+                bool allIncluded = requiredCoins.All(c => coins40.Contains(c, StringComparer.OrdinalIgnoreCase));
+                bool allInSupported = requiredCoins.All(c => TelegramBotService.Supported50Coins.Contains(c));
+                bool maxLimit20 = CryptoSense.Worker.BackgroundMarketScanner.MaxGlobalOpenPositions == 20;
+
+                return Task.FromResult(has40 && allIncluded && allInSupported && maxLimit20);
             });
 
             Console.WriteLine("\n========================================================");

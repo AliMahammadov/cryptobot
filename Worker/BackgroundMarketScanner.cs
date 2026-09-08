@@ -28,7 +28,7 @@ namespace CryptoSense.Worker
         private readonly BinanceFuturesWsClient _wsClient;
         private readonly AppConfig _config;
 
-        public const int MaxGlobalOpenPositions = 5;
+        public const int MaxGlobalOpenPositions = 20;
 
         private static int _consecutiveLosses = 0;
         private static DateTime _circuitBreakerUntil = DateTime.MinValue;
@@ -138,24 +138,8 @@ namespace CryptoSense.Worker
                 }
             }, stoppingToken);
 
-            // 3. REAL-TIME BREAKING NEWS & NEW LISTING PUSH MONITOR (Every 30 seconds)
-            var newsMonitorTask = Task.Run(async () =>
-            {
-                while (!stoppingToken.IsCancellationRequested)
-                {
-                    try
-                    {
-                        await MonitorBreakingNewsAndListingsAsync(stoppingToken);
-                    }
-                    catch (Exception ex)
-                    {
-                        Console.WriteLine($"[NewsMonitor] Warning: {ex.Message}");
-                    }
-                    await Task.Delay(30000, stoppingToken);
-                }
-            }, stoppingToken);
-
-            await Task.WhenAll(outcomeTrackerTask, marketScannerTask, newsMonitorTask);
+            // 3. REAL-TIME BREAKING NEWS & NEW LISTING PUSH MONITOR - Dayandırıldı (istifadəçi tələbi ilə avtomatik xəbər axını söndürüldü)
+            await Task.WhenAll(outcomeTrackerTask, marketScannerTask);
         }
 
         private async Task TrackActiveSignalOutcomesAsync(CancellationToken stoppingToken)
@@ -956,7 +940,7 @@ namespace CryptoSense.Worker
             if (coinsToScan.Count > 0)
             {
                 // Scan by COIN in parallel (eliminates multiple threads scanning the same coin simultaneously!)
-                await Parallel.ForEachAsync(coinsToScan, new ParallelOptions { MaxDegreeOfParallelism = 5, CancellationToken = stoppingToken }, async (sym, ct) =>
+                await Parallel.ForEachAsync(coinsToScan, new ParallelOptions { MaxDegreeOfParallelism = 10, CancellationToken = stoppingToken }, async (sym, ct) =>
                 {
                     try
                     {
@@ -1207,36 +1191,10 @@ namespace CryptoSense.Worker
         private static DateTime _lastNewsAlertSentUtc = DateTime.MinValue;
         private static readonly TimeSpan MinNewsAlertInterval = TimeSpan.FromMinutes(3);
 
-        private async Task MonitorBreakingNewsAndListingsAsync(CancellationToken stoppingToken)
+        private Task MonitorBreakingNewsAndListingsAsync(CancellationToken stoppingToken)
         {
-            // Anti-flood: ən azı 3 dəqiqə fasilə gözlənilir, ard-arda bildiriş gəlməsi qadağandır
-            if (DateTime.UtcNow - _lastNewsAlertSentUtc < MinNewsAlertInterval)
-            {
-                return;
-            }
-
-            using var scope = _serviceProvider.CreateScope();
-            var newsService = scope.ServiceProvider.GetRequiredService<INewsService>();
-
-            var urgentItems = await newsService.GetUrgentBreakingNewsAndListingsAsync();
-            if (urgentItems == null || urgentItems.Count == 0) return;
-
-            // Ard-arda gəlmənin qarşısını almaq üçün: Dövr başına yalnız ən təzə 1 xəbər göndərilir
-            var itemToSend = urgentItems.OrderByDescending(x => x.PublishedAt).FirstOrDefault();
-            if (itemToSend != null)
-            {
-                if (stoppingToken.IsCancellationRequested) return;
-
-                bool isListing = itemToSend.Title.Contains("List", StringComparison.OrdinalIgnoreCase) || 
-                                 itemToSend.Title.Contains("Token", StringComparison.OrdinalIgnoreCase) ||
-                                 itemToSend.Title.Contains("Binance", StringComparison.OrdinalIgnoreCase) ||
-                                 itemToSend.OriginalTitle.Contains("List", StringComparison.OrdinalIgnoreCase) ||
-                                 itemToSend.OriginalTitle.Contains("Token", StringComparison.OrdinalIgnoreCase);
-
-                await _telegramService.SendUrgentNewsAlertAsync(itemToSend, isListing);
-                _lastNewsAlertSentUtc = DateTime.UtcNow;
-                Console.WriteLine($"[NewsMonitor] Sent urgent news alert: {itemToSend.Title} (Published: {itemToSend.PublishedAt:HH:mm:ss} UTC)");
-            }
+            // Avtomatik xəbər axını istifadəçi əmri ilə qəti şəkildə dayandırıldı.
+            return Task.CompletedTask;
         }
     }
 }

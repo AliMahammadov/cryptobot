@@ -29,14 +29,37 @@ namespace CryptoSense.Application.Services
         {
             "surge", "surges", "soar", "soars", "jump", "jumps", "rally", "rallies", "bull", "bullish", "record",
             "all-time high", "ath", "adoption", "approved", "approval", "inflow", "inflows", "gain", "gains",
-            "pump", "breakout", "accumulate", "accumulation", "growth", "optimistic", "partnership", "upgrade", "buys", "buy", "green"
+            "pump", "breakout", "accumulate", "accumulation", "growth", "optimistic", "partnership", "upgrade", "buys", "buy", "buying", "bought", "green"
         };
 
         private static readonly string[] BearishWords = new[]
         {
             "crash", "crashes", "plunge", "plunges", "drop", "drops", "fall", "falls", "bear", "bearish", "ban",
-            "bans", "lawsuit", "sue", "sues", "sec", "hack", "hacked", "stolen", "dump", "dumps", "outflow",
-            "outflows", "liquidation", "liquidated", "scam", "warning", "panic", "fear", "down", "collapse", "decline", "red"
+            "bans", "lawsuit", "sue", "sues", "sec", "hack", "hacked", "stolen", "dump", "dumps", "dumping", "outflow",
+            "outflows", "liquidation", "liquidated", "scam", "warning", "panic", "fear", "down", "collapse", "decline", "declines", "red",
+            "halt", "halts", "halted", "pause", "pauses", "paused", "stop", "stops", "stopped", "suspend", "suspends", "suspended",
+            "sell", "sells", "selling", "sold", "loss", "losses", "cut", "cuts", "freeze", "freezes", "frozen", "reject", "rejected", "rejection", "fail", "fails", "failed", "downturn"
+        };
+
+        private static readonly string[] BearishNegationPrefixes = new[]
+        {
+            "halt", "halts", "halted", "halting",
+            "stop", "stops", "stopped", "stopping",
+            "pause", "pauses", "paused", "pausing",
+            "suspend", "suspends", "suspended", "suspending",
+            "cancel", "cancels", "canceled", "cancelling",
+            "delay", "delays", "delayed", "delaying",
+            "freeze", "freezes", "frozen",
+            "reject", "rejects", "rejected",
+            "fail", "fails", "failed",
+            "cut", "cuts", "cutting"
+        };
+
+        private static readonly string[] BullishActionTargets = new[]
+        {
+            "buy", "buys", "buying", "bought", "purchase", "purchases", "purchasing",
+            "inflow", "inflows", "accumulation", "accumulating", "accumulate",
+            "adoption", "etf", "approval", "rally", "growth"
         };
 
         private static readonly Dictionary<string, string> DictionaryAz = new(StringComparer.OrdinalIgnoreCase)
@@ -44,6 +67,12 @@ namespace CryptoSense.Application.Services
             { "Bitcoin", "Bitcoin" },
             { "Ethereum", "Ethereum" },
             { "Crypto", "Kripto" },
+            { "Strategy", "MicroStrategy" },
+            { "Halted", "Dayandırdı" },
+            { "Halt", "Dayandırıldı" },
+            { "Buys", "Alışları" },
+            { "Buy", "Alış" },
+            { "Buying", "Alışı" },
             { "Surges", "Sürətlə yüksəlir" },
             { "Plunges", "Kəskin düşür" },
             { "Rally", "Yüksəliş dalğası" },
@@ -552,19 +581,52 @@ namespace CryptoSense.Application.Services
             return text;
         }
 
-        private static (string Sentiment, int Score) AnalyzeTextSentiment(string text)
+        public static (string Sentiment, int Score) AnalyzeTextSentiment(string text)
         {
             var lower = text.ToLowerInvariant();
             int score = 0;
 
-            foreach (var w in BullishWords)
+            // 1. Kritik Qayda: İnkar və Alışın Dayandırılması (məs: "Strategy Halted Its Bitcoin Buys")
+            // Əgər alış, kapital axını və ya böyümə dayandırılıb/ləğv edilibsə, bu qəti şəkildə GÜCLÜ BEARISH-dir!
+            bool hasBearishNegation = false;
+            foreach (var neg in BearishNegationPrefixes)
             {
-                if (lower.Contains(w)) score += 30;
+                if (Regex.IsMatch(lower, $@"\b{Regex.Escape(neg)}\b", RegexOptions.IgnoreCase))
+                {
+                    foreach (var target in BullishActionTargets)
+                    {
+                        if (Regex.IsMatch(lower, $@"\b{Regex.Escape(target)}\b", RegexOptions.IgnoreCase))
+                        {
+                            hasBearishNegation = true;
+                            break;
+                        }
+                    }
+                }
+                if (hasBearishNegation) break;
             }
 
+            if (hasBearishNegation)
+            {
+                score = -75;
+                return ("BEARISH (MƏNFİ) 🔴", score);
+            }
+
+            // 2. Bearish sözlərin dəqiq söz sərhədi (\b) ilə axtarışı
             foreach (var w in BearishWords)
             {
-                if (lower.Contains(w)) score -= 35;
+                if (Regex.IsMatch(lower, $@"\b{Regex.Escape(w)}\b", RegexOptions.IgnoreCase))
+                {
+                    score -= 35;
+                }
+            }
+
+            // 3. Bullish sözlərin dəqiq söz sərhədi (\b) ilə axtarışı (yalnız inkar olmadıqda)
+            foreach (var w in BullishWords)
+            {
+                if (Regex.IsMatch(lower, $@"\b{Regex.Escape(w)}\b", RegexOptions.IgnoreCase))
+                {
+                    score += 30;
+                }
             }
 
             score = Math.Clamp(score, -100, 100);
