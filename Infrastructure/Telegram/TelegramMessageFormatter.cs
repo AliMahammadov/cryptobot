@@ -173,7 +173,7 @@ namespace CryptoSense.Infrastructure.Telegram
         public static string FormatUrgentNewsAlert(CryptoNewsItem newsItem, bool isListing = false)
         {
             var sb = new StringBuilder();
-            if (isListing || newsItem.Title.Contains("List", StringComparison.OrdinalIgnoreCase) || newsItem.Title.Contains("Token", StringComparison.OrdinalIgnoreCase))
+            if (isListing || newsItem.Title.Contains("List", StringComparison.OrdinalIgnoreCase) || newsItem.Title.Contains("Token", StringComparison.OrdinalIgnoreCase) || newsItem.OriginalTitle.Contains("List", StringComparison.OrdinalIgnoreCase) || newsItem.OriginalTitle.Contains("Token", StringComparison.OrdinalIgnoreCase))
             {
                 sb.AppendLine("🪙 <b>YENİ COİN LİSTİNQİ / BURAXILIŞ BİLDİRİŞİ!</b> 🚀");
             }
@@ -186,7 +186,7 @@ namespace CryptoSense.Infrastructure.Telegram
             sb.AppendLine($"📰 <b>Məlumat:</b> <b>{safeTitle}</b>");
             sb.AppendLine($"🌐 <b>Mənbə:</b> <code>{newsItem.Source}</code>");
             sb.AppendLine($"🎯 <b>Bazar Əhvalı / Təsiri:</b> <b>{newsItem.Sentiment}</b>");
-            sb.AppendLine($"🕒 <b>Tarix:</b> <code>{newsItem.PublishedAt:dd.MM.yyyy | HH:mm:ss}</code>");
+            sb.AppendLine($"🕒 <b>Paylaşılma Vaxtı (Bakı):</b> <code>{CryptoSense.Domain.Common.TimeHelper.FormatAz(newsItem.PublishedAt)}</code>");
             if (!string.IsNullOrWhiteSpace(newsItem.Url))
             {
                 sb.AppendLine();

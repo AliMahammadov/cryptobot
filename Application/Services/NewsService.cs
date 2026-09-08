@@ -8,6 +8,8 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using System.Xml.Linq;
+using System.Globalization;
+using System.IO;
 using CryptoSense.Application.Interfaces;
 using CryptoSense.Domain.Entities;
 
@@ -60,7 +62,7 @@ namespace CryptoSense.Application.Services
 
         public async Task<NewsSentimentSummary> GetNewsAndSentimentAsync()
         {
-            if (_cachedSummary != null && DateTime.UtcNow - _lastFetchTime < TimeSpan.FromMinutes(2))
+            if (_cachedSummary != null && DateTime.UtcNow - _lastFetchTime < TimeSpan.FromSeconds(30))
             {
                 return _cachedSummary;
             }
@@ -68,89 +70,108 @@ namespace CryptoSense.Application.Services
             await _newsLock.WaitAsync();
             try
             {
-                if (_cachedSummary != null && DateTime.UtcNow - _lastFetchTime < TimeSpan.FromMinutes(2))
+                if (_cachedSummary != null && DateTime.UtcNow - _lastFetchTime < TimeSpan.FromSeconds(30))
                 {
                     return _cachedSummary;
                 }
 
-            var summary = new NewsSentimentSummary();
-            var allItems = new List<CryptoNewsItem>();
+                var summary = new NewsSentimentSummary();
+                var allItems = new List<CryptoNewsItem>();
 
-            var sources = new (string Name, string Url)[]
-            {
-                ("CoinTelegraph", "https://cointelegraph.com/rss"),
-                ("CoinDesk", "https://www.coindesk.com/arc/outboundfeeds/rss/"),
-                ("Decrypt", "https://decrypt.co/feed"),
-                ("Bitcoin Magazine", "https://bitcoinmagazine.com/feed")
-            };
-
-            foreach (var (sourceName, feedUrl) in sources)
-            {
-                try
+                var sources = new (string Name, string Url)[]
                 {
-                    using var cts = new System.Threading.CancellationTokenSource(TimeSpan.FromSeconds(3));
-                    var content = await _httpClient.GetStringAsync(feedUrl, cts.Token);
-                    var xdoc = XDocument.Parse(content);
-                    var items = xdoc.Descendants("item").Take(3);
+                    ("CoinTelegraph", "https://cointelegraph.com/rss"),
+                    ("CoinDesk", "https://www.coindesk.com/arc/outboundfeeds/rss/"),
+                    ("Decrypt", "https://decrypt.co/feed"),
+                    ("Bitcoin Magazine", "https://bitcoinmagazine.com/feed")
+                };
 
-                    foreach (var item in items)
+                foreach (var (sourceName, feedUrl) in sources)
+                {
+                    try
                     {
-                        var title = item.Element("title")?.Value?.Trim() ?? "";
-                        var link = item.Element("link")?.Value?.Trim() ?? "";
-                        var pubDateStr = item.Element("pubDate")?.Value ?? "";
-                        DateTime.TryParse(pubDateStr, out var pubDate);
-                        if (pubDate == DateTime.MinValue) pubDate = DateTime.UtcNow;
+                        using var cts = new System.Threading.CancellationTokenSource(TimeSpan.FromSeconds(3));
+                        var content = await _httpClient.GetStringAsync(feedUrl, cts.Token);
+                        var xdoc = XDocument.Parse(content);
+                        var items = xdoc.Descendants("item").Take(10);
 
-                        if (string.IsNullOrWhiteSpace(title)) continue;
-
-                        var (sentiment, score) = AnalyzeTextSentiment(title);
-                        var titleAz = await TranslateToAzAsync(title);
-
-                        allItems.Add(new CryptoNewsItem
+                        foreach (var item in items)
                         {
-                            Title = titleAz,
-                            Source = sourceName,
-                            Url = link,
-                            PublishedAt = pubDate,
-                            Sentiment = sentiment,
-                            SentimentScore = score
-                        });
+                            var title = item.Element("title")?.Value?.Trim() ?? "";
+                            var link = item.Element("link")?.Value?.Trim() ?? "";
+                            var pubDateStr = item.Element("pubDate")?.Value 
+                                          ?? item.Element(XName.Get("date", "http://purl.org/dc/elements/1.1/"))?.Value 
+                                          ?? "";
+                            DateTime pubDate = DateTime.MinValue;
+                            if (!string.IsNullOrWhiteSpace(pubDateStr))
+                            {
+                                if (DateTimeOffset.TryParse(pubDateStr, CultureInfo.InvariantCulture, DateTimeStyles.None, out var parsedDto))
+                                {
+                                    pubDate = parsedDto.UtcDateTime;
+                                }
+                                else if (DateTime.TryParse(pubDateStr, CultureInfo.InvariantCulture, DateTimeStyles.AdjustToUniversal, out var parsedDt))
+                                {
+                                    pubDate = parsedDt.ToUniversalTime();
+                                }
+                            }
+
+                            if (pubDate == DateTime.MinValue)
+                            {
+                                // Qətiyyən indiki zaman götürmürük; etibarlı tarix yoxdursa köhnə xəbərin yanlışlıqla yeni kimi çıxmasının qarşısı alınır
+                                continue;
+                            }
+
+                            if (string.IsNullOrWhiteSpace(title)) continue;
+
+                            var (sentiment, score) = AnalyzeTextSentiment(title);
+                            var titleAz = await TranslateToAzAsync(title);
+
+                            allItems.Add(new CryptoNewsItem
+                            {
+                                Title = titleAz,
+                                OriginalTitle = title,
+                                Source = sourceName,
+                                Url = link,
+                                PublishedAt = pubDate,
+                                Sentiment = sentiment,
+                                SentimentScore = score
+                            });
+                        }
+                    }
+                    catch
+                    {
                     }
                 }
-                catch
-                {
-                }
-            }
 
-            if (allItems.Count == 0)
-            {
-                summary.LatestNews = new List<CryptoNewsItem>();
-                summary.BullishCount = 0;
-                summary.BearishCount = 0;
-                summary.OverallScore = 0;
-                summary.Status = "XƏBƏR ƏLÇATMAZDIR (NEYTRAL) ⚪";
+                if (allItems.Count == 0)
+                {
+                    summary.LatestNews = new List<CryptoNewsItem>();
+                    summary.BullishCount = 0;
+                    summary.BearishCount = 0;
+                    summary.OverallScore = 0;
+                    summary.Status = "XƏBƏR ƏLÇATMAZDIR (NEYTRAL) ⚪";
+                    _cachedSummary = summary;
+                    _lastFetchTime = DateTime.UtcNow;
+                    return summary;
+                }
+
+                allItems.Sort((a, b) => b.PublishedAt.CompareTo(a.PublishedAt));
+                summary.LatestNews = allItems.Take(15).ToList();
+
+                summary.BullishCount = summary.LatestNews.Count(n => n.SentimentScore > 0);
+                summary.BearishCount = summary.LatestNews.Count(n => n.SentimentScore < 0);
+
+                var avgScore = summary.LatestNews.Count > 0 ? (int)summary.LatestNews.Average(n => n.SentimentScore) : 0;
+                summary.OverallScore = Math.Clamp(avgScore, -100, 100);
+
+                if (summary.OverallScore >= 25) summary.Status = "BULLISH (MÜSBƏT) 🟢";
+                else if (summary.OverallScore <= -25) summary.Status = "BEARISH (MƏNFİ) 🔴";
+                else summary.Status = "NEYTRAL (BALANS) ⚪";
+
                 _cachedSummary = summary;
                 _lastFetchTime = DateTime.UtcNow;
+
                 return summary;
-            }
-
-            allItems.Sort((a, b) => b.PublishedAt.CompareTo(a.PublishedAt));
-            summary.LatestNews = allItems.Take(15).ToList();
-
-            summary.BullishCount = summary.LatestNews.Count(n => n.SentimentScore > 0);
-            summary.BearishCount = summary.LatestNews.Count(n => n.SentimentScore < 0);
-
-            var avgScore = summary.LatestNews.Count > 0 ? (int)summary.LatestNews.Average(n => n.SentimentScore) : 0;
-            summary.OverallScore = Math.Clamp(avgScore, -100, 100);
-
-            if (summary.OverallScore >= 25) summary.Status = "BULLISH (MÜSBƏT) 🟢";
-            else if (summary.OverallScore <= -25) summary.Status = "BEARISH (MƏNFİ) 🔴";
-            else summary.Status = "NEYTRAL (BALANS) ⚪";
-
-            _cachedSummary = summary;
-            _lastFetchTime = DateTime.UtcNow;
-
-            return summary;
             }
             finally
             {
@@ -158,7 +179,105 @@ namespace CryptoSense.Application.Services
             }
         }
 
-        private static readonly ConcurrentDictionary<string, (DateTime FirstSeen, string NormalizedTitle)> _seenNewsCache = new();
+        public class SentNewsRecord
+        {
+            public string Title { get; set; } = "";
+            public string OriginalTitle { get; set; } = "";
+            public string NormalizedTitle { get; set; } = "";
+            public List<string> Keywords { get; set; } = new();
+            public string Url { get; set; } = "";
+            public DateTime PublishedAtUtc { get; set; }
+            public DateTime SentAtUtc { get; set; }
+        }
+
+        private static readonly string DataDirectory = !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("RAILWAY_VOLUME_MOUNT_PATH")) && Directory.Exists(Environment.GetEnvironmentVariable("RAILWAY_VOLUME_MOUNT_PATH"))
+            ? Environment.GetEnvironmentVariable("RAILWAY_VOLUME_MOUNT_PATH")!
+            : (Directory.Exists("/app/data") ? "/app/data" : Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "data"));
+        private static readonly string SentNewsFilePath = Path.Combine(DataDirectory, "sent_news_history.json");
+        private static readonly object _sentNewsLock = new();
+        private static List<SentNewsRecord> _sentNewsRecords = new();
+        private static DateTime _lastPublishedCutoffUtc = DateTime.UtcNow.AddMinutes(-5);
+
+        static NewsService()
+        {
+            LoadSentNewsHistory();
+        }
+
+        private static void LoadSentNewsHistory()
+        {
+            lock (_sentNewsLock)
+            {
+                try
+                {
+                    if (File.Exists(SentNewsFilePath))
+                    {
+                        var json = File.ReadAllText(SentNewsFilePath);
+                        var list = JsonSerializer.Deserialize<List<SentNewsRecord>>(json);
+                        if (list != null)
+                        {
+                            var cutoff24h = DateTime.UtcNow.AddHours(-24);
+                            _sentNewsRecords = list.Where(r => r.SentAtUtc >= cutoff24h).ToList();
+                            if (_sentNewsRecords.Count > 0)
+                            {
+                                var maxSentPub = _sentNewsRecords.Max(r => r.PublishedAtUtc);
+                                _lastPublishedCutoffUtc = maxSentPub > DateTime.UtcNow.AddMinutes(-30)
+                                    ? maxSentPub
+                                    : DateTime.UtcNow.AddMinutes(-5);
+                            }
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[NewsService] LoadSentNewsHistory error: {ex.Message}");
+                }
+            }
+        }
+
+        private static void SaveSentNewsHistory()
+        {
+            lock (_sentNewsLock)
+            {
+                try
+                {
+                    if (!Directory.Exists(DataDirectory))
+                    {
+                        Directory.CreateDirectory(DataDirectory);
+                    }
+                    var cutoff24h = DateTime.UtcNow.AddHours(-24);
+                    _sentNewsRecords = _sentNewsRecords.Where(r => r.SentAtUtc >= cutoff24h).ToList();
+                    var json = JsonSerializer.Serialize(_sentNewsRecords, new JsonSerializerOptions { WriteIndented = true });
+                    File.WriteAllText(SentNewsFilePath, json);
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[NewsService] SaveSentNewsHistory error: {ex.Message}");
+                }
+            }
+        }
+
+        private static readonly HashSet<string> StopWords = new(StringComparer.OrdinalIgnoreCase)
+        {
+            "a", "an", "the", "in", "on", "at", "to", "for", "of", "with", "by", "from", "up", "about",
+            "into", "over", "after", "is", "are", "was", "were", "be", "been", "being", "have", "has",
+            "had", "do", "does", "did", "but", "and", "or", "as", "if", "not", "new", "says", "market",
+            "price", "crypto", "cryptocurrency", "today", "now", "just", "will", "this", "that", "these",
+            "those", "its", "it's", "their", "more", "than", "down", "post", "read", "view",
+            "bu", "bir", "ve", "və", "ile", "ilə", "üçün", "ucun", "haqqinda", "haqqında", "kimi", "yeni", "teze", "təzə",
+            "qiyməti", "qiymet", "bazar", "kripto", "bugün", "indi", "artıq", "üzrə", "sonra"
+        };
+
+        public static List<string> ExtractSignificantKeywords(string text)
+        {
+            if (string.IsNullOrWhiteSpace(text)) return new();
+            var lower = text.ToLowerInvariant();
+            var words = Regex.Matches(lower, @"\b[a-z0-9]{3,}\b")
+                             .Select(m => m.Value)
+                             .Where(w => !StopWords.Contains(w))
+                             .Distinct()
+                             .ToList();
+            return words;
+        }
 
         public static string NormalizeNewsTitle(string title)
         {
@@ -207,46 +326,162 @@ namespace CryptoSense.Application.Services
             if (summary.LatestNews == null || summary.LatestNews.Count == 0) return urgentItems;
 
             var listingWords = new[] { "list", "lists", "listing", "launch", "binance", "airdrop", "token", "təzə", "yeni" };
-            var breakingWords = new[] { "sec", "fed", "interest rate", "faiz", "rate cut", "inflation", "cpi", "emergency", "təcili", "hack", "exploit", "etf", "approval", "təsdiq", "court", "lawsuit", "məhkəmə", "tariff", "war", "ban", "qadağa", "breaking" };
+            var breakingWords = new[] { "sec", "fed", "interest rate", "faiz", "rate cut", "rate hike", "inflation", "cpi", "emergency", "təcili", "hack", "exploit", "etf", "approval", "təsdiq", "court", "lawsuit", "məhkəmə", "tariff", "war", "ban", "qadağa", "breaking", "ath", "all-time high" };
 
-            foreach (var item in summary.LatestNews)
+            var now = DateTime.UtcNow;
+            DateTime highestPublishedInBatch = _lastPublishedCutoffUtc;
+
+            lock (_sentNewsLock)
             {
-                var lowerTitle = (item.Title + " " + item.Url).ToLowerInvariant();
-                bool isListing = listingWords.Any(w => lowerTitle.Contains(w));
-                bool isBreaking = breakingWords.Any(w => lowerTitle.Contains(w));
+                // Filter out records older than 24h
+                var cutoff24h = now.AddHours(-24);
+                _sentNewsRecords.RemoveAll(r => r.SentAtUtc < cutoff24h);
 
-                if (isListing || isBreaking || Math.Abs(item.SentimentScore) >= 60)
+                foreach (var item in summary.LatestNews)
                 {
-                    var normTitle = NormalizeNewsTitle(item.Title);
-                    var newsKey = !string.IsNullOrWhiteSpace(item.Url) ? item.Url.Trim() : normTitle;
-                    var now = DateTime.UtcNow;
-
-                    if (_seenNewsCache.TryGetValue(newsKey, out var existing))
+                    // Track highest publication date seen in current batch (not exceeding now + 2m for clock skew)
+                    if (item.PublishedAt > highestPublishedInBatch && item.PublishedAt <= now.AddMinutes(2))
                     {
-                        var ageHours = (now - existing.FirstSeen).TotalHours;
-                        if (ageHours < 12)
+                        highestPublishedInBatch = item.PublishedAt;
+                    }
+
+                    // QAYDA 1: ZAMAN FİLTRİ (Publication Time Filter)
+                    // 14:56-da paylaşılan xəbərdən sonra 14:57, 14:58-də yalnız həmin dəqiqələrdə paylaşılanlar göndərilir!
+                    // Köhnə vaxtda paylaşılan xəbərlər QƏTİYYƏN bir daha göndərilmir.
+                    if (item.PublishedAt <= _lastPublishedCutoffUtc)
+                    {
+                        continue;
+                    }
+                    if (now - item.PublishedAt > TimeSpan.FromMinutes(15))
+                    {
+                        continue;
+                    }
+
+                    var searchBody = (item.OriginalTitle + " " + item.Title + " " + item.Url).ToLowerInvariant();
+                    bool isListing = listingWords.Any(w => searchBody.Contains(w));
+                    bool isBreaking = breakingWords.Any(w => searchBody.Contains(w));
+
+                    if (isListing || isBreaking || Math.Abs(item.SentimentScore) >= 60)
+                    {
+                        var normAzTitle = NormalizeNewsTitle(item.Title);
+                        var normEnTitle = NormalizeNewsTitle(item.OriginalTitle);
+                        var azKeywords = ExtractSignificantKeywords(item.Title);
+                        var enKeywords = ExtractSignificantKeywords(item.OriginalTitle);
+                        var combinedItemKeywords = azKeywords.Union(enKeywords, StringComparer.OrdinalIgnoreCase).Distinct().ToList();
+
+                        // QAYDA 2: GÜN ƏRZİNDƏ EYNİ TİP XƏBƏRİN TƏKRAR BLOKLANMASI (24 saatlıq unikal mövzu yoxlaması)
+                        // "Bir xəbər gün ərzində bir dəfə gəldi, ikinci səfər eyni tip xəbər gəlməsin"
+                        bool isDuplicate = false;
+
+                        foreach (var sent in _sentNewsRecords)
                         {
-                            // 12 saat eyni açar -> göndərmə. YALNIZ normalize başlıq >30% dəyişəndə UPDATE
-                            var diff = CalculateTitleDifference(existing.NormalizedTitle, normTitle);
-                            if (diff > 0.30)
+                            // 1. Eyni URL
+                            if (!string.IsNullOrWhiteSpace(item.Url) && !string.IsNullOrWhiteSpace(sent.Url) &&
+                                string.Equals(item.Url.Trim(), sent.Url.Trim(), StringComparison.OrdinalIgnoreCase))
                             {
-                                _seenNewsCache[newsKey] = (now, normTitle);
-                                item.Title = "🔄 [YENİLƏNMƏ] " + item.Title;
-                                urgentItems.Add(item);
+                                isDuplicate = true;
+                                break;
                             }
+
+                            // 2. Yüksək başlıq bənzərliyi (Levenshtein fərqi < 30%) - həm AZ, həm EN
+                            if (!string.IsNullOrWhiteSpace(sent.NormalizedTitle) && !string.IsNullOrWhiteSpace(normAzTitle))
+                            {
+                                if (CalculateTitleDifference(sent.NormalizedTitle, normAzTitle) < 0.30)
+                                {
+                                    isDuplicate = true;
+                                    break;
+                                }
+                                if (sent.NormalizedTitle.Length >= 15 && (sent.NormalizedTitle.Contains(normAzTitle) || normAzTitle.Contains(sent.NormalizedTitle)))
+                                {
+                                    isDuplicate = true;
+                                    break;
+                                }
+                            }
+                            if (!string.IsNullOrWhiteSpace(sent.OriginalTitle) && !string.IsNullOrWhiteSpace(normEnTitle))
+                            {
+                                var sentNormEn = NormalizeNewsTitle(sent.OriginalTitle);
+                                if (CalculateTitleDifference(sentNormEn, normEnTitle) < 0.30)
+                                {
+                                    isDuplicate = true;
+                                    break;
+                                }
+                                if (sentNormEn.Length >= 15 && (sentNormEn.Contains(normEnTitle) || normEnTitle.Contains(sentNormEn)))
+                                {
+                                    isDuplicate = true;
+                                    break;
+                                }
+                            }
+
+                            // 3. Eyni tip / mövzu açar söz üst-üstə düşməsi (Jaccard similarity >= 30%)
+                            if (combinedItemKeywords.Count >= 2 && sent.Keywords.Count >= 2)
+                            {
+                                int intersection = combinedItemKeywords.Intersect(sent.Keywords, StringComparer.OrdinalIgnoreCase).Count();
+                                int union = combinedItemKeywords.Union(sent.Keywords, StringComparer.OrdinalIgnoreCase).Count();
+                                if (union > 0 && ((double)intersection / union) >= 0.30)
+                                {
+                                    isDuplicate = true;
+                                    break;
+                                }
+                            }
+
+                            // 4. Eyni Kriptovalyuta / Birja + Hadisə kombinasiyası (24 saat ərzində təkrar qadağandır)
+                            var keyEntities = new[] { "btc", "bitcoin", "eth", "ethereum", "sol", "solana", "xrp", "ripple", "bnb", "binance", "doge", "pepe", "shib", "cardano", "ada", "sec", "fed", "cpi", "etf", "ftx", "tether", "usdt" };
+                            var actions = new[] { "list", "listing", "launch", "delist", "delisting", "sec", "fed", "hack", "exploit", "etf", "approval", "rate", "faiz", "court", "lawsuit", "təsdiq", "qadağa", "ban", "ath" };
+
+                            var itemEntities = combinedItemKeywords.Where(w => keyEntities.Contains(w.ToLowerInvariant())).Distinct().ToList();
+                            var sentEntities = sent.Keywords.Where(w => keyEntities.Contains(w.ToLowerInvariant())).Distinct().ToList();
+
+                            if (itemEntities.Count > 0 && sentEntities.Count > 0)
+                            {
+                                var sharedEntities = itemEntities.Intersect(sentEntities, StringComparer.OrdinalIgnoreCase).ToList();
+                                if (sharedEntities.Count >= 2)
+                                {
+                                    isDuplicate = true;
+                                    break;
+                                }
+                                if (sharedEntities.Count == 1)
+                                {
+                                    bool itemHasAction = combinedItemKeywords.Any(w => actions.Contains(w.ToLowerInvariant()));
+                                    bool sentHasAction = sent.Keywords.Any(w => actions.Contains(w.ToLowerInvariant()));
+                                    if (itemHasAction && sentHasAction)
+                                    {
+                                        isDuplicate = true;
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+
+                        if (isDuplicate)
+                        {
                             continue;
                         }
-                        else
+
+                        // Yeni və unikal xəbər qeydə alınır
+                        _sentNewsRecords.Add(new SentNewsRecord
                         {
-                            _seenNewsCache[newsKey] = (now, normTitle);
-                            urgentItems.Add(item);
-                        }
-                    }
-                    else
-                    {
-                        _seenNewsCache[newsKey] = (now, normTitle);
+                            Title = item.Title,
+                            OriginalTitle = item.OriginalTitle,
+                            NormalizedTitle = normAzTitle,
+                            Keywords = combinedItemKeywords,
+                            Url = item.Url ?? "",
+                            PublishedAtUtc = item.PublishedAt,
+                            SentAtUtc = now
+                        });
+
                         urgentItems.Add(item);
                     }
+                }
+
+                // Qayda 1-in davamı: Watermark irəlilədilir ki, 14:56-dakı xəbərlər 14:57 və 14:58-də bir daha əsla yoxlanmasın
+                if (highestPublishedInBatch > _lastPublishedCutoffUtc)
+                {
+                    _lastPublishedCutoffUtc = highestPublishedInBatch;
+                }
+
+                if (urgentItems.Count > 0)
+                {
+                    SaveSentNewsHistory();
                 }
             }
             return urgentItems;

@@ -1191,20 +1191,38 @@ namespace CryptoSense.Worker
             }
         }
 
+        private static DateTime _lastNewsAlertSentUtc = DateTime.MinValue;
+        private static readonly TimeSpan MinNewsAlertInterval = TimeSpan.FromMinutes(3);
+
         private async Task MonitorBreakingNewsAndListingsAsync(CancellationToken stoppingToken)
         {
+            // Anti-flood: ən azı 3 dəqiqə fasilə gözlənilir, ard-arda bildiriş gəlməsi qadağandır
+            if (DateTime.UtcNow - _lastNewsAlertSentUtc < MinNewsAlertInterval)
+            {
+                return;
+            }
+
             using var scope = _serviceProvider.CreateScope();
             var newsService = scope.ServiceProvider.GetRequiredService<INewsService>();
 
             var urgentItems = await newsService.GetUrgentBreakingNewsAndListingsAsync();
-            foreach (var item in urgentItems)
+            if (urgentItems == null || urgentItems.Count == 0) return;
+
+            // Ard-arda gəlmənin qarşısını almaq üçün: Dövr başına yalnız ən təzə 1 xəbər göndərilir
+            var itemToSend = urgentItems.OrderByDescending(x => x.PublishedAt).FirstOrDefault();
+            if (itemToSend != null)
             {
-                if (stoppingToken.IsCancellationRequested) break;
-                bool isListing = item.Title.Contains("List", StringComparison.OrdinalIgnoreCase) || 
-                                 item.Title.Contains("Token", StringComparison.OrdinalIgnoreCase) ||
-                                 item.Title.Contains("Binance", StringComparison.OrdinalIgnoreCase);
-                await _telegramService.SendUrgentNewsAlertAsync(item, isListing);
-                await Task.Delay(1000, stoppingToken);
+                if (stoppingToken.IsCancellationRequested) return;
+
+                bool isListing = itemToSend.Title.Contains("List", StringComparison.OrdinalIgnoreCase) || 
+                                 itemToSend.Title.Contains("Token", StringComparison.OrdinalIgnoreCase) ||
+                                 itemToSend.Title.Contains("Binance", StringComparison.OrdinalIgnoreCase) ||
+                                 itemToSend.OriginalTitle.Contains("List", StringComparison.OrdinalIgnoreCase) ||
+                                 itemToSend.OriginalTitle.Contains("Token", StringComparison.OrdinalIgnoreCase);
+
+                await _telegramService.SendUrgentNewsAlertAsync(itemToSend, isListing);
+                _lastNewsAlertSentUtc = DateTime.UtcNow;
+                Console.WriteLine($"[NewsMonitor] Sent urgent news alert: {itemToSend.Title} (Published: {itemToSend.PublishedAt:HH:mm:ss} UTC)");
             }
         }
     }

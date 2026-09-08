@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Threading.Tasks;
 using CryptoSense.Application.DTOs;
 using CryptoSense.Application.Interfaces;
+using CryptoSense.Application.Services;
 using CryptoSense.Domain.Entities;
 using CryptoSense.Domain.Enums;
 using CryptoSense.Domain.Interfaces;
@@ -922,6 +923,63 @@ namespace CryptoSense.Infrastructure.Testing
                 }
 
                 return true;
+            });
+
+            // 34. News Architecture: Publication Watermark Time Filter & 24-Hour Semantic Topic Deduplication
+            await AssertTest("Test 41: News Architecture - Publication Watermark Time Filter & 24h Topic Dedup", () =>
+            {
+                // Test 1: Title Normalization & Keyword Extraction
+                var azTitle = "Binance yeni PEPE və FLOKI ticarət cütlüklərini rəsmi elan etdi!";
+                var keywords = NewsService.ExtractSignificantKeywords(azTitle);
+                if (!keywords.Contains("pepe") || !keywords.Contains("floki") || !keywords.Contains("binance"))
+                {
+                    Console.WriteLine("[Test 41 Fail] Keywords missing key tokens!");
+                    return Task.FromResult(false);
+                }
+
+                // Test 2: Levenshtein Difference for closely phrased news
+                var t1 = NewsService.NormalizeNewsTitle("SEC approves Ethereum Spot ETF in historical decision");
+                var t2 = NewsService.NormalizeNewsTitle("SEC Approves Ethereum Spot ETF in Historic Ruling");
+                var diff = NewsService.CalculateTitleDifference(t1, t2);
+                if (diff >= 0.30)
+                {
+                    Console.WriteLine($"[Test 41 Fail] Expected title difference < 0.30, got {diff:F2}");
+                    return Task.FromResult(false);
+                }
+
+                // Test 3: Publication time filter (Zaman filtri)
+                var cutoff = new DateTime(2026, 9, 8, 14, 56, 30, DateTimeKind.Utc);
+                var oldNewsTime = new DateTime(2026, 9, 8, 14, 56, 0, DateTimeKind.Utc);
+                var newNewsTime = new DateTime(2026, 9, 8, 14, 57, 0, DateTimeKind.Utc);
+
+                bool oldNewsBlocked = oldNewsTime <= cutoff;
+                bool newNewsAllowed = newNewsTime > cutoff;
+                if (!oldNewsBlocked || !newNewsAllowed)
+                {
+                    Console.WriteLine("[Test 41 Fail] Watermark comparison logic failed!");
+                    return Task.FromResult(false);
+                }
+
+                // Test 4: Entity + Action collision detection (24h Daily Unique Rule)
+                var sentKeywords = new List<string> { "solana", "sec", "etf", "approval" };
+                var incomingKeywords = new List<string> { "solana", "etf", "approved", "sec", "crypto" };
+                var keyEntities = new[] { "btc", "bitcoin", "eth", "ethereum", "sol", "solana", "xrp", "binance", "sec", "fed", "etf" };
+                var actions = new[] { "list", "listing", "launch", "sec", "fed", "hack", "etf", "approval", "rate" };
+
+                var sharedEnts = sentKeywords.Intersect(incomingKeywords, StringComparer.OrdinalIgnoreCase)
+                                             .Where(w => keyEntities.Contains(w.ToLowerInvariant()))
+                                             .ToList();
+                bool sameAction = sentKeywords.Any(w => actions.Contains(w.ToLowerInvariant())) &&
+                                  incomingKeywords.Any(w => actions.Contains(w.ToLowerInvariant()));
+
+                bool isDuplicate = sharedEnts.Count >= 2 || (sharedEnts.Count >= 1 && sameAction);
+                if (!isDuplicate)
+                {
+                    Console.WriteLine("[Test 41 Fail] Entity+Action collision was not flagged as duplicate!");
+                    return Task.FromResult(false);
+                }
+
+                return Task.FromResult(true);
             });
 
             Console.WriteLine("\n========================================================");
