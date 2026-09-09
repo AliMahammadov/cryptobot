@@ -941,6 +941,8 @@ namespace CryptoSense.Infrastructure.Telegram
             if (userSettings.Coins.Count == 0) return;
             using var scope = _serviceProvider.CreateScope();
             var uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
+            var signalEngine = scope.ServiceProvider.GetRequiredService<ISignalEngine>();
+            var marketData = scope.ServiceProvider.GetRequiredService<IMarketDataProvider>();
 
             var tfDisplay = (timeframe == "Hamısı" || timeframe == "Hamisi") ? "1h, 4h" : timeframe;
             var userOpenSignals = await uow.Signals.GetUserOpenSignalsAsync(chatId);
@@ -949,12 +951,63 @@ namespace CryptoSense.Infrastructure.Telegram
                 userOpenSignals = userOpenSignals.Where(s => s.Timeframe == timeframe).ToList();
             }
 
-            var cleanList = string.Join(", ", userSettings.Coins.Select(c => c.Replace("USDT", "")));
-            var sb = new StringBuilder();
-            sb.AppendLine($"⚡ <b>Seçilmiş Coinlər Üzrə Canlı İzləmə Aktivdir! 🟢</b>\n");
-            sb.AppendLine($"⏱ <b>Aktiv Rejim:</b> <code>{tfDisplay}</code>");
-            sb.AppendLine($"🪙 <b>Coinləriniz ({userSettings.Coins.Count} ədəd):</b> <code>{cleanList}</code>\n");
+            // 1. Fetch BTC Compass
+            BtcMarketCompass? btcCompass = null;
+            try
+            {
+                btcCompass = await signalEngine.GetBtcCompassAsync();
+            }
+            catch { }
 
+            // 2. Fetch live tickers for the selected coins
+            List<CoinTicker> matchedTickers = new();
+            try
+            {
+                var allTickers = await marketData.GetTopFuturesTickersAsync(120);
+                var coinSet = new HashSet<string>(userSettings.Coins, StringComparer.OrdinalIgnoreCase);
+                matchedTickers = allTickers.Where(t => coinSet.Contains(t.Symbol) || coinSet.Contains(t.Symbol.Replace("1000", ""))).ToList();
+            }
+            catch { }
+
+            var sb = new StringBuilder();
+            sb.AppendLine($"📊 <b>Portfel və Bazar Vəziyyəti Xülasəsi 🟢</b>\n");
+            sb.AppendLine($"⏱ <b>Aktiv Zaman:</b> <code>{tfDisplay}</code>");
+            sb.AppendLine($"🪙 <b>İzlənən Portfel:</b> <b>{userSettings.Coins.Count} ədəd coin</b>\n");
+
+            // BTC Market Regime & Benchmark
+            if (btcCompass != null && btcCompass.Price > 0)
+            {
+                var btcSign = btcCompass.Change24h >= 0 ? "+" : "";
+                var btcIcon = btcCompass.Change24h >= 0 ? "🟢" : "🔴";
+                sb.AppendLine($"🧭 <b>Bitcoin Kompası (BTC/USDT):</b>");
+                sb.AppendLine($"• <b>Qiymət:</b> ${btcCompass.Price.ToString("N0", CultureInfo.InvariantCulture)} ({btcSign}{btcCompass.Change24h.ToString("F2", CultureInfo.InvariantCulture)}% {btcIcon})");
+                sb.AppendLine($"• <b>Bazar Rejimi:</b> {btcCompass.Trend}");
+                sb.AppendLine();
+            }
+
+            // Live status of tracked portfolio
+            if (matchedTickers.Count > 0)
+            {
+                var gainers = matchedTickers.Where(t => t.PriceChangePercent > 0).OrderByDescending(t => t.PriceChangePercent).ToList();
+                var losers = matchedTickers.Where(t => t.PriceChangePercent < 0).OrderBy(t => t.PriceChangePercent).ToList();
+
+                sb.AppendLine($"📈 <b>Portfeldəki Coinlərin Canlı Vəziyyəti:</b>");
+                sb.AppendLine($"• <b>Bazar Balansı:</b> 🟢 {gainers.Count} Yüksələn | 🔴 {losers.Count} Düşən\n");
+
+                if (gainers.Count > 0)
+                {
+                    var topGainers = string.Join(" | ", gainers.Take(3).Select(t => $"{t.Symbol.Replace("USDT", "")}: +{t.PriceChangePercent.ToString("F2", CultureInfo.InvariantCulture)}%"));
+                    sb.AppendLine($"🔥 <b>Ən Çox Artanlar:</b> <code>{topGainers}</code>");
+                }
+                if (losers.Count > 0)
+                {
+                    var topLosers = string.Join(" | ", losers.Take(3).Select(t => $"{t.Symbol.Replace("USDT", "")}: {t.PriceChangePercent.ToString("F2", CultureInfo.InvariantCulture)}%"));
+                    sb.AppendLine($"❄️ <b>Ən Çox Düşənlər:</b> <code>{topLosers}</code>");
+                }
+                sb.AppendLine();
+            }
+
+            // Open trades or scanner status
             if (userOpenSignals.Count > 0)
             {
                 sb.AppendLine($"📌 <b>Hazırda Açıq İzlənən Əməliyyatlar ({userOpenSignals.Count} ədəd):</b>");
@@ -969,9 +1022,20 @@ namespace CryptoSense.Infrastructure.Telegram
             }
             else
             {
-                sb.AppendLine($"ℹ️ <i>Seçilmiş coinləriniz üzrə hazırda açıq əməliyyat yoxdur.</i>\n");
+                sb.AppendLine($"🎯 <b>Skaner Analizi:</b> <i>Bütün {userSettings.Coins.Count} coin üzrə RSI, ADX, SuperTrend, EMA20/50 və Volume Wave davamlı analiz edilir.</i>");
+                sb.AppendLine($"⚡ <i>Növbəti şam bağlanışında Confluence ≥ 75% qeydə alınan kimi dərhal əməliyyat kartı göndəriləcək.</i>\n");
             }
-            sb.AppendLine($"🟢 <b>Sistem canlı izləmədədir.</b> Seçdiyiniz coinlərdə yeni şam bağlandıqca 75%+ siqnallar real vaxtda avtomatik çatınıza göndəriləcək.");
+
+            bool isTestMode = _testModeChats.ContainsKey(chatId);
+            if (isTestMode)
+            {
+                sb.AppendLine($"🧪 <b>Test Rejimi:</b> Aktivdir 🟢\n<i>Simulyasiya test siqnalı hazırlanır...</i>");
+            }
+            else
+            {
+                sb.AppendLine($"💡 <i>Test siqnalı simulyasiyası aparmaq üçün Əsas Terminalda <b>🧪 Test Rejimi</b> düyməsini aktivləşdirə və ya çatda <code>başla</code> yaza bilərsiniz.</i>");
+            }
+
             await SendMessageAsync(sb.ToString(), chatId);
         }
 
@@ -1191,7 +1255,7 @@ namespace CryptoSense.Infrastructure.Telegram
                 var activeCount = await unitOfWork.Signals.GetActiveSignalsCountAsync();
                 var lastTime = userSettings.LastSignalSentUtc == default ? "" : Domain.Common.TimeHelper.FormatAz(userSettings.LastSignalSentUtc);
                 var dashText = TelegramMessageFormatter.FormatTerminalDashboard(userSettings, activeCount, lastTime);
-                await EditMessageTextAsync(chatId, messageId, dashText, TelegramKeyboards.BuildTerminalInlineKeyboard(userSettings));
+                await EditMessageTextAsync(chatId, messageId, dashText, TelegramKeyboards.BuildTerminalInlineKeyboard(userSettings, _testModeChats.ContainsKey(chatId)));
             }
             else if (data == "cb_toggle")
             {
@@ -1200,7 +1264,38 @@ namespace CryptoSense.Infrastructure.Telegram
                 var activeCount = await unitOfWork.Signals.GetActiveSignalsCountAsync();
                 var lastTime = userSettings.LastSignalSentUtc == default ? "" : Domain.Common.TimeHelper.FormatAz(userSettings.LastSignalSentUtc);
                 var dashText = TelegramMessageFormatter.FormatTerminalDashboard(userSettings, activeCount, lastTime);
-                await EditMessageTextAsync(chatId, messageId, dashText, TelegramKeyboards.BuildTerminalInlineKeyboard(userSettings));
+                await EditMessageTextAsync(chatId, messageId, dashText, TelegramKeyboards.BuildTerminalInlineKeyboard(userSettings, _testModeChats.ContainsKey(chatId)));
+            }
+            else if (data == "cb_toggle_testmode")
+            {
+                bool newState = !_testModeChats.ContainsKey(chatId);
+                if (newState)
+                {
+                    _testModeChats[chatId] = true;
+                    var activeCount = await unitOfWork.Signals.GetActiveSignalsCountAsync();
+                    var lastTime = userSettings.LastSignalSentUtc == default ? "" : Domain.Common.TimeHelper.FormatAz(userSettings.LastSignalSentUtc);
+                    var dashText = TelegramMessageFormatter.FormatTerminalDashboard(userSettings, activeCount, lastTime);
+                    await EditMessageTextAsync(chatId, messageId, dashText, TelegramKeyboards.BuildTerminalInlineKeyboard(userSettings, isTestMode: true));
+
+                    var testActiveMsg = "🧪 <b>Test Simulyasiya Rejimi AKTİVLƏŞDİRİLDİ! 🟢</b>\n\n" +
+                                        "İndi istənilən portfel (məs. <b>🪙 Standart 40 Coin</b> və ya <b>⭐ Mənim Coinlərim</b>) seçib zaman aralığını (1h/4h) təyin edin.\n\n" +
+                                        "⚡ Sistem dərhal sizə real Confluence ilə nümunəvi <b>TEST Siqnalı</b> və 6 saniyə sonra <b>TP1 Hədəfi (+1.20%)</b> bildirişi göndərəcək!\n\n" +
+                                        "<i>Testi bitirmək üçün yenidən eyni düyməyə toxunun və ya çatda <code>testi dayandır</code> yazın.</i>";
+                    await SendMessageAsync(testActiveMsg, chatId);
+                    _ = SendMockTestSignalAsync(chatId, userSettings, userSettings.Timeframe);
+                }
+                else
+                {
+                    _testModeChats.TryRemove(chatId, out _);
+                    var activeCount = await unitOfWork.Signals.GetActiveSignalsCountAsync();
+                    var lastTime = userSettings.LastSignalSentUtc == default ? "" : Domain.Common.TimeHelper.FormatAz(userSettings.LastSignalSentUtc);
+                    var dashText = TelegramMessageFormatter.FormatTerminalDashboard(userSettings, activeCount, lastTime);
+                    await EditMessageTextAsync(chatId, messageId, dashText, TelegramKeyboards.BuildTerminalInlineKeyboard(userSettings, isTestMode: false));
+
+                    var testStopMsg = "⚪ <b>Test Rejimi DAYANDIRILDI!</b>\n\n" +
+                                      "🚀 Sistem 100% real canlı bazar analizinə qayıtdı. Yalnız Binance birjasında təsdiqlənən real bazar siqnalları göndəriləcək.";
+                    await SendMessageAsync(testStopMsg, chatId);
+                }
             }
             else if (data == "cb_portfolio_std40")
             {
@@ -1834,7 +1929,7 @@ namespace CryptoSense.Infrastructure.Telegram
                     : Domain.Common.TimeHelper.FormatAz(userSettings.LastSignalSentUtc);
 
                 var dashText = TelegramMessageFormatter.FormatTerminalDashboard(userSettings, openCount, lastTime);
-                var inlineKb = TelegramKeyboards.BuildTerminalInlineKeyboard(userSettings);
+                var inlineKb = TelegramKeyboards.BuildTerminalInlineKeyboard(userSettings, _testModeChats.ContainsKey(chatId));
 
                 var newMsgId = await SendMessageReturnIdAsync(dashText, chatId, inlineKb);
                 userSettings.LastTerminalMessageId = newMsgId;

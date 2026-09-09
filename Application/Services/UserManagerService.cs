@@ -21,6 +21,44 @@ namespace CryptoSense.Application.Services
         private static bool _superAdminInitialized = false;
         private static readonly object _initLock = new();
 
+        private static readonly string VolumeEnv = Environment.GetEnvironmentVariable("RAILWAY_VOLUME_MOUNT_PATH") ?? "";
+        private static readonly string DataDir = !string.IsNullOrEmpty(VolumeEnv) && Directory.Exists(VolumeEnv)
+            ? VolumeEnv
+            : (Directory.Exists("/app/data") ? "/app/data" : Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "data"));
+
+        private static readonly string[] BackupFilePaths = new[]
+        {
+            Path.Combine(DataDir, "users_backup.json"),
+            Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "users_backup.json"),
+            Path.Combine(Directory.GetCurrentDirectory(), "users_backup.json")
+        };
+
+        private void SaveBackupUsers()
+        {
+            try
+            {
+                var allUsers = _unitOfWork.Users.GetAllUsersAsync().GetAwaiter().GetResult();
+                var json = System.Text.Json.JsonSerializer.Serialize(allUsers, new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
+                foreach (var path in BackupFilePaths)
+                {
+                    try
+                    {
+                        var dir = Path.GetDirectoryName(path);
+                        if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
+                        {
+                            Directory.CreateDirectory(dir);
+                        }
+                        File.WriteAllText(path, json);
+                    }
+                    catch { }
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[UserManager] SaveBackupUsers error: {ex.Message}");
+            }
+        }
+
         private void InitializeSuperAdmin()
         {
             if (_superAdminInitialized) return;
@@ -30,6 +68,8 @@ namespace CryptoSense.Application.Services
                 try
                 {
                     _unitOfWork.EnsureDatabaseCreated();
+
+                    // 1. Ensure SuperAdmin (Ali) exists
                     var superAdmin = _unitOfWork.Users.GetByUsernameAsync("Ali").GetAwaiter().GetResult() ??
                                      _unitOfWork.Users.GetByUsernameAsync("Ali Mahammadov").GetAwaiter().GetResult();
 
@@ -49,8 +89,74 @@ namespace CryptoSense.Application.Services
                             LastLoginAt = DateTime.UtcNow
                         };
                         _unitOfWork.Users.AddAsync(newAdmin).GetAwaiter().GetResult();
-                        _unitOfWork.SaveChangesAsync().GetAwaiter().GetResult();
                     }
+
+                    // 2. Ensure Murad exists permanently
+                    var muradUser = _unitOfWork.Users.GetByUsernameAsync("Murad").GetAwaiter().GetResult();
+                    if (muradUser == null)
+                    {
+                        var newMurad = new UserAccount
+                        {
+                            Username = "Murad",
+                            PasswordHash = "$2a$11$rqAHb83ZUadJSdNAGGvTuu/ze535B8TvcCku4/6UrV6qctyOO6Sju",
+                            Role = UserRole.User,
+                            IsActive = true,
+                            CreatedAtUtc = DateTime.UtcNow,
+                            LastLoginAt = DateTime.UtcNow
+                        };
+                        _unitOfWork.Users.AddAsync(newMurad).GetAwaiter().GetResult();
+                    }
+
+                    // 3. Restore all users from users_backup.json (survives container redeploy)
+                    foreach (var path in BackupFilePaths)
+                    {
+                        if (File.Exists(path))
+                        {
+                            try
+                            {
+                                var json = File.ReadAllText(path);
+                                var backedUsers = System.Text.Json.JsonSerializer.Deserialize<List<UserAccount>>(json);
+                                if (backedUsers != null)
+                                {
+                                    foreach (var bu in backedUsers)
+                                    {
+                                        if (string.IsNullOrWhiteSpace(bu.Username)) continue;
+                                        var existing = _unitOfWork.Users.GetByUsernameAsync(bu.Username).GetAwaiter().GetResult();
+                                        if (existing == null)
+                                        {
+                                            var toAdd = new UserAccount
+                                            {
+                                                Username = bu.Username,
+                                                PasswordHash = bu.PasswordHash,
+                                                Role = bu.Role,
+                                                TelegramUsername = bu.TelegramUsername,
+                                                TelegramUserId = bu.TelegramUserId,
+                                                TelegramChatId = bu.TelegramChatId,
+                                                IsActive = bu.IsActive,
+                                                CreatedAtUtc = bu.CreatedAtUtc == default ? DateTime.UtcNow : bu.CreatedAtUtc,
+                                                LastLoginAt = bu.LastLoginAt == default ? DateTime.UtcNow : bu.LastLoginAt
+                                            };
+                                            _unitOfWork.Users.AddAsync(toAdd).GetAwaiter().GetResult();
+                                        }
+                                        else
+                                        {
+                                            existing.IsActive = bu.IsActive;
+                                            if (!string.IsNullOrEmpty(bu.PasswordHash) && existing.PasswordHash != bu.PasswordHash)
+                                            {
+                                                existing.PasswordHash = bu.PasswordHash;
+                                            }
+                                            _unitOfWork.Users.UpdateAsync(existing).GetAwaiter().GetResult();
+                                        }
+                                    }
+                                }
+                                break;
+                            }
+                            catch { }
+                        }
+                    }
+
+                    _unitOfWork.SaveChangesAsync().GetAwaiter().GetResult();
+                    SaveBackupUsers();
                     _superAdminInitialized = true;
                 }
                 catch
@@ -126,6 +232,7 @@ namespace CryptoSense.Application.Services
 
                 await _unitOfWork.Users.UpdateAsync(adminUser);
                 await _unitOfWork.SaveChangesAsync();
+                SaveBackupUsers();
                 return (true, adminUser);
             }
 
@@ -167,6 +274,7 @@ namespace CryptoSense.Application.Services
 
                 await _unitOfWork.Users.UpdateAsync(user);
                 await _unitOfWork.SaveChangesAsync();
+                SaveBackupUsers();
                 return (true, user);
             }
 
@@ -187,6 +295,7 @@ namespace CryptoSense.Application.Services
                 user.TelegramUserId = null;
                 await _unitOfWork.Users.UpdateAsync(user);
                 await _unitOfWork.SaveChangesAsync();
+                SaveBackupUsers();
             }
         }
 
@@ -217,6 +326,7 @@ namespace CryptoSense.Application.Services
             });
 
             await _unitOfWork.SaveChangesAsync();
+            SaveBackupUsers();
             Console.WriteLine($"[UserManager] User '{username}' successfully created and saved to database.");
             return true;
         }
@@ -242,6 +352,7 @@ namespace CryptoSense.Application.Services
             });
 
             await _unitOfWork.SaveChangesAsync();
+            SaveBackupUsers();
             return true;
         }
 
@@ -262,6 +373,7 @@ namespace CryptoSense.Application.Services
             });
 
             await _unitOfWork.SaveChangesAsync();
+            SaveBackupUsers();
             return true;
         }
 

@@ -4,12 +4,13 @@ namespace CryptoSense.Infrastructure.Telegram
 {
     public static class TelegramKeyboards
     {
-        public static object BuildTerminalInlineKeyboard(UserSettings settings)
+        public static object BuildTerminalInlineKeyboard(UserSettings settings, bool isTestMode = false)
         {
             var toggleText = settings.IsActive ? "🛑 Bildirişləri Dayandır" : "▶️ Bildirişləri Başlat";
             var stdLabel = settings.PortfolioMode == "Standard40" ? "🪙 Standart 40 Coin 🟢" : "🪙 Standart 40 Coin";
             var custLabel = settings.PortfolioMode == "Custom" ? "⭐ Fərdi Coinlərim 🟢" : 
                            (settings.PortfolioMode == "Combined" ? "🔥 40 + Fərdi Coin 🟢" : "⭐ Mənim Coinlərim");
+            var testBtnText = isTestMode ? "🧪 Test Rejimi: Aktiv 🟢" : "🧪 Test Rejimi: Qapalı ⚪";
 
             return new
             {
@@ -32,6 +33,7 @@ namespace CryptoSense.Infrastructure.Telegram
                     },
                     new[]
                     {
+                        new { text = testBtnText, callback_data = "cb_toggle_testmode" },
                         new { text = toggleText, callback_data = "cb_toggle" }
                     },
                     new[]
