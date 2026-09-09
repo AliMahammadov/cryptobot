@@ -2,7 +2,7 @@
   {
     "Id": 47,
     "Username": "Ali",
-    "PasswordHash": "$2a$11$Bzqnkh1I6ATvXZSP5m7Hv.b1uKhc8I9MhwJG.XYxfDy6/ggSqhasS",
+    "PasswordHash": "$2a$11$osmwX2rkzgaqQXEAmWcPtu5wTp6PlA/amuTwVsaRkFgRLF4KpVJHO",
     "Password": "",
     "Role": 0,
     "TelegramUsername": "Ali_Mahammadov",
@@ -10,7 +10,7 @@
     "TelegramUserId": 1219998176,
     "IsActive": true,
     "CreatedAtUtc": "2026-09-04T00:45:17.967678",
-    "LastLoginAt": "2026-09-09T20:43:09.4321101Z"
+    "LastLoginAt": "2026-09-09T20:56:39.8223653Z"
   },
   {
     "Id": 165,
@@ -63,6 +63,19 @@
     "IsActive": false,
     "CreatedAtUtc": "2026-09-08T15:18:24.4862037",
     "LastLoginAt": "2026-09-08T15:18:24.4862043"
+  },
+  {
+    "Id": 209,
+    "Username": "AliTest_4b78",
+    "PasswordHash": "$2a$11$7de6BNaWQIo3KJwcLKNzQ.ns5WIrv.WLqIfRtMVR6cRZsG/OZtcEi",
+    "Password": "",
+    "Role": 1,
+    "TelegramUsername": "",
+    "TelegramChatId": "",
+    "TelegramUserId": null,
+    "IsActive": false,
+    "CreatedAtUtc": "2026-09-09T20:56:57.4644835Z",
+    "LastLoginAt": "2026-09-09T20:56:57.4644847Z"
   },
   {
     "Id": 193,
@@ -139,8 +152,8 @@
     "TelegramChatId": "",
     "TelegramUserId": null,
     "IsActive": false,
-    "CreatedAtUtc": "2026-09-09T20:43:30.0592546Z",
-    "LastLoginAt": "2026-09-09T20:43:30.0592553Z"
+    "CreatedAtUtc": "2026-09-09T20:43:30.0592546",
+    "LastLoginAt": "2026-09-09T20:43:30.0592553"
   },
   {
     "Id": 164,
@@ -234,6 +247,19 @@
     "LastLoginAt": "2026-09-09T20:24:19.4285535"
   },
   {
+    "Id": 207,
+    "Username": "qa_tester_db2c1c",
+    "PasswordHash": "$2a$11$zWN9roJ3CH/Yf8YU5LZApeIeF18DXBU5nMHTlSKsmaKvi3hdKX0Ae",
+    "Password": "",
+    "Role": 1,
+    "TelegramUsername": "",
+    "TelegramChatId": "",
+    "TelegramUserId": null,
+    "IsActive": false,
+    "CreatedAtUtc": "2026-09-09T20:56:45.4088938Z",
+    "LastLoginAt": "2026-09-09T20:56:45.4088943Z"
+  },
+  {
     "Id": 175,
     "Username": "qa_tester_e144fc",
     "PasswordHash": "$2a$11$7lI4oOmkuBnIYwGZ5eTdg.kbdWuZ6mwkPLjvSjAfc/23btI8K2NzG",
@@ -256,8 +282,8 @@
     "TelegramChatId": "",
     "TelegramUserId": null,
     "IsActive": false,
-    "CreatedAtUtc": "2026-09-09T20:43:16.0542574Z",
-    "LastLoginAt": "2026-09-09T20:43:16.0542585Z"
+    "CreatedAtUtc": "2026-09-09T20:43:16.0542574",
+    "LastLoginAt": "2026-09-09T20:43:16.0542585"
   },
   {
     "Id": 171,
@@ -360,8 +386,21 @@
     "TelegramChatId": "test_chat_848faa24",
     "TelegramUserId": 999888777,
     "IsActive": false,
-    "CreatedAtUtc": "2026-09-09T20:43:28.6849546Z",
-    "LastLoginAt": "2026-09-09T20:43:29.0378215Z"
+    "CreatedAtUtc": "2026-09-09T20:43:28.6849546",
+    "LastLoginAt": "2026-09-09T20:43:29.0378215"
+  },
+  {
+    "Id": 208,
+    "Username": "session_user_905ec4",
+    "PasswordHash": "$2a$11$ecOwsHtxyapzmP7wb1rILuj31k4oJa1SaV7eZRQd3h1qEKzZGfFKW",
+    "Password": "",
+    "Role": 1,
+    "TelegramUsername": "",
+    "TelegramChatId": "test_chat_d1b584dd",
+    "TelegramUserId": 999888777,
+    "IsActive": false,
+    "CreatedAtUtc": "2026-09-09T20:56:56.5001054Z",
+    "LastLoginAt": "2026-09-09T20:56:56.657615Z"
   },
   {
     "Id": 196,
@@ -416,6 +455,19 @@
     "LastLoginAt": "2026-09-09T20:11:01.8924692"
   },
   {
+    "Id": 206,
+    "Username": "testuser_43e238",
+    "PasswordHash": "$2a$11$n75J4Bs7mHAFz5CedYhYxOyNFpJgDTWP4hrW5RLsENa7OMN3vmNou",
+    "Password": "",
+    "Role": 1,
+    "TelegramUsername": "",
+    "TelegramChatId": "",
+    "TelegramUserId": null,
+    "IsActive": false,
+    "CreatedAtUtc": "2026-09-09T20:56:40.0631019Z",
+    "LastLoginAt": "2026-09-09T20:56:40.8285088Z"
+  },
+  {
     "Id": 182,
     "Username": "testuser_5b8862",
     "PasswordHash": "$2a$11$xmk3Ws9mEECC05xYlGqWE.x8G1Qt3bkAhTcRvaeIJJ3suHNurzEcy",
@@ -438,8 +490,8 @@
     "TelegramChatId": "",
     "TelegramUserId": null,
     "IsActive": false,
-    "CreatedAtUtc": "2026-09-09T20:43:09.8668852Z",
-    "LastLoginAt": "2026-09-09T20:43:11.0537402Z"
+    "CreatedAtUtc": "2026-09-09T20:43:09.8668852",
+    "LastLoginAt": "2026-09-09T20:43:11.0537402"
   },
   {
     "Id": 186,

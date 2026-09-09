@@ -4,43 +4,57 @@ namespace CryptoSense.Infrastructure.Telegram
 {
     public static class TelegramKeyboards
     {
-        public static object BuildTerminalInlineKeyboard(UserSettings settings, bool isTestMode = false)
+        public static object BuildTerminalInlineKeyboard(UserSettings settings, bool isTestMode = false, bool isAdmin = false)
         {
             var toggleText = settings.IsActive ? "🛑 Bildirişləri Dayandır" : "▶️ Bildirişləri Başlat";
             var stdLabel = settings.PortfolioMode == "Standard40" ? "🪙 Standart 40 Coin 🟢" : "🪙 Standart 40 Coin";
             var custLabel = settings.PortfolioMode == "Custom" ? "⭐ Fərdi Coinlərim 🟢" : 
                            (settings.PortfolioMode == "Combined" ? "🔥 40 + Fərdi Coin 🟢" : "⭐ Mənim Coinlərim");
-            var testBtnText = isTestMode ? "🧪 Test Rejimi: Aktiv 🟢" : "🧪 Test Rejimi: Qapalı ⚪";
+
+            var rows = new System.Collections.Generic.List<object[]>
+            {
+                new object[]
+                {
+                    new { text = stdLabel, callback_data = "cb_portfolio_std40" },
+                    new { text = custLabel, callback_data = "cb_portfolio_custom" }
+                },
+                new object[]
+                {
+                    new { text = "🧭 Bitcoin Trend", callback_data = "cb_btc" },
+                    new { text = "📊 Canlı Statistika", callback_data = "cb_stats" }
+                }
+            };
+
+            // "🧹 Siqnalları Sıfırla" is strictly reserved for Admin
+            if (isAdmin)
+            {
+                rows.Add(new object[]
+                {
+                    new { text = "ℹ️ Sistem Statusu", callback_data = "cb_status" },
+                    new { text = "🧹 Siqnalları Sıfırla", callback_data = "cb_reset" }
+                });
+            }
+            else
+            {
+                rows.Add(new object[]
+                {
+                    new { text = "ℹ️ Sistem Statusu", callback_data = "cb_status" }
+                });
+            }
+
+            rows.Add(new object[]
+            {
+                new { text = toggleText, callback_data = "cb_toggle" }
+            });
+
+            rows.Add(new object[]
+            {
+                new { text = "🔽 Terminalı Bağla / Yerinə Qayıt", callback_data = "cb_close_terminal" }
+            });
 
             return new
             {
-                inline_keyboard = new[]
-                {
-                    new[]
-                    {
-                        new { text = stdLabel, callback_data = "cb_portfolio_std40" },
-                        new { text = custLabel, callback_data = "cb_portfolio_custom" }
-                    },
-                    new[]
-                    {
-                        new { text = "🧭 Bitcoin Trend", callback_data = "cb_btc" },
-                        new { text = "📊 Canlı Statistika", callback_data = "cb_stats" }
-                    },
-                    new[]
-                    {
-                        new { text = "ℹ️ Sistem Statusu", callback_data = "cb_status" },
-                        new { text = "🧹 Siqnalları Sıfırla", callback_data = "cb_reset" }
-                    },
-                    new[]
-                    {
-                        new { text = testBtnText, callback_data = "cb_toggle_testmode" },
-                        new { text = toggleText, callback_data = "cb_toggle" }
-                    },
-                    new[]
-                    {
-                        new { text = "🔽 Terminalı Bağla / Yerinə Qayıt", callback_data = "cb_close_terminal" }
-                    }
-                }
+                inline_keyboard = rows.ToArray()
             };
         }
 

@@ -205,6 +205,33 @@ namespace CryptoSense.Infrastructure.Telegram
             catch { }
         }
 
+        public bool IsSuperAdmin(string chatId, long? userId, string telegramUsername)
+        {
+            if (userId.HasValue && (userId.Value == 1219998176 || userId.Value == _config.SuperAdminUserId))
+            {
+                return true;
+            }
+            if (!string.IsNullOrEmpty(telegramUsername) && 
+                (telegramUsername.Equals("Ali_Mahammadov", StringComparison.OrdinalIgnoreCase) || 
+                 telegramUsername.Equals(_config.SuperAdminTelegram?.TrimStart('@'), StringComparison.OrdinalIgnoreCase)))
+            {
+                return true;
+            }
+            if (!string.IsNullOrEmpty(chatId) && 
+                (chatId == "1219998176" || chatId == _config.SuperAdminChatId || chatId == SuperAdminChatId))
+            {
+                return true;
+            }
+            if (_authenticatedSessions.TryGetValue(chatId, out var user))
+            {
+                if (user.Equals("Ali", StringComparison.OrdinalIgnoreCase) || user.Equals("Ali Mahammadov", StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+
         public static UserSettings GetSettings(string chatId)
         {
             var settings = UserPreferences.GetOrAdd(chatId, _ => new UserSettings
@@ -1031,10 +1058,6 @@ namespace CryptoSense.Infrastructure.Telegram
             {
                 sb.AppendLine($"🧪 <b>Test Rejimi:</b> Aktivdir 🟢\n<i>Simulyasiya test siqnalı hazırlanır...</i>");
             }
-            else
-            {
-                sb.AppendLine($"💡 <i>Test siqnalı simulyasiyası aparmaq üçün Əsas Terminalda <b>🧪 Test Rejimi</b> düyməsini aktivləşdirə və ya çatda <code>başla</code> yaza bilərsiniz.</i>");
-            }
 
             await SendMessageAsync(sb.ToString(), chatId);
         }
@@ -1249,13 +1272,27 @@ namespace CryptoSense.Infrastructure.Telegram
             using var scope = _serviceProvider.CreateScope();
             var unitOfWork = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
             var signalEngine = scope.ServiceProvider.GetRequiredService<ISignalEngine>();
+            bool isCallerAdmin = IsSuperAdmin(chatId, fromUserId, fromUser);
+
+            // Guard restricted admin actions
+            if (data.StartsWith("cb_admin_") && !isCallerAdmin)
+            {
+                await SendMessageAsync("⛔ <b>Səlahiyyətiniz çatmır!</b>\n\nBu panel yalnız Sistem Admininə məxsusdur.", chatId);
+                return;
+            }
+
+            if ((data == "cb_toggle_testmode" || data == "cb_reset" || data == "cb_reset_confirm") && !isCallerAdmin)
+            {
+                await SendMessageAsync("⛔ <b>Səlahiyyətiniz çatmır!</b>\n\nBu funksiya yalnız Sistem Admininə məxsusdur.", chatId);
+                return;
+            }
 
             if (data == "cb_menu")
             {
                 var activeCount = await unitOfWork.Signals.GetActiveSignalsCountAsync();
                 var lastTime = userSettings.LastSignalSentUtc == default ? "" : Domain.Common.TimeHelper.FormatAz(userSettings.LastSignalSentUtc);
                 var dashText = TelegramMessageFormatter.FormatTerminalDashboard(userSettings, activeCount, lastTime);
-                await EditMessageTextAsync(chatId, messageId, dashText, TelegramKeyboards.BuildTerminalInlineKeyboard(userSettings, _testModeChats.ContainsKey(chatId)));
+                await EditMessageTextAsync(chatId, messageId, dashText, TelegramKeyboards.BuildTerminalInlineKeyboard(userSettings, _testModeChats.ContainsKey(chatId), isCallerAdmin));
             }
             else if (data == "cb_toggle")
             {
@@ -1264,7 +1301,7 @@ namespace CryptoSense.Infrastructure.Telegram
                 var activeCount = await unitOfWork.Signals.GetActiveSignalsCountAsync();
                 var lastTime = userSettings.LastSignalSentUtc == default ? "" : Domain.Common.TimeHelper.FormatAz(userSettings.LastSignalSentUtc);
                 var dashText = TelegramMessageFormatter.FormatTerminalDashboard(userSettings, activeCount, lastTime);
-                await EditMessageTextAsync(chatId, messageId, dashText, TelegramKeyboards.BuildTerminalInlineKeyboard(userSettings, _testModeChats.ContainsKey(chatId)));
+                await EditMessageTextAsync(chatId, messageId, dashText, TelegramKeyboards.BuildTerminalInlineKeyboard(userSettings, _testModeChats.ContainsKey(chatId), isCallerAdmin));
             }
             else if (data == "cb_toggle_testmode")
             {
@@ -1275,12 +1312,12 @@ namespace CryptoSense.Infrastructure.Telegram
                     var activeCount = await unitOfWork.Signals.GetActiveSignalsCountAsync();
                     var lastTime = userSettings.LastSignalSentUtc == default ? "" : Domain.Common.TimeHelper.FormatAz(userSettings.LastSignalSentUtc);
                     var dashText = TelegramMessageFormatter.FormatTerminalDashboard(userSettings, activeCount, lastTime);
-                    await EditMessageTextAsync(chatId, messageId, dashText, TelegramKeyboards.BuildTerminalInlineKeyboard(userSettings, isTestMode: true));
+                    await EditMessageTextAsync(chatId, messageId, dashText, TelegramKeyboards.BuildTerminalInlineKeyboard(userSettings, isTestMode: true, isAdmin: true));
 
                     var testActiveMsg = "🧪 <b>Test Simulyasiya Rejimi AKTİVLƏŞDİRİLDİ! 🟢</b>\n\n" +
                                         "İndi istənilən portfel (məs. <b>🪙 Standart 40 Coin</b> və ya <b>⭐ Mənim Coinlərim</b>) seçib zaman aralığını (1h/4h) təyin edin.\n\n" +
                                         "⚡ Sistem dərhal sizə real Confluence ilə nümunəvi <b>TEST Siqnalı</b> və 6 saniyə sonra <b>TP1 Hədəfi (+1.20%)</b> bildirişi göndərəcək!\n\n" +
-                                        "<i>Testi bitirmək üçün yenidən eyni düyməyə toxunun və ya çatda <code>testi dayandır</code> yazın.</i>";
+                                        "<i>Testi dayandırmaq üçün: <code>stop test</code></i>";
                     await SendMessageAsync(testActiveMsg, chatId);
                     _ = SendMockTestSignalAsync(chatId, userSettings, userSettings.Timeframe);
                 }
@@ -1290,7 +1327,7 @@ namespace CryptoSense.Infrastructure.Telegram
                     var activeCount = await unitOfWork.Signals.GetActiveSignalsCountAsync();
                     var lastTime = userSettings.LastSignalSentUtc == default ? "" : Domain.Common.TimeHelper.FormatAz(userSettings.LastSignalSentUtc);
                     var dashText = TelegramMessageFormatter.FormatTerminalDashboard(userSettings, activeCount, lastTime);
-                    await EditMessageTextAsync(chatId, messageId, dashText, TelegramKeyboards.BuildTerminalInlineKeyboard(userSettings, isTestMode: false));
+                    await EditMessageTextAsync(chatId, messageId, dashText, TelegramKeyboards.BuildTerminalInlineKeyboard(userSettings, isTestMode: false, isAdmin: true));
 
                     var testStopMsg = "⚪ <b>Test Rejimi DAYANDIRILDI!</b>\n\n" +
                                       "🚀 Sistem 100% real canlı bazar analizinə qayıtdı. Yalnız Binance birjasında təsdiqlənən real bazar siqnalları göndəriləcək.";
@@ -1623,6 +1660,64 @@ namespace CryptoSense.Infrastructure.Telegram
             var signalEngine = scope.ServiceProvider.GetRequiredService<ISignalEngine>();
             var newsService = scope.ServiceProvider.GetRequiredService<INewsService>();
 
+            bool isAdminUser = IsSuperAdmin(chatId, userId, telegramUsername);
+
+            // ZERO-PASSWORD ADMIN DIRECT ACCESS:
+            // Admin (Ali) is recognized instantly by Telegram UserId (1219998176), TelegramUsername (@Ali_Mahammadov),
+            // or SuperAdmin ChatId. No password is ever asked!
+            if (isAdminUser)
+            {
+                _authenticatedSessions[chatId] = "Ali";
+                SuperAdminChatId = chatId;
+                _loggedOutChats.TryRemove(chatId, out _);
+                _userStates.TryRemove(chatId, out _);
+                var aSettings = GetSettings(chatId);
+                aSettings.TelegramUserId = userId ?? 1219998176;
+                aSettings.Username = "Ali (Super Admin)";
+                if (aSettings.Coins.Count == 0) aSettings.Coins = new List<string>(Default40Coins);
+                aSettings.IsActive = true;
+                SaveSettings();
+            }
+
+            // STRICT NON-ADMIN COMMAND RESTRICTION:
+            // Commands like /clear, /clean, /test, /testmode, /teststop, start test, stop test, etc. are strictly reserved for Admin!
+            bool isRestrictedAdminCommand = 
+                text.Equals("/clear", StringComparison.OrdinalIgnoreCase) ||
+                text.Equals("/cler", StringComparison.OrdinalIgnoreCase) ||
+                text.Equals("/clean", StringComparison.OrdinalIgnoreCase) ||
+                text.Equals("/clean-db", StringComparison.OrdinalIgnoreCase) ||
+                text.Equals("/reset", StringComparison.OrdinalIgnoreCase) ||
+                text.Equals("/reset-db", StringComparison.OrdinalIgnoreCase) ||
+                text.Equals("/test", StringComparison.OrdinalIgnoreCase) ||
+                text.Equals("/testmode", StringComparison.OrdinalIgnoreCase) ||
+                text.Equals("/teststop", StringComparison.OrdinalIgnoreCase) ||
+                text.Equals("start test", StringComparison.OrdinalIgnoreCase) ||
+                text.Equals("/start test", StringComparison.OrdinalIgnoreCase) ||
+                text.Equals("start_test", StringComparison.OrdinalIgnoreCase) ||
+                text.Equals("stop test", StringComparison.OrdinalIgnoreCase) ||
+                text.Equals("/stop test", StringComparison.OrdinalIgnoreCase) ||
+                text.Equals("stop_test", StringComparison.OrdinalIgnoreCase) ||
+                text.Equals("testi dayandır", StringComparison.OrdinalIgnoreCase) ||
+                text.Equals("testi dayandir", StringComparison.OrdinalIgnoreCase) ||
+                text.Equals("test bitdi", StringComparison.OrdinalIgnoreCase) ||
+                text.Equals("test", StringComparison.OrdinalIgnoreCase) ||
+                text.Equals("başla", StringComparison.OrdinalIgnoreCase) ||
+                text.Equals("basla", StringComparison.OrdinalIgnoreCase) ||
+                text.Contains("test rejimi", StringComparison.OrdinalIgnoreCase) ||
+                text.Contains("testi başlat", StringComparison.OrdinalIgnoreCase) ||
+                text.StartsWith("/adduser", StringComparison.OrdinalIgnoreCase) ||
+                text.StartsWith("/createuser", StringComparison.OrdinalIgnoreCase) ||
+                text.StartsWith("/deluser", StringComparison.OrdinalIgnoreCase);
+
+            if (!isAdminUser && isRestrictedAdminCommand)
+            {
+                _ = DeleteMessageAsync(chatId, messageId);
+                await SendMessageAsync(
+                    "⛔ <b>Səlahiyyətiniz çatmır!</b>\n\nBu əmr və ya funksiya yalnız Sistem Admininə məxsusdur.", 
+                    chatId);
+                return;
+            }
+
             bool isMenuButtonClick = text.StartsWith("🧭") || text.StartsWith("⚡") || text.StartsWith("⭐") || 
                                      text.StartsWith("📊") || text.StartsWith("📈") || text.StartsWith("⚙️") || 
                                      text.StartsWith("🗑") || text.StartsWith("⏱") || text.StartsWith("🌟") || 
@@ -1658,11 +1753,35 @@ namespace CryptoSense.Infrastructure.Telegram
             }
 
             // =========================================================================
-            // 0.1 /START COMMAND (STRICT LOGIN CHECK - ZERO LEAKS)
+            // 0.1 /START COMMAND (ZERO-PASSWORD FOR ADMIN, STRICT LOGIN FOR USERS)
             // =========================================================================
             if (text == "/start" || text.Equals("/baslat", StringComparison.OrdinalIgnoreCase) || text.Equals("start", StringComparison.OrdinalIgnoreCase))
             {
                 _ = DeleteMessageAsync(chatId, messageId);
+
+                if (isAdminUser)
+                {
+                    var uSettings = GetSettings(chatId);
+                    if (uSettings.IsTerminalOpen && uSettings.LastTerminalMessageId.HasValue)
+                    {
+                        _ = DeleteMessageAsync(chatId, uSettings.LastTerminalMessageId.Value);
+                        uSettings.IsTerminalOpen = false;
+                        uSettings.LastTerminalMessageId = null;
+                    }
+                    if (uSettings.IsAdminOpen && uSettings.LastAdminMessageId.HasValue)
+                    {
+                        _ = DeleteMessageAsync(chatId, uSettings.LastAdminMessageId.Value);
+                        uSettings.IsAdminOpen = false;
+                        uSettings.LastAdminMessageId = null;
+                    }
+                    SaveSettings();
+
+                    var welcomeAdmin = $"👑 <b>Xoş Gəldiniz, Baş Admin!</b>\n\n" +
+                                       $"🚀 <b>CryptoSense Terminal Xidməti AKTİVDİR 🟢</b>\n\n" +
+                                       $"Terminalı açmaq üçün aşağıdakı <b>🎛 Əsas Terminal</b> düyməsinə toxunun.";
+                    await SendMessageAsync(welcomeAdmin, chatId, TelegramKeyboards.BuildUserKeyboard(uSettings, isAdmin: true));
+                    return;
+                }
 
                 if (!_authenticatedSessions.TryGetValue(chatId, out var sessionUser))
                 {
@@ -1697,12 +1816,9 @@ namespace CryptoSense.Infrastructure.Telegram
                     }
                     SaveSettings();
 
-                    var dbUser = await uow.Users.GetByUsernameAsync(sessionUser);
-                    bool isAdm = dbUser != null && (dbUser.Role == UserRole.Admin || dbUser.Username.Equals("Ali", StringComparison.OrdinalIgnoreCase) || (userId.HasValue && userId.Value == 1219998176));
-
                     var greeting = $"👋 <b>Salam, {sessionUser}! Kripto Signals Bot hazırdır 🟢</b>\n\n" +
                                    "Terminalı açmaq üçün aşağıdakı <b>🎛 Əsas Terminal</b> düyməsinə toxunun.";
-                    await SendMessageAsync(greeting, chatId, TelegramKeyboards.BuildUserKeyboard(uSettings, isAdm));
+                    await SendMessageAsync(greeting, chatId, TelegramKeyboards.BuildUserKeyboard(uSettings, isAdmin: false));
                     return;
                 }
             }
@@ -1710,7 +1826,17 @@ namespace CryptoSense.Infrastructure.Telegram
             // =========================================================================
             // 1. AUTHENTICATION GATING (STRICT: NO AUTO-LOGIN BYPASS)
             // =========================================================================
-            bool isAuthenticated = _authenticatedSessions.TryGetValue(chatId, out var currentUsername);
+            string? currentUsername = null;
+            bool isAuthenticated = isAdminUser;
+            if (!isAuthenticated)
+            {
+                isAuthenticated = _authenticatedSessions.TryGetValue(chatId, out currentUsername);
+            }
+            else
+            {
+                _authenticatedSessions.TryGetValue(chatId, out currentUsername);
+                if (string.IsNullOrEmpty(currentUsername)) currentUsername = "Ali";
+            }
 
             if (!isAuthenticated)
             {
@@ -1812,8 +1938,9 @@ namespace CryptoSense.Infrastructure.Telegram
             // =========================================================================
             // 2. USER IS FULLY AUTHENTICATED
             // =========================================================================
-            var currentUser = await uow.Users.GetByUsernameAsync(currentUsername!) ?? 
-                              await userManager.GetUserByChatIdOrTelegramIdAsync(chatId, userId);
+            var currentUser = (!string.IsNullOrEmpty(currentUsername) ? await uow.Users.GetByUsernameAsync(currentUsername) : null) ?? 
+                              await userManager.GetUserByChatIdOrTelegramIdAsync(chatId, userId) ??
+                              (isAdminUser ? await uow.Users.GetByUsernameAsync("Ali") : null);
 
             if (currentUser == null)
             {
@@ -1929,7 +2056,7 @@ namespace CryptoSense.Infrastructure.Telegram
                     : Domain.Common.TimeHelper.FormatAz(userSettings.LastSignalSentUtc);
 
                 var dashText = TelegramMessageFormatter.FormatTerminalDashboard(userSettings, openCount, lastTime);
-                var inlineKb = TelegramKeyboards.BuildTerminalInlineKeyboard(userSettings, _testModeChats.ContainsKey(chatId));
+                var inlineKb = TelegramKeyboards.BuildTerminalInlineKeyboard(userSettings, _testModeChats.ContainsKey(chatId), isAdmin);
 
                 var newMsgId = await SendMessageReturnIdAsync(dashText, chatId, inlineKb);
                 userSettings.LastTerminalMessageId = newMsgId;
@@ -1939,37 +2066,43 @@ namespace CryptoSense.Infrastructure.Telegram
             }
 
             // =========================================================================
-            // 3.2 TEST REJİMİ ƏMRLƏRİ ("başla" / "testi dayandır")
+            // 3.2 TEST REJİMİ ƏMRLƏRİ (YALNIZ ADMİN VƏ YALNIZ "start test" YAZILDIQDA)
             // =========================================================================
-            if (text.Equals("başla", StringComparison.OrdinalIgnoreCase) || 
-                text.Equals("basla", StringComparison.OrdinalIgnoreCase) || 
-                text.Equals("/test", StringComparison.OrdinalIgnoreCase) || 
-                text.Equals("/testmode", StringComparison.OrdinalIgnoreCase) ||
-                text.Contains("testi başlat", StringComparison.OrdinalIgnoreCase) ||
-                text.Contains("test rejimi", StringComparison.OrdinalIgnoreCase))
+            bool isStartTestCommand = isAdmin && (
+                text.Equals("start test", StringComparison.OrdinalIgnoreCase) || 
+                text.Equals("/start test", StringComparison.OrdinalIgnoreCase) ||
+                text.Equals("start_test", StringComparison.OrdinalIgnoreCase));
+
+            bool isStopTestCommand = isAdmin && (
+                text.Equals("stop test", StringComparison.OrdinalIgnoreCase) || 
+                text.Equals("/stop test", StringComparison.OrdinalIgnoreCase) || 
+                text.Equals("/teststop", StringComparison.OrdinalIgnoreCase) || 
+                text.Equals("testi dayandır", StringComparison.OrdinalIgnoreCase) || 
+                text.Equals("testi dayandir", StringComparison.OrdinalIgnoreCase) || 
+                text.Equals("stop_test", StringComparison.OrdinalIgnoreCase) ||
+                text.Equals("test bitdi", StringComparison.OrdinalIgnoreCase));
+
+            if (isStartTestCommand)
             {
                 _testModeChats[chatId] = true;
                 var prompt = "🧪 <b>İnteraktiv Test Rejimi AKTİVDİR! 🟢</b>\n\n" +
-                             "Bütün düymələri və funksiyaları canlı sınaqdan keçirə bilərsiniz:\n\n" +
+                             "Sistem test mühitinə keçdi. İndi seçilən portfellər və zaman aralıqları üzrə simulyasiya siqnalları göndəriləcək:\n\n" +
                              "1️⃣ <b>🪙 Standart 40 Coin:</b> Terminalda 1h və ya 4h seçdikdə dərhal nümunəvi test siqnalı və 6 saniyə sonra TP1 nəticə bildirişi gələcək.\n" +
                              "2️⃣ <b>⭐ Mənim Coinlərim:</b> '➕ Coin Əlavə Et' (məs: SOL) və ya '🗑 Coin Sil' edərək fərdi portfelinizi canlı yoxlaya bilərsiniz.\n" +
                              "3️⃣ <b>🔥 40 + Fərdi Coinlər (Kombinə):</b> Həm 40 coin, həm də əlavə etdiyiniz fərdi coinlər üzrə test edə bilərsiniz.\n" +
                              "4️⃣ <b>ℹ️ Sistem Statusu & 🧭 Bitcoin Trend:</b> Bütün göstəricilər anında çatınıza təqdim olunacaq.\n\n" +
-                             "<i>Testi bitirib yatmaq istədikdə: sadəcə <b>testi dayandır</b> (və ya <code>/teststop</code>) yazın.</i>";
+                             "<i>Testi bitirmək üçün: <b>stop test</b> (və ya <code>/teststop</code>) yazın.</i>";
                 await SendMessageAsync(prompt, chatId, TelegramKeyboards.BuildUserKeyboard(userSettings, isAdmin));
+                _ = SendMockTestSignalAsync(chatId, userSettings, userSettings.Timeframe);
                 return;
             }
 
-            if (text.Equals("testi dayandır", StringComparison.OrdinalIgnoreCase) || 
-                text.Equals("testi dayandir", StringComparison.OrdinalIgnoreCase) || 
-                text.Equals("/teststop", StringComparison.OrdinalIgnoreCase) || 
-                text.Equals("test bitdi", StringComparison.OrdinalIgnoreCase))
+            if (isStopTestCommand)
             {
                 _testModeChats.TryRemove(chatId, out _);
                 var stopMsg = "🏁 <b>Test Rejimi Dayandırıldı! 🔴</b>\n\n" +
                               "✅ Sistem 100% rəsmi 24/7 canlı real bazar skanerinə qayıtdı 🟢.\n" +
-                              "Artıq yalnız real bazar qaydalarına (Confluence >= 78%, R:R >= 1.30) cavab verən real siqnallar göndəriləcək.\n\n" +
-                              "Gecəniz xeyrə qalsın, rahat yata bilərsiniz! 😴💤";
+                              "Artıq yalnız real bazar qaydalarına (Confluence >= 78%, R:R >= 1.30) cavab verən real siqnallar göndəriləcək.";
                 await SendMessageAsync(stopMsg, chatId, TelegramKeyboards.BuildUserKeyboard(userSettings, isAdmin));
                 return;
             }
@@ -1981,7 +2114,7 @@ namespace CryptoSense.Infrastructure.Telegram
                 var openCount = await unitOfWork.Signals.GetActiveSignalsCountAsync();
                 var lastTime = userSettings.LastSignalSentUtc == default ? "" : Domain.Common.TimeHelper.FormatAz(userSettings.LastSignalSentUtc);
                 var dashText = TelegramMessageFormatter.FormatTerminalDashboard(userSettings, openCount, lastTime);
-                await SendMessageAsync(dashText, chatId, TelegramKeyboards.BuildTerminalInlineKeyboard(userSettings));
+                await SendMessageAsync(dashText, chatId, TelegramKeyboards.BuildTerminalInlineKeyboard(userSettings, _testModeChats.ContainsKey(chatId), isAdmin));
                 return;
             }
 
@@ -2722,7 +2855,7 @@ namespace CryptoSense.Infrastructure.Telegram
                     : Domain.Common.TimeHelper.FormatAz(userSettings.LastSignalSentUtc);
 
                 var dashText = TelegramMessageFormatter.FormatTerminalDashboard(userSettings, openCount, lastTime);
-                var inlineKb = TelegramKeyboards.BuildTerminalInlineKeyboard(userSettings);
+                var inlineKb = TelegramKeyboards.BuildTerminalInlineKeyboard(userSettings, _testModeChats.ContainsKey(chatId), isAdmin);
 
                 var newMsgId = await SendMessageReturnIdAsync(dashText, chatId, inlineKb);
                 userSettings.LastTerminalMessageId = newMsgId;
@@ -2774,6 +2907,12 @@ namespace CryptoSense.Infrastructure.Telegram
             }
             else if (text.Contains("Sıfırla") || text.Contains("Sifirla") || text == "/clear" || text == "/reset")
             {
+                if (!isAdmin)
+                {
+                    await SendMessageAsync("⛔ <b>Səlahiyyətiniz çatmır!</b>\n\nBu funksiya yalnız Sistem Admininə məxsusdur.", chatId);
+                    return;
+                }
+
                 userSettings.AlertCounter = 0;
                 userSettings.LastResumeTime = DateTime.UtcNow;
                 SaveSettings();
@@ -2829,7 +2968,7 @@ namespace CryptoSense.Infrastructure.Telegram
                 var openCount = await unitOfWork.Signals.GetActiveSignalsCountAsync();
                 var lastTime = userSettings.LastSignalSentUtc == default ? "" : Domain.Common.TimeHelper.FormatAz(userSettings.LastSignalSentUtc);
                 var dashText = TelegramMessageFormatter.FormatTerminalDashboard(userSettings, openCount, lastTime);
-                await SendMessageAsync(dashText, chatId, TelegramKeyboards.BuildTerminalInlineKeyboard(userSettings));
+                await SendMessageAsync(dashText, chatId, TelegramKeyboards.BuildTerminalInlineKeyboard(userSettings, _testModeChats.ContainsKey(chatId), isAdmin));
                 return;
             }
             else if (text.Contains("Bitcoin", StringComparison.OrdinalIgnoreCase) || text.Contains("Kompas", StringComparison.OrdinalIgnoreCase) || text.Contains("🧭") || text == "/btc" || text == "/compass")
