@@ -36,6 +36,7 @@ namespace CryptoSense.Infrastructure.Telegram
         private static readonly ConcurrentDictionary<string, (string Text, DateTime Time)> _lastUserAction = new();
         private static readonly ConcurrentDictionary<string, bool> _loggedOutChats = new();
         private static readonly ConcurrentDictionary<string, string> _authenticatedSessions = new();
+        private static readonly ConcurrentDictionary<string, bool> _testModeChats = new();
         private static readonly string DataDirectory = !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("RAILWAY_VOLUME_MOUNT_PATH")) && Directory.Exists(Environment.GetEnvironmentVariable("RAILWAY_VOLUME_MOUNT_PATH"))
             ? Environment.GetEnvironmentVariable("RAILWAY_VOLUME_MOUNT_PATH")!
             : (Directory.Exists("/app/data") ? "/app/data" : Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "data"));
@@ -974,6 +975,83 @@ namespace CryptoSense.Infrastructure.Telegram
             await SendMessageAsync(sb.ToString(), chatId);
         }
 
+        private async Task SendMockTestSignalAsync(string chatId, UserSettings settings, string timeframe)
+        {
+            try
+            {
+                await Task.Delay(2000);
+                if (!_testModeChats.ContainsKey(chatId)) return;
+
+                var coin = settings.CustomCoins.Count > 0 ? settings.CustomCoins.Last() : (settings.Coins.Count > 0 ? settings.Coins.First() : "BTCUSDT");
+                var cleanCoin = coin.Replace("USDT", "");
+                var isBtc = cleanCoin == "BTC";
+                var isSol = cleanCoin == "SOL";
+                
+                decimal entry = isBtc ? 63250.00m : (isSol ? 142.50m : 5.80m);
+                decimal tp1 = isBtc ? 64010.00m : (isSol ? 144.20m : 5.87m);
+                decimal tp2 = isBtc ? 64770.00m : (isSol ? 145.90m : 5.94m);
+                decimal sl = isBtc ? 62800.00m : (isSol ? 141.50m : 5.76m);
+                var tf = (timeframe == "Hamısı" || timeframe == "Hamisi" || string.IsNullOrWhiteSpace(timeframe) || timeframe == "Təyin olunmayıb") ? "1h" : timeframe;
+
+                var mockSig = new FuturesSignal
+                {
+                    Id = (int)(DateTime.UtcNow.Ticks % 100000),
+                    Symbol = coin,
+                    SignalType = "STRONG_BUY_LONG",
+                    Direction = SignalDirection.Buy,
+                    EntryPrice = entry,
+                    EntryLow = Math.Round(entry * 0.998m, 4),
+                    EntryHigh = Math.Round(entry * 1.002m, 4),
+                    TakeProfit1 = tp1,
+                    TakeProfit2 = tp2,
+                    StopLoss = sl,
+                    ConfluenceScore = 84.5m,
+                    Timeframe = tf,
+                    GeneratedAt = DateTime.UtcNow,
+                    TimestampFormatted = CryptoSense.Domain.Common.TimeHelper.NowFormatted,
+                    CandleCloseTimeUtc = DateTime.UtcNow,
+                    PriceSource = "Binance Futures Test Engine",
+                    DataAgeMs = 110,
+                    NewsSentimentImpact = "BULLISH 🟢",
+                    Status = SignalStatus.Open
+                };
+
+                var userSigNum = settings.AlertCounter + 1;
+                settings.AlertCounter = userSigNum;
+                settings.LastSignalSentUtc = DateTime.UtcNow;
+                SaveSettings();
+
+                var alertMsg = TelegramMessageFormatter.FormatSignalAlert(mockSig, userSigNum);
+                var note = "🧪 <b>[TEST REJİMİ CANLI SİMULYASİYASI]</b>\n" +
+                           "<i>Bütün parametrlər və düymələr işləkdir. Göndərilən test siqnalı:</i>\n\n";
+                await SendMessageAsync(note + alertMsg, chatId);
+
+                // Simulate TP1 target reached after 6 seconds so user sees how win/target alert looks
+                _ = Task.Run(async () =>
+                {
+                    try
+                    {
+                        await Task.Delay(6000);
+                        if (!_testModeChats.ContainsKey(chatId)) return;
+                        mockSig.Status = SignalStatus.Success;
+                        mockSig.ClosePrice = tp1;
+                        mockSig.GrossResultPercent = 1.20m;
+                        mockSig.NetResultPercent = 1.10m;
+                        mockSig.ClosedAt = DateTime.UtcNow;
+
+                        var outcomeMsg = TelegramMessageFormatter.FormatOutcomeAlert(mockSig, userSigNum, "🎯 Take Profit 1 (TP1)", tp1, +1.20m);
+                        var outNote = "🧪 <b>[TEST REJİMİ NƏTİCƏ SİMULYASİYASI]</b>\n\n";
+                        await SendMessageAsync(outNote + outcomeMsg, chatId);
+                    }
+                    catch { }
+                });
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[TestMode] Error: {ex.Message}");
+            }
+        }
+
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
             if (string.IsNullOrWhiteSpace(_config.TelegramBotToken)) return;
@@ -1195,6 +1273,10 @@ namespace CryptoSense.Infrastructure.Telegram
                           $"🚀 Skaner aktivləşdirildi. Canlı texniki bazar vəziyyəti aşağıda təqdim edilir:";
                 await EditMessageTextAsync(chatId, messageId, msg, TelegramKeyboards.BuildBackToTerminalKeyboard());
                 await ScanUserCoinsInstantlyAsync(userSettings, chatId, userSettings.Timeframe);
+                if (_testModeChats.ContainsKey(chatId))
+                {
+                    _ = SendMockTestSignalAsync(chatId, userSettings, userSettings.Timeframe);
+                }
             }
             else if (data == "cb_std_tf_1h" || data == "cb_std_tf_4h" || data == "cb_std_tf_all")
             {
@@ -1211,6 +1293,10 @@ namespace CryptoSense.Infrastructure.Telegram
                           $"🚀 Skaner aktivləşdirildi. Canlı texniki bazar vəziyyəti aşağıda təqdim edilir:";
                 await EditMessageTextAsync(chatId, messageId, msg, TelegramKeyboards.BuildBackToTerminalKeyboard());
                 await ScanUserCoinsInstantlyAsync(userSettings, chatId, userSettings.Timeframe);
+                if (_testModeChats.ContainsKey(chatId))
+                {
+                    _ = SendMockTestSignalAsync(chatId, userSettings, userSettings.Timeframe);
+                }
             }
             else if (data == "cb_cust_tf_1h" || data == "cb_cust_tf_4h" || data == "cb_cust_tf_all")
             {
@@ -1245,6 +1331,10 @@ namespace CryptoSense.Infrastructure.Telegram
                           $"🚀 Skaner aktivləşdirildi. Canlı texniki bazar vəziyyəti aşağıda təqdim edilir:";
                 await EditMessageTextAsync(chatId, messageId, msg, TelegramKeyboards.BuildBackToTerminalKeyboard());
                 await ScanUserCoinsInstantlyAsync(userSettings, chatId, userSettings.Timeframe);
+                if (_testModeChats.ContainsKey(chatId))
+                {
+                    _ = SendMockTestSignalAsync(chatId, userSettings, userSettings.Timeframe);
+                }
             }
             else if (data == "cb_custom_add" || data == "cb_coin_add")
             {
@@ -1280,6 +1370,10 @@ namespace CryptoSense.Infrastructure.Telegram
                 var activeCount = await unitOfWork.Signals.GetActiveSignalsCountAsync();
                 var lastTime = userSettings.LastSignalSentUtc == default ? "" : Domain.Common.TimeHelper.FormatAz(userSettings.LastSignalSentUtc);
                 var statusMsg = TelegramMessageFormatter.FormatBotStatus(userSettings, activeCount, lastTime);
+                if (_testModeChats.ContainsKey(chatId))
+                {
+                    statusMsg += "\n\n🧪 <b>Test Rejimi:</b> AKTİVDİR 🟢\n<i>Bütün butonlar və simulyasiyalar test üçün hazırdır.</i>";
+                }
                 await EditMessageTextAsync(chatId, messageId, statusMsg, TelegramKeyboards.BuildBackToTerminalKeyboard());
             }
             else if (data == "cb_coins" || data == "cb_coins_40")
@@ -1749,6 +1843,42 @@ namespace CryptoSense.Infrastructure.Telegram
                 return;
             }
 
+            // =========================================================================
+            // 3.2 TEST REJİMİ ƏMRLƏRİ ("başla" / "testi dayandır")
+            // =========================================================================
+            if (text.Equals("başla", StringComparison.OrdinalIgnoreCase) || 
+                text.Equals("basla", StringComparison.OrdinalIgnoreCase) || 
+                text.Equals("/test", StringComparison.OrdinalIgnoreCase) || 
+                text.Equals("/testmode", StringComparison.OrdinalIgnoreCase) ||
+                text.Contains("testi başlat", StringComparison.OrdinalIgnoreCase) ||
+                text.Contains("test rejimi", StringComparison.OrdinalIgnoreCase))
+            {
+                _testModeChats[chatId] = true;
+                var prompt = "🧪 <b>İnteraktiv Test Rejimi AKTİVDİR! 🟢</b>\n\n" +
+                             "Bütün düymələri və funksiyaları canlı sınaqdan keçirə bilərsiniz:\n\n" +
+                             "1️⃣ <b>🪙 Standart 40 Coin:</b> Terminalda 1h və ya 4h seçdikdə dərhal nümunəvi test siqnalı və 6 saniyə sonra TP1 nəticə bildirişi gələcək.\n" +
+                             "2️⃣ <b>⭐ Mənim Coinlərim:</b> '➕ Coin Əlavə Et' (məs: SOL) və ya '🗑 Coin Sil' edərək fərdi portfelinizi canlı yoxlaya bilərsiniz.\n" +
+                             "3️⃣ <b>🔥 40 + Fərdi Coinlər (Kombinə):</b> Həm 40 coin, həm də əlavə etdiyiniz fərdi coinlər üzrə test edə bilərsiniz.\n" +
+                             "4️⃣ <b>ℹ️ Sistem Statusu & 🧭 Bitcoin Trend:</b> Bütün göstəricilər anında çatınıza təqdim olunacaq.\n\n" +
+                             "<i>Testi bitirib yatmaq istədikdə: sadəcə <b>testi dayandır</b> (və ya <code>/teststop</code>) yazın.</i>";
+                await SendMessageAsync(prompt, chatId, TelegramKeyboards.BuildUserKeyboard(userSettings, isAdmin));
+                return;
+            }
+
+            if (text.Equals("testi dayandır", StringComparison.OrdinalIgnoreCase) || 
+                text.Equals("testi dayandir", StringComparison.OrdinalIgnoreCase) || 
+                text.Equals("/teststop", StringComparison.OrdinalIgnoreCase) || 
+                text.Equals("test bitdi", StringComparison.OrdinalIgnoreCase))
+            {
+                _testModeChats.TryRemove(chatId, out _);
+                var stopMsg = "🏁 <b>Test Rejimi Dayandırıldı! 🔴</b>\n\n" +
+                              "✅ Sistem 100% rəsmi 24/7 canlı real bazar skanerinə qayıtdı 🟢.\n" +
+                              "Artıq yalnız real bazar qaydalarına (Confluence >= 78%, R:R >= 1.30) cavab verən real siqnallar göndəriləcək.\n\n" +
+                              "Gecəniz xeyrə qalsın, rahat yata bilərsiniz! 😴💤";
+                await SendMessageAsync(stopMsg, chatId, TelegramKeyboards.BuildUserKeyboard(userSettings, isAdmin));
+                return;
+            }
+
             if (isAdmin && (text == "📊 Əsas Menyu (Siqnallar)" || text == "⬅️ Əsas Menyu"))
             {
                 _userStates.TryRemove(chatId, out _);
@@ -2178,6 +2308,10 @@ namespace CryptoSense.Infrastructure.Telegram
                                  $"📈 <b>Ümumi İzlənən:</b> {userSettings.Coins.Count} ədəd coin.\n\n" +
                                  "<i>Aşağıdan zaman kəsiyini seçərək canlı skaneri aktivləşdirə bilərsiniz:</i>";
                 await SendMessageAsync(successMsg, chatId, TelegramKeyboards.BuildCustomCoinsKeyboard(userSettings));
+                if (_testModeChats.ContainsKey(chatId))
+                {
+                    _ = SendMockTestSignalAsync(chatId, userSettings, userSettings.Timeframe);
+                }
                 return;
             }
 
