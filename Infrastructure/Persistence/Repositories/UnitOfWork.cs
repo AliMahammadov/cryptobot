@@ -44,6 +44,9 @@ namespace CryptoSense.Infrastructure.Persistence.Repositories
             try { _context.Database.ExecuteSqlRaw("ALTER TABLE Signals ADD COLUMN IsPartial2Closed INTEGER NOT NULL DEFAULT 0;"); } catch { }
             try { _context.Database.ExecuteSqlRaw("ALTER TABLE Signals ADD COLUMN CloseReason TEXT NULL;"); } catch { }
 
+            // Data cleanup: fix any corrupt signals where Status was Success but ResultPercent was negative or TakeProfit3 was 0
+            try { _context.Database.ExecuteSqlRaw("UPDATE Signals SET Status = 2 WHERE Status = 1 AND (ResultPercent < 0 OR (TakeProfit3 <= 0 AND CloseReason = 'TP3'));"); } catch { }
+
             // Safe SuperAdmin initialization & validation: Always guarantee TelegramChatId and TelegramUserId are populated
             var adminUser = _context.Users.FirstOrDefault(u => u.Username == "Ali" || u.Role == UserRole.Admin);
             if (adminUser == null)

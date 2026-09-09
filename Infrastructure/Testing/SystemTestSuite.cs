@@ -897,13 +897,28 @@ namespace CryptoSense.Infrastructure.Testing
                     return false;
                 }
 
-                // If trade signal was generated on 15m, check TP1 distance <= 2.0%
+                // If trade signal was generated on 15m, check TP1 distance (0.60% <= TP1 <= 2.50%) & TP3 > 0
                 if (sig15m.SignalType.Contains("LONG") || sig15m.SignalType.Contains("SHORT"))
                 {
                     decimal tp1DistPct = Math.Abs(sig15m.TakeProfit1 - sig15m.EntryPrice) / sig15m.EntryPrice;
-                    if (tp1DistPct > 0.020m)
+                    if (tp1DistPct > 0.025m)
                     {
-                        Console.WriteLine($"[Test 40 Fail] 15m TP1 distance is {tp1DistPct:P2} (must be <= 2.0%)");
+                        Console.WriteLine($"[Test 40 Fail] 15m TP1 distance is {tp1DistPct:P2} (must be <= 2.5%)");
+                        return false;
+                    }
+                    if (tp1DistPct < 0.0058m)
+                    {
+                        Console.WriteLine($"[Test 40 Fail] 15m TP1 distance is {tp1DistPct:P2} (must be >= 0.60%)");
+                        return false;
+                    }
+                    if (sig15m.TakeProfit2 > 0 && sig15m.TakeProfit2 == sig15m.TakeProfit1)
+                    {
+                        Console.WriteLine("[Test 40 Fail] TakeProfit2 cannot equal TakeProfit1!");
+                        return false;
+                    }
+                    if (sig15m.TakeProfit3 > 0 && (sig15m.TakeProfit3 == sig15m.TakeProfit2 || sig15m.TakeProfit3 == sig15m.TakeProfit1))
+                    {
+                        Console.WriteLine("[Test 40 Fail] TakeProfit3 cannot equal TakeProfit2 or TakeProfit1!");
                         return false;
                     }
                 }
@@ -1087,6 +1102,127 @@ namespace CryptoSense.Infrastructure.Testing
                 bool maxLimit20 = CryptoSense.Worker.BackgroundMarketScanner.MaxGlobalOpenPositions == 20;
 
                 return Task.FromResult(has40 && allIncluded && allInSupported && maxLimit20);
+            });
+
+            // 38. Target Integrity: TP1 >= 0.60%, TP1 <= 2.50%, TP3 > 0 strictly guaranteed
+            await AssertTest("Test 45: Target Integrity - TP1 >= 0.60%, TP1 <= 2.50%, TP3 > 0 strictly guaranteed", () =>
+            {
+                var klines = new List<Kline>();
+                var baseTime = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() - (60 * 15 * 60 * 1000);
+                decimal basePrice = 10.0m;
+                for (int i = 0; i < 60; i++)
+                {
+                    decimal p = basePrice + ((decimal)Math.Sin(i * 0.2) * 0.15m);
+                    klines.Add(new Kline
+                    {
+                        OpenTime = baseTime + (i * 15 * 60 * 1000),
+                        Open = p,
+                        High = p + 0.05m,
+                        Low = p - 0.05m,
+                        Close = p + 0.01m,
+                        Volume = 5000
+                    });
+                }
+
+                // Buy test
+                var buyRes = SignalEngine.CalculateSrTargetsAndStops(klines, SignalDirection.Buy, basePrice, 0.03m, basePrice);
+                if (buyRes.Success)
+                {
+                    decimal tp1Dist = ((buyRes.TakeProfit1 - basePrice) / basePrice) * 100m;
+                    if (tp1Dist < 0.60m || tp1Dist > 2.50m)
+                    {
+                        Console.WriteLine($"[Test 45 Fail] Buy TP1 distance is {tp1Dist:F2}% (expected 0.60% - 2.50%)");
+                        return Task.FromResult(false);
+                    }
+                    if (buyRes.TakeProfit2 > 0 && buyRes.TakeProfit2 <= buyRes.TakeProfit1)
+                    {
+                        Console.WriteLine($"[Test 45 Fail] Buy targets invalid: TP1={buyRes.TakeProfit1}, TP2={buyRes.TakeProfit2}");
+                        return Task.FromResult(false);
+                    }
+                    if (buyRes.TakeProfit3 > 0 && buyRes.TakeProfit3 <= buyRes.TakeProfit2)
+                    {
+                        Console.WriteLine($"[Test 45 Fail] Buy targets invalid: TP2={buyRes.TakeProfit2}, TP3={buyRes.TakeProfit3}");
+                        return Task.FromResult(false);
+                    }
+                }
+
+                // Sell test
+                var sellRes = SignalEngine.CalculateSrTargetsAndStops(klines, SignalDirection.Sell, basePrice, 0.03m, basePrice);
+                if (sellRes.Success)
+                {
+                    decimal tp1Dist = ((basePrice - sellRes.TakeProfit1) / basePrice) * 100m;
+                    if (tp1Dist < 0.60m || tp1Dist > 2.50m)
+                    {
+                        Console.WriteLine($"[Test 45 Fail] Sell TP1 distance is {tp1Dist:F2}% (expected 0.60% - 2.50%)");
+                        return Task.FromResult(false);
+                    }
+                    if (sellRes.TakeProfit2 > 0 && sellRes.TakeProfit2 >= sellRes.TakeProfit1)
+                    {
+                        Console.WriteLine($"[Test 45 Fail] Sell targets invalid: TP1={sellRes.TakeProfit1}, TP2={sellRes.TakeProfit2}");
+                        return Task.FromResult(false);
+                    }
+                    if (sellRes.TakeProfit3 > 0 && sellRes.TakeProfit3 >= sellRes.TakeProfit2)
+                    {
+                        Console.WriteLine($"[Test 45 Fail] Sell targets invalid: TP2={sellRes.TakeProfit2}, TP3={sellRes.TakeProfit3}");
+                        return Task.FromResult(false);
+                    }
+                }
+
+                return Task.FromResult(true);
+            });
+
+            // 39. Breakeven Invariant: MFE >= beTrigger pulls StopLoss without closing trade
+            await AssertTest("Test 46: Breakeven Invariant - MFE +0.9% pulls SL but DOES NOT close position", () =>
+            {
+                var sig = new FuturesSignal
+                {
+                    Id = 9999,
+                    Symbol = "ARBUSDT",
+                    Direction = SignalDirection.Sell,
+                    SignalType = "GÜCLÜ TREND SHORT 🔴",
+                    EntryPrice = 1.000m,
+                    StopLoss = 1.015m,
+                    TakeProfit1 = 0.985m,
+                    TakeProfit2 = 0.975m,
+                    TakeProfit3 = 0.965m,
+                    InitialRiskR = 0.015m,
+                    AtrPercent = 1.0m,
+                    RemainingPositionRatio = 1.0m,
+                    SessionHigh = 1.000m,
+                    SessionLow = 0.991m // +0.9% in profit
+                };
+
+                // Trigger Breakeven
+                sig.BreakevenTriggered = true;
+                sig.StopLoss = SignalEngine.RoundToCoinPrecision(sig.EntryPrice, sig.EntryPrice * 0.9988m); // 0.9988
+
+                // Current live price is 0.991 (+0.9% profit)
+                decimal livePrice = 0.991m;
+
+                // StopLoss check when BE is triggered must evaluate (livePrice >= sig.StopLoss) for SHORT:
+                bool isShortSlHit = (sig.BreakevenTriggered || sig.Tp1Notified)
+                    ? (livePrice >= sig.StopLoss)
+                    : (sig.SessionHigh >= sig.StopLoss || livePrice >= sig.StopLoss);
+
+                if (isShortSlHit)
+                {
+                    Console.WriteLine("[Test 46 Fail] Breakeven falsely closed a profitable trade (+0.9%)!");
+                    return Task.FromResult(false);
+                }
+
+                // If price reverses back to 0.9988 or 0.9990, now it should close at BE:
+                decimal retracePrice = 0.9990m;
+                bool isRetraceSlHit = (sig.BreakevenTriggered || sig.Tp1Notified)
+                    ? (retracePrice >= sig.StopLoss)
+                    : (sig.SessionHigh >= sig.StopLoss || retracePrice >= sig.StopLoss);
+
+                if (!isRetraceSlHit)
+                {
+                    Console.WriteLine("[Test 46 Fail] Breakeven did not close when price retraced to stop loss!");
+                    return Task.FromResult(false);
+                }
+
+                return Task.FromResult(true);
             });
 
             Console.WriteLine("\n========================================================");

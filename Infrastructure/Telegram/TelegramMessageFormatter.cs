@@ -41,8 +41,14 @@ namespace CryptoSense.Infrastructure.Telegram
 
             sb.AppendLine($"📍 <b>Giriş Zonası:</b> ${signal.EntryLow.ToString(CultureInfo.InvariantCulture)} - ${signal.EntryHigh.ToString(CultureInfo.InvariantCulture)}");
             sb.AppendLine($"🎯 <b>Hədəf 1 (TP1):</b> ${signal.TakeProfit1.ToString(CultureInfo.InvariantCulture)} (+{tp1Pct.ToString("F2", CultureInfo.InvariantCulture)}%)");
-            sb.AppendLine($"🎯 <b>Hədəf 2 (TP2):</b> ${signal.TakeProfit2.ToString(CultureInfo.InvariantCulture)}");
-            sb.AppendLine($"🌟 <b>Hədəf 3 (TP3):</b> ${signal.TakeProfit3.ToString(CultureInfo.InvariantCulture)}");
+            if (signal.TakeProfit2 > 0 && signal.TakeProfit2 != signal.TakeProfit1)
+            {
+                sb.AppendLine($"🎯 <b>Hədəf 2 (TP2):</b> ${signal.TakeProfit2.ToString(CultureInfo.InvariantCulture)}");
+            }
+            if (signal.TakeProfit3 > 0 && signal.TakeProfit3 != signal.TakeProfit2 && signal.TakeProfit3 != signal.TakeProfit1)
+            {
+                sb.AppendLine($"🌟 <b>Hədəf 3 (TP3):</b> ${signal.TakeProfit3.ToString(CultureInfo.InvariantCulture)}");
+            }
             sb.AppendLine($"⛔ <b>Stop Loss (SL):</b> ${signal.StopLoss.ToString(CultureInfo.InvariantCulture)} (-{slPct.ToString("F2", CultureInfo.InvariantCulture)}%)");
             sb.AppendLine($"⚖️ <b>Risk:Mükafat (R:R):</b> <b>{rr.ToString("F2", CultureInfo.InvariantCulture)}</b>");
             sb.AppendLine("-----------------------------------");
@@ -107,18 +113,32 @@ namespace CryptoSense.Infrastructure.Telegram
             if (outcomeType.Contains("TP1") || outcomeType.Contains("Hədəf 1"))
             {
                 sb.AppendLine();
-                sb.AppendLine("🛡️ <b>PARTİAL CLOSE (50% BAĞLANDI) & RİSK MENECMENT:</b>");
-                sb.AppendLine("• Mövqenin <b>50%-i TP1 SƏVİYYƏSİNDƏ QAZANCLA BAĞLANDI ✅</b>");
-                sb.AppendLine($"• Stop Loss dərhal <b>GİRİŞƏ (${signal.EntryPrice.ToString(CultureInfo.InvariantCulture)})</b> çəkildi (Sıfır Risk)!");
-                sb.AppendLine($"• Qalan <b>50%</b> mövqe ilə <b>Hədəf 2 (TP2: ${signal.TakeProfit2.ToString(CultureInfo.InvariantCulture)})</b> gözlənilir.");
+                if (signal.IsClosed || signal.TakeProfit2 <= 0 || signal.TakeProfit2 == signal.TakeProfit1)
+                {
+                    sb.AppendLine("🏆 <b>TAM HƏDƏFƏ ÇATILDI:</b> Mövqe maksimum mənfəətlə 100% bağlandı.");
+                }
+                else
+                {
+                    sb.AppendLine("🛡️ <b>PARTİAL CLOSE (50% BAĞLANDI) & RİSK MENECMENT:</b>");
+                    sb.AppendLine("• Mövqenin <b>50%-i TP1 SƏVİYYƏSİNDƏ QAZANCLA BAĞLANDI ✅</b>");
+                    sb.AppendLine($"• Stop Loss dərhal <b>GİRİŞƏ (${signal.EntryPrice.ToString(CultureInfo.InvariantCulture)})</b> çəkildi (Sıfır Risk)!");
+                    sb.AppendLine($"• Qalan <b>50%</b> mövqe ilə <b>Hədəf 2 (TP2: ${signal.TakeProfit2.ToString(CultureInfo.InvariantCulture)})</b> gözlənilir.");
+                }
             }
             else if (outcomeType.Contains("TP2") || outcomeType.Contains("Hədəf 2"))
             {
                 sb.AppendLine();
-                sb.AppendLine("🛡️ <b>PARTİAL CLOSE (25% ƏLAVƏ BAĞLANDI) & TRAILING STOP:</b>");
-                sb.AppendLine("• Qalan mövqenin 50%-i (İlkin mövqenin <b>25%-i</b>) <b>QAZANCLA BAĞLANDI ✅</b>");
-                sb.AppendLine($"• Stop Loss <b>TP1 (${signal.TakeProfit1.ToString(CultureInfo.InvariantCulture)})</b> səviyyəsinə qaldırıldı (Trailing)!");
-                sb.AppendLine($"• Qalan son <b>25%</b> mövqe ilə <b>Hədəf 3 (TP3: ${signal.TakeProfit3.ToString(CultureInfo.InvariantCulture)})</b> gözlənilir.");
+                if (signal.IsClosed || signal.TakeProfit3 <= 0 || signal.TakeProfit3 == signal.TakeProfit2)
+                {
+                    sb.AppendLine("🏆 <b>TAM HƏDƏFƏ ÇATILDI:</b> Mövqe maksimum mənfəətlə 100% bağlandı.");
+                }
+                else
+                {
+                    sb.AppendLine("🛡️ <b>PARTİAL CLOSE (25% ƏLAVƏ BAĞLANDI) & TRAILING STOP:</b>");
+                    sb.AppendLine("• Qalan mövqenin 50%-i (İlkin mövqenin <b>25%-i</b>) <b>QAZANCLA BAĞLANDI ✅</b>");
+                    sb.AppendLine($"• Stop Loss <b>TP1 (${signal.TakeProfit1.ToString(CultureInfo.InvariantCulture)})</b> səviyyəsinə qaldırıldı (Trailing)!");
+                    sb.AppendLine($"• Qalan son <b>25%</b> mövqe ilə <b>Hədəf 3 (TP3: ${signal.TakeProfit3.ToString(CultureInfo.InvariantCulture)})</b> gözlənilir.");
+                }
             }
             else if (outcomeType.Contains("TP3") || outcomeType.Contains("Hədəf 3"))
             {

@@ -192,8 +192,10 @@ namespace CryptoSense.Application.Services
                 decimal rawTp1 = nearestResistance - offsetDist;
                 decimal distPct = ((rawTp1 - calculationRefPrice) / calculationRefPrice) * 100m;
 
-                // TP1 dist = clamp(dist, 0.6*ATR%, 1.8*ATR%) sonra <= 2.5%
-                distPct = Math.Clamp(distPct, 0.6m * atrPct, 1.8m * atrPct);
+                // TP1 dist: minimum 0.60%, maksimum 2.50%. 0.60%-dən yaxın TP1 getməsin.
+                decimal minTp1Dist = Math.Max(0.60m, 0.6m * atrPct);
+                decimal maxTp1Dist = Math.Min(2.50m, Math.Max(minTp1Dist, 1.8m * atrPct));
+                distPct = Math.Clamp(distPct, minTp1Dist, maxTp1Dist);
                 if (distPct > 2.5m)
                 {
                     return fail with { SkipReason = $"SKIP_TP_FAR (TP1 dist {distPct:F2}% > 2.5% tavan)" };
@@ -226,26 +228,35 @@ namespace CryptoSense.Application.Services
                     return fail with { SkipReason = $"SKIP_RR (R:R {rrRatio:F2} < 0.8R)" };
                 }
 
-                // TP2 / TP3 = növbəti klaster. Yoxdursa TP2 = TP1 + 1*ATR% (tavan içində) və ya TP2 olmasın. 4.5-6.7% qadağan.
+                // TP2 / TP3 = YALNIZ real növbəti klasterlər olduqda. Klaster yoxdursa TP2/TP3 UYDURULMUR!
                 var nextClusters = resistances.Where(c => c > tp1).OrderBy(c => c).ToList();
                 decimal tp2 = 0m;
-                if (nextClusters.Count > 0 && ((nextClusters[0] - calculationRefPrice) / calculationRefPrice * 100m) <= 2.5m)
+                if (nextClusters.Count > 0)
                 {
-                    tp2 = nextClusters[0] - offsetDist;
-                }
-                else
-                {
-                    decimal candidateTp2Dist = distPct + (1.0m * atrPct);
-                    if (candidateTp2Dist <= 2.5m)
+                    decimal cDist = ((nextClusters[0] - calculationRefPrice) / calculationRefPrice) * 100m;
+                    if (cDist > distPct + 0.20m && cDist <= 3.50m)
                     {
-                        tp2 = calculationRefPrice * (1m + candidateTp2Dist / 100m);
+                        decimal candTp2 = nextClusters[0] - offsetDist;
+                        if (candTp2 > tp1)
+                        {
+                            tp2 = candTp2;
+                        }
                     }
                 }
 
                 decimal tp3 = 0m;
-                if (nextClusters.Count > 1 && ((nextClusters[1] - calculationRefPrice) / calculationRefPrice * 100m) <= 2.5m)
+                if (tp2 > 0m && nextClusters.Count > 1)
                 {
-                    tp3 = nextClusters[1] - offsetDist;
+                    decimal cDist3 = ((nextClusters[1] - calculationRefPrice) / calculationRefPrice) * 100m;
+                    decimal tp2DistPct = ((tp2 - calculationRefPrice) / calculationRefPrice) * 100m;
+                    if (cDist3 > tp2DistPct + 0.20m && cDist3 <= 5.0m)
+                    {
+                        decimal candTp3 = nextClusters[1] - offsetDist;
+                        if (candTp3 > tp2)
+                        {
+                            tp3 = candTp3;
+                        }
+                    }
                 }
 
                 return new SrTargetResult(
@@ -281,8 +292,10 @@ namespace CryptoSense.Application.Services
                 decimal rawTp1 = nearestSupport + offsetDist;
                 decimal distPct = ((calculationRefPrice - rawTp1) / calculationRefPrice) * 100m;
 
-                // TP1 dist = clamp(dist, 0.6*ATR%, 1.8*ATR%) sonra <= 2.5%
-                distPct = Math.Clamp(distPct, 0.6m * atrPct, 1.8m * atrPct);
+                // TP1 dist: minimum 0.60%, maksimum 2.50%. 0.60%-dən yaxın TP1 getməsin.
+                decimal minTp1Dist = Math.Max(0.60m, 0.6m * atrPct);
+                decimal maxTp1Dist = Math.Min(2.50m, Math.Max(minTp1Dist, 1.8m * atrPct));
+                distPct = Math.Clamp(distPct, minTp1Dist, maxTp1Dist);
                 if (distPct > 2.5m)
                 {
                     return fail with { SkipReason = $"SKIP_TP_FAR (TP1 dist {distPct:F2}% > 2.5% tavan)" };
@@ -315,26 +328,35 @@ namespace CryptoSense.Application.Services
                     return fail with { SkipReason = $"SKIP_RR (R:R {rrRatio:F2} < 0.8R)" };
                 }
 
-                // TP2 / TP3 = növbəti klaster. Yoxdursa TP2 = TP1 + 1*ATR% (tavan içində) və ya TP2 olmasın. 4.5-6.7% qadağan.
+                // TP2 / TP3 = YALNIZ real növbəti klasterlər olduqda. Klaster yoxdursa TP2/TP3 UYDURULMUR!
                 var nextClusters = supports.Where(c => c < tp1).OrderByDescending(c => c).ToList();
                 decimal tp2 = 0m;
-                if (nextClusters.Count > 0 && ((calculationRefPrice - nextClusters[0]) / calculationRefPrice * 100m) <= 2.5m)
+                if (nextClusters.Count > 0)
                 {
-                    tp2 = nextClusters[0] + offsetDist;
-                }
-                else
-                {
-                    decimal candidateTp2Dist = distPct + (1.0m * atrPct);
-                    if (candidateTp2Dist <= 2.5m)
+                    decimal cDist = ((calculationRefPrice - nextClusters[0]) / calculationRefPrice) * 100m;
+                    if (cDist > distPct + 0.20m && cDist <= 3.50m)
                     {
-                        tp2 = calculationRefPrice * (1m - candidateTp2Dist / 100m);
+                        decimal candTp2 = nextClusters[0] + offsetDist;
+                        if (candTp2 < tp1)
+                        {
+                            tp2 = candTp2;
+                        }
                     }
                 }
 
                 decimal tp3 = 0m;
-                if (nextClusters.Count > 1 && ((calculationRefPrice - nextClusters[1]) / calculationRefPrice * 100m) <= 2.5m)
+                if (tp2 > 0m && nextClusters.Count > 1)
                 {
-                    tp3 = nextClusters[1] + offsetDist;
+                    decimal cDist3 = ((calculationRefPrice - nextClusters[1]) / calculationRefPrice) * 100m;
+                    decimal tp2DistPct = ((calculationRefPrice - tp2) / calculationRefPrice) * 100m;
+                    if (cDist3 > tp2DistPct + 0.20m && cDist3 <= 5.0m)
+                    {
+                        decimal candTp3 = nextClusters[1] + offsetDist;
+                        if (candTp3 < tp2)
+                        {
+                            tp3 = candTp3;
+                        }
+                    }
                 }
 
                 return new SrTargetResult(
@@ -870,8 +892,12 @@ namespace CryptoSense.Application.Services
                 }
 
                 newSignal.TakeProfit1 = RoundToCoinPrecision(calculationRefPrice, srResult.TakeProfit1);
-                newSignal.TakeProfit2 = srResult.TakeProfit2 > 0 ? RoundToCoinPrecision(calculationRefPrice, srResult.TakeProfit2) : 0m;
-                newSignal.TakeProfit3 = srResult.TakeProfit3 > 0 ? RoundToCoinPrecision(calculationRefPrice, srResult.TakeProfit3) : 0m;
+                newSignal.TakeProfit2 = (srResult.TakeProfit2 > 0 && srResult.TakeProfit2 != srResult.TakeProfit1)
+                    ? RoundToCoinPrecision(calculationRefPrice, srResult.TakeProfit2)
+                    : 0m;
+                newSignal.TakeProfit3 = (srResult.TakeProfit3 > 0 && srResult.TakeProfit3 != srResult.TakeProfit2 && srResult.TakeProfit3 != srResult.TakeProfit1)
+                    ? RoundToCoinPrecision(calculationRefPrice, srResult.TakeProfit3)
+                    : 0m;
                 newSignal.StopLoss = RoundToCoinPrecision(calculationRefPrice, srResult.StopLoss);
                 newSignal.InitialRiskR = srResult.InitialRiskR;
                 newSignal.AtrPercent = srResult.AtrPercent;
