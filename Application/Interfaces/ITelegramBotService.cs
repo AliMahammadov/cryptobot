@@ -6,6 +6,7 @@ namespace CryptoSense.Application.Interfaces
     public interface ITelegramBotService
     {
         Task<bool> SendMessageAsync(string message, string targetChatId, object? replyMarkup = null);
+        Task<long?> SendMessageReturnIdAsync(string message, string targetChatId, object? replyMarkup = null);
         Task<bool> EditMessageTextAsync(string chatId, long messageId, string text, object? replyMarkup = null);
         Task<bool> AnswerCallbackQueryAsync(string callbackQueryId, string? text = null);
         Task<bool> DeleteMessageAsync(string chatId, long messageId);

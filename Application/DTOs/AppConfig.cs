@@ -19,7 +19,11 @@ namespace CryptoSense.Application.DTOs
     {
         public bool IsActive { get; set; } = true;
         public string Timeframe { get; set; } = "1h";
-        public List<string> Coins { get; set; } = new(); // Starts completely EMPTY so user selects their own coins
+        public string PortfolioMode { get; set; } = "Standard40"; // "Standard40", "Custom", "Combined"
+        public List<string> Coins { get; set; } = new(); // Currently active monitored coins
+        public List<string> CustomCoins { get; set; } = new(); // User's private custom-added coins
+        public long? LastTerminalMessageId { get; set; }
+        public bool IsTerminalOpen { get; set; } = false;
         public System.DateTime LastResumeTime { get; set; } = System.DateTime.UtcNow;
         public System.DateTime LastSignalSentUtc { get; set; } = System.DateTime.UtcNow;
         public System.DateTime LastHeartbeatSentUtc { get; set; } = System.DateTime.UtcNow;

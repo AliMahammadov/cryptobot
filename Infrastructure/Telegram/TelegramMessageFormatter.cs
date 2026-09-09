@@ -544,19 +544,75 @@ namespace CryptoSense.Infrastructure.Telegram
         public static string FormatTerminalDashboard(UserSettings settings, int activePositionsCount, string lastSignalTime)
         {
             var statusIcon = settings.IsActive ? "İşləyir 🟢" : "Dayandırılıb 🔴";
-            var tfDisplay = (settings.Timeframe == "Hamısı" || settings.Timeframe == "Hamisi") ? "1h, 4h" : (settings.Timeframe == "15m" ? "1h" : settings.Timeframe);
-            var coinCount = settings.Coins.Count == 0 ? "40 (Standart İnstitusional)" : $"{settings.Coins.Count} ədəd";
+            var tfDisplay = string.IsNullOrWhiteSpace(settings.Timeframe) || settings.Timeframe == "Təyin olunmayıb"
+                ? "Təyin olunmayıb ⚠️"
+                : ((settings.Timeframe == "Hamısı" || settings.Timeframe == "Hamisi") ? "1h, 4h" : settings.Timeframe);
+
+            string portModeName;
+            string coinCount;
+            if (settings.PortfolioMode == "Combined")
+            {
+                portModeName = "🔥 40 Coin + Fərdi Coinlər (Kombinə)";
+                coinCount = $"{settings.Coins.Count} ədəd (40 Standart + {settings.CustomCoins.Count} Fərdi)";
+            }
+            else if (settings.PortfolioMode == "Custom")
+            {
+                portModeName = "⭐ Mənim Coinlərim (Fərdi)";
+                coinCount = settings.CustomCoins.Count > 0 ? $"{settings.CustomCoins.Count} ədəd (Fərdi)" : "0 ədəd (Boşdur)";
+            }
+            else
+            {
+                portModeName = "🪙 Standart 40 Coin";
+                coinCount = $"{settings.Coins.Count} ədəd (İnstitusional 40)";
+            }
 
             var sb = new StringBuilder();
             sb.AppendLine("🤖 <b>CryptoSense v2.0 | Canlı Terminal</b>");
             sb.AppendLine("━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-            sb.AppendLine($"⏱ <b>Aktiv Rejim:</b> <code>{tfDisplay}</code>");
-            sb.AppendLine($"🪙 <b>İzlənən Portfel:</b> <code>{coinCount}</code>");
+            sb.AppendLine($"💼 <b>Aktiv Portfel:</b> <b>{portModeName}</b>");
+            sb.AppendLine($"⏱ <b>Zaman Rejimi:</b> <code>{tfDisplay}</code>");
+            sb.AppendLine($"🪙 <b>İzlənən Coinlər:</b> <code>{coinCount}</code>");
             sb.AppendLine($"⚡ <b>Açıq Mövqelər:</b> <code>{activePositionsCount} ədəd (Maksimum: 20)</code>");
             sb.AppendLine($"🔔 <b>Skaner Vəziyyəti:</b> <b>{statusIcon}</b>");
             sb.AppendLine($"🕒 <b>Son Siqnal:</b> <code>{(string.IsNullOrEmpty(lastSignalTime) ? "Hələ yoxdur" : lastSignalTime)}</code>");
             sb.AppendLine("━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-            sb.AppendLine("<i>Aşağıdakı düymələrlə terminalı interaktiv idarə edin:</i>");
+            if (string.IsNullOrWhiteSpace(settings.Timeframe) || settings.Timeframe == "Təyin olunmayıb" || !settings.IsActive)
+            {
+                sb.AppendLine("⚠️ <i>Zaman rejimi təyin olunmayıb. Aşağıdan portfel və zaman seçərək skaneri aktivləşdirin.</i>");
+            }
+            else
+            {
+                sb.AppendLine("<i>Aşağıdakı düymələrlə portfeli və parametrləri tənzimləyin:</i>");
+            }
+            return sb.ToString();
+        }
+
+        public static string FormatResetConfirmationPrompt()
+        {
+            var sb = new StringBuilder();
+            sb.AppendLine("⚠️ <b>DİQQƏT: Bütün Bazar Sistemlərini Sıfırlamaq</b>");
+            sb.AppendLine("━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+            sb.AppendLine("Bu əməliyyatı təsdiq etdikdə:");
+            sb.AppendLine("• Bütün aktiv bazar skaneri və bildirişlər <b>dayandırılacaq</b> (Dayandırılıb 🔴).");
+            sb.AppendLine("• Bütün təyin edilmiş zaman aralıqları (1h / 4h) <b>sıfırlanacaq</b> və yenidən təyin olunma tələb edəcək.");
+            sb.AppendLine("• Şəxsi siqnal sayğacınız sıfırlanacaq.");
+            sb.AppendLine();
+            sb.AppendLine("ℹ️ <b>QEYD:</b> <i>Sizin seçilmiş standart 40 coin və ya əlavə etdiyiniz fərdi coinləriniz SİLİNMİR, toxunulmaz saxlanılır!</i>");
+            sb.AppendLine("━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+            sb.AppendLine("Davam etmək istədiyinizə əminsiniz?");
+            return sb.ToString();
+        }
+
+        public static string FormatAdminDashboard(int totalUsers, int activeUsers)
+        {
+            var sb = new StringBuilder();
+            sb.AppendLine("👑 <b>CryptoSense v2.0 | Super Admin Paneli</b>");
+            sb.AppendLine("━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+            sb.AppendLine($"👥 <b>Qeydiyyatlı İstifadəçilər:</b> <code>{totalUsers} nəfər</code>");
+            sb.AppendLine($"🟢 <b>Aktiv İcazəli Sessiyalar:</b> <code>{activeUsers} nəfər</code>");
+            sb.AppendLine($"🕒 <b>Sistem Vaxtı (AZT):</b> <code>{CryptoSense.Domain.Common.TimeHelper.NowFormatted}</code>");
+            sb.AppendLine("━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+            sb.AppendLine("<i>Aşağıdakı düymələrlə inzibati əməliyyatları icra edin:</i>");
             return sb.ToString();
         }
 

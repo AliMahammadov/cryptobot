@@ -298,6 +298,74 @@ namespace CryptoSense.Infrastructure.Telegram
             }
         }
 
+        public async Task<long?> SendMessageReturnIdAsync(string message, string targetChatId, object? replyMarkup = null)
+        {
+            if (string.IsNullOrWhiteSpace(_config.TelegramBotToken) || string.IsNullOrWhiteSpace(targetChatId))
+            {
+                return null;
+            }
+
+            try
+            {
+                var url = $"https://api.telegram.org/bot{_config.TelegramBotToken}/sendMessage";
+                var payload = new Dictionary<string, object>
+                {
+                    { "chat_id", targetChatId },
+                    { "text", message },
+                    { "parse_mode", "HTML" },
+                    { "disable_web_page_preview", false }
+                };
+
+                if (replyMarkup != null)
+                {
+                    payload["reply_markup"] = replyMarkup;
+                }
+
+                var content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
+                var response = await _httpClient.PostAsync(url, content);
+                if (response.IsSuccessStatusCode)
+                {
+                    var jsonStr = await response.Content.ReadAsStringAsync();
+                    using var doc = JsonDocument.Parse(jsonStr);
+                    if (doc.RootElement.TryGetProperty("result", out var resElem) &&
+                        resElem.TryGetProperty("message_id", out var msgIdElem))
+                    {
+                        return msgIdElem.GetInt64();
+                    }
+                }
+                else
+                {
+                    var err = await response.Content.ReadAsStringAsync();
+                    Console.WriteLine($"[TelegramBotService] SendReturnId error: {response.StatusCode} - {err}");
+
+                    if (response.StatusCode == System.Net.HttpStatusCode.BadRequest && (err.Contains("can't parse entities") || err.Contains("Bad Request")))
+                    {
+                        var plainText = System.Text.RegularExpressions.Regex.Replace(message, "<.*?>", string.Empty);
+                        payload["text"] = plainText;
+                        payload.Remove("parse_mode");
+                        var retryContent = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
+                        var retryResp = await _httpClient.PostAsync(url, retryContent);
+                        if (retryResp.IsSuccessStatusCode)
+                        {
+                            var retryJson = await retryResp.Content.ReadAsStringAsync();
+                            using var doc2 = JsonDocument.Parse(retryJson);
+                            if (doc2.RootElement.TryGetProperty("result", out var resElem2) &&
+                                resElem2.TryGetProperty("message_id", out var msgIdElem2))
+                            {
+                                return msgIdElem2.GetInt64();
+                            }
+                        }
+                    }
+                }
+                return null;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[TelegramBotService] SendReturnId error: {ex.Message}");
+                return null;
+            }
+        }
+
         public async Task<bool> EditMessageTextAsync(string chatId, long messageId, string text, object? replyMarkup = null)
         {
             if (string.IsNullOrWhiteSpace(_config.TelegramBotToken) || string.IsNullOrWhiteSpace(chatId))
@@ -1054,55 +1122,125 @@ namespace CryptoSense.Infrastructure.Telegram
                 var dashText = TelegramMessageFormatter.FormatTerminalDashboard(userSettings, activeCount, lastTime);
                 await EditMessageTextAsync(chatId, messageId, dashText, TelegramKeyboards.BuildTerminalInlineKeyboard(userSettings));
             }
-            else if (data == "cb_sig_1h")
+            else if (data == "cb_portfolio_std40")
             {
-                var openSignals = await unitOfWork.Signals.GetOpenTrackedSignalsAsync();
-                var signals1h = openSignals.Where(s => s.Timeframe == "1h" && !s.IsClosed).ToList();
-
-                var sb = new StringBuilder();
-                sb.AppendLine("⏱ <b>Aktiv 1 Saat (1h) Siqnalları</b>");
-                sb.AppendLine("━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-                if (signals1h.Count == 0)
-                {
-                    sb.AppendLine("ℹ️ <i>Hal-hazırda aktiv 1h siqnalı yoxdur. Skaner bazarı 24/7 rejimində izləyir.</i>");
-                }
-                else
-                {
-                    foreach (var s in signals1h)
-                    {
-                        var aztTime = Domain.Common.TimeHelper.FormatAz(s.GeneratedAt);
-                        sb.AppendLine($"⚡ <b>#{s.Number} {s.Symbol}</b> | {s.SignalType}");
-                        sb.AppendLine($"💵 Giriş: <code>{s.EntryPrice}</code> | TP1: <code>{s.TakeProfit1}</code> | SL: <code>{s.StopLoss}</code>");
-                        sb.AppendLine($"🕒 Vaxt: <code>{aztTime}</code>");
-                        sb.AppendLine("-----------------------------------");
-                    }
-                }
-                await EditMessageTextAsync(chatId, messageId, sb.ToString(), TelegramKeyboards.BuildBackToTerminalKeyboard());
+                userSettings.PortfolioMode = "Standard40";
+                userSettings.Coins = new List<string>(Default40Coins);
+                SaveSettings();
+                var cleanList = string.Join(", ", Default40Coins.Select(c => c.Replace("USDT", "")));
+                var msg = "🪙 <b>Standart 40 İnstitusional Portfel Seçildi</b>\n\n" +
+                          $"📊 <b>İzlənən Coinlər:</b> 40/40\n" +
+                          $"📋 <code>{cleanList}</code>\n\n" +
+                          "<i>Zəhmət olmasa bu portfel üçün ticarət zaman kəsiyini seçin:</i>";
+                await EditMessageTextAsync(chatId, messageId, msg, TelegramKeyboards.BuildStandard40TimeframeKeyboard());
             }
-            else if (data == "cb_sig_4h")
+            else if (data == "cb_portfolio_custom")
             {
-                var openSignals = await unitOfWork.Signals.GetOpenTrackedSignalsAsync();
-                var signals4h = openSignals.Where(s => s.Timeframe == "4h" && !s.IsClosed).ToList();
-
-                var sb = new StringBuilder();
-                sb.AppendLine("⏱ <b>Aktiv 4 Saat (4h) Siqnalları</b>");
-                sb.AppendLine("━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-                if (signals4h.Count == 0)
+                var custCoins = userSettings.CustomCoins.Select(c => c.Replace("USDT", "")).ToList();
+                var custDisplay = custCoins.Count > 0 ? string.Join(", ", custCoins) : "Hələ heç bir fərdi coin əlavə edilməyib.";
+                var activeModeText = userSettings.PortfolioMode == "Combined" 
+                    ? "🔥 40 Coin + Fərdi Coinlər (Kombinə)" 
+                    : (userSettings.PortfolioMode == "Custom" ? "⭐ Yalnız Fərdi Coinlər" : "🪙 Standart 40 Coin");
+                var msg = "⭐ <b>Fərdi Portfel İdarəsi</b>\n\n" +
+                          $"📌 <b>Cari Rejim:</b> <b>{activeModeText}</b>\n" +
+                          $"🪙 <b>Fərdi Coinləriniz ({custCoins.Count} ədəd):</b>\n<code>{custDisplay}</code>\n\n" +
+                          "<i>Aşağıdakı düymələrlə portfel rejimini dəyişə, coin əlavə edib/silə və zaman kəsiyini təyin edə bilərsiniz:</i>";
+                await EditMessageTextAsync(chatId, messageId, msg, TelegramKeyboards.BuildCustomCoinsKeyboard(userSettings));
+            }
+            else if (data == "cb_cust_mode_only")
+            {
+                userSettings.PortfolioMode = "Custom";
+                userSettings.Coins = new List<string>(userSettings.CustomCoins);
+                SaveSettings();
+                var custCoins = userSettings.CustomCoins.Select(c => c.Replace("USDT", "")).ToList();
+                var custDisplay = custCoins.Count > 0 ? string.Join(", ", custCoins) : "Hələ heç bir fərdi coin əlavə edilməyib.";
+                var msg = "🎯 <b>Yalnız Fərdi Coinlər Rejimi Seçildi! 🟢</b>\n\n" +
+                          $"🪙 <b>İzlənən Coinləriniz ({custCoins.Count} ədəd):</b>\n<code>{custDisplay}</code>\n\n" +
+                          (custCoins.Count == 0 
+                              ? "⚠️ <i>Siyahınız boşdur. Əvvəlcə '➕ Coin Əlavə Et' düyməsinə klikləyərək coin əlavə edin.</i>" 
+                              : "<i>İndi bu portfel üçün zaman kəsiyini seçin:</i>");
+                await EditMessageTextAsync(chatId, messageId, msg, TelegramKeyboards.BuildCustomCoinsKeyboard(userSettings));
+            }
+            else if (data == "cb_cust_mode_comb")
+            {
+                userSettings.PortfolioMode = "Combined";
+                var combSet = new HashSet<string>(Default40Coins);
+                foreach (var c in userSettings.CustomCoins) combSet.Add(c);
+                userSettings.Coins = combSet.ToList();
+                SaveSettings();
+                var msg = "🔥 <b>40 Standart Coin + Fərdi Coinlər (Kombinə) Aktivləşdirildi! 🟢</b>\n\n" +
+                          $"📊 <b>Ümumi İzlənən:</b> <b>{userSettings.Coins.Count} ədəd coin</b>\n" +
+                          $"• Standart: 40 institusional coin\n" +
+                          $"• Fərdi: {userSettings.CustomCoins.Count} ədəd əlavə coin\n\n" +
+                          "<i>İndi bu kombinə portfel üçün zaman kəsiyini (1h, 4h və ya Hər İkisi) seçin:</i>";
+                await EditMessageTextAsync(chatId, messageId, msg, TelegramKeyboards.BuildCustomCoinsKeyboard(userSettings));
+            }
+            else if (data == "cb_std_tf_1h" || data == "cb_std_tf_4h" || data == "cb_std_tf_all")
+            {
+                userSettings.PortfolioMode = "Standard40";
+                userSettings.Coins = new List<string>(Default40Coins);
+                userSettings.Timeframe = data == "cb_std_tf_1h" ? "1h" : (data == "cb_std_tf_4h" ? "4h" : "Hamısı");
+                userSettings.IsActive = true;
+                userSettings.LastResumeTime = DateTime.UtcNow;
+                SaveSettings();
+                var cleanList = string.Join(", ", Default40Coins.Select(c => c.Replace("USDT", "")));
+                var msg = $"✅ <b>Standart 40 Coin Portfeli Aktivləşdirildi! 🟢</b>\n\n" +
+                          $"⏱ <b>Zaman Rejimi:</b> <code>{userSettings.Timeframe}</code>\n" +
+                          $"🪙 <b>İzlənən Coinlər:</b> 40/40 İnstitusional coin\n\n" +
+                          $"🚀 Skaner aktivləşdirildi. Canlı texniki bazar vəziyyəti aşağıda təqdim edilir:";
+                await EditMessageTextAsync(chatId, messageId, msg, TelegramKeyboards.BuildBackToTerminalKeyboard());
+                await ScanUserCoinsInstantlyAsync(userSettings, chatId, userSettings.Timeframe);
+            }
+            else if (data == "cb_cust_tf_1h" || data == "cb_cust_tf_4h" || data == "cb_cust_tf_all")
+            {
+                if (userSettings.PortfolioMode == "Custom" && userSettings.CustomCoins.Count == 0)
                 {
-                    sb.AppendLine("ℹ️ <i>Hal-hazırda aktiv 4h siqnalı yoxdur. Skaner bazarı 24/7 rejimində izləyir.</i>");
+                    var warnMsg = "⚠️ <b>Fərdi portfeliniz boşdur!</b>\n\n" +
+                                  "Zaman təyin etməzdən əvvəl <b>➕ Coin Əlavə Et</b> düyməsinə klikləyərək ən azı 1 coin əlavə edin.";
+                    await EditMessageTextAsync(chatId, messageId, warnMsg, TelegramKeyboards.BuildCustomCoinsKeyboard(userSettings));
+                    return;
+                }
+                if (userSettings.PortfolioMode == "Combined")
+                {
+                    var combSet = new HashSet<string>(Default40Coins);
+                    foreach (var c in userSettings.CustomCoins) combSet.Add(c);
+                    userSettings.Coins = combSet.ToList();
                 }
                 else
                 {
-                    foreach (var s in signals4h)
-                    {
-                        var aztTime = Domain.Common.TimeHelper.FormatAz(s.GeneratedAt);
-                        sb.AppendLine($"⚡ <b>#{s.Number} {s.Symbol}</b> | {s.SignalType}");
-                        sb.AppendLine($"💵 Giriş: <code>{s.EntryPrice}</code> | TP1: <code>{s.TakeProfit1}</code> | SL: <code>{s.StopLoss}</code>");
-                        sb.AppendLine($"🕒 Vaxt: <code>{aztTime}</code>");
-                        sb.AppendLine("-----------------------------------");
-                    }
+                    userSettings.PortfolioMode = "Custom";
+                    userSettings.Coins = new List<string>(userSettings.CustomCoins);
                 }
-                await EditMessageTextAsync(chatId, messageId, sb.ToString(), TelegramKeyboards.BuildBackToTerminalKeyboard());
+                userSettings.Timeframe = data == "cb_cust_tf_1h" ? "1h" : (data == "cb_cust_tf_4h" ? "4h" : "Hamısı");
+                userSettings.IsActive = true;
+                userSettings.LastResumeTime = DateTime.UtcNow;
+                SaveSettings();
+
+                var portName = userSettings.PortfolioMode == "Combined" ? "🔥 40 + Fərdi Coin (Kombinə)" : "⭐ Fərdi Coinlər";
+                var cleanList = string.Join(", ", userSettings.Coins.Select(c => c.Replace("USDT", "")));
+                var msg = $"✅ <b>{portName} Portfeli Aktivləşdirildi! 🟢</b>\n\n" +
+                          $"⏱ <b>Zaman Rejimi:</b> <code>{userSettings.Timeframe}</code>\n" +
+                          $"🪙 <b>İzlənən Coinlər ({userSettings.Coins.Count} ədəd):</b>\n<code>{cleanList}</code>\n\n" +
+                          $"🚀 Skaner aktivləşdirildi. Canlı texniki bazar vəziyyəti aşağıda təqdim edilir:";
+                await EditMessageTextAsync(chatId, messageId, msg, TelegramKeyboards.BuildBackToTerminalKeyboard());
+                await ScanUserCoinsInstantlyAsync(userSettings, chatId, userSettings.Timeframe);
+            }
+            else if (data == "cb_custom_add" || data == "cb_coin_add")
+            {
+                _userStates[chatId] = "WAITING_ADD_CUSTOM_COIN";
+                var msg = "➕ <b>Yeni Fərdi Coin Əlavə Et</b>\n\n" +
+                          "İzləmək istədiyiniz coinin adını mesaj olaraq yazın (məsələn: <code>SOL</code>, <code>NOT</code> və ya <code>DOGE</code>):";
+                await EditMessageTextAsync(chatId, messageId, msg, TelegramKeyboards.BuildBackToTerminalKeyboard());
+            }
+            else if (data == "cb_custom_del" || data == "cb_coin_del")
+            {
+                _userStates[chatId] = "USER_WAITING_DELETE_COIN";
+                var custCoins = userSettings.CustomCoins.Select(c => c.Replace("USDT", "")).ToList();
+                var custDisplay = custCoins.Count > 0 ? string.Join(", ", custCoins) : "Hələ heç bir fərdi coin əlavə edilməyib.";
+                var msg = "🗑 <b>Fərdi Coin Sil</b>\n\n" +
+                          $"Cari fərdi coinləriniz:\n<code>{custDisplay}</code>\n\n" +
+                          "Silmək istədiyiniz coinin adını mesaj olaraq yazın (məsələn: <code>SOL</code>):";
+                await EditMessageTextAsync(chatId, messageId, msg, TelegramKeyboards.BuildBackToTerminalKeyboard());
             }
             else if (data == "cb_btc")
             {
@@ -1123,59 +1261,96 @@ namespace CryptoSense.Infrastructure.Telegram
                 var statusMsg = TelegramMessageFormatter.FormatBotStatus(userSettings, activeCount, lastTime);
                 await EditMessageTextAsync(chatId, messageId, statusMsg, TelegramKeyboards.BuildBackToTerminalKeyboard());
             }
-            else if (data == "cb_coins")
+            else if (data == "cb_coins" || data == "cb_coins_40")
             {
-                if (userSettings.Coins == null || userSettings.Coins.Count <= 16)
-                {
-                    userSettings.Coins = new List<string>(Default40Coins);
-                    SaveSettings();
-                }
-                var cleanCoins = (userSettings.Coins.Count > 0 ? userSettings.Coins : Default40Coins)
-                    .Select(c => c.Replace("USDT", "")).ToList();
-                var msg = "🪙 <b>Coin Portfel İdarəsi</b>\n\n" +
-                          $"📊 <b>İzlənən Coin Sayı:</b> <b>{cleanCoins.Count} ədəd</b>\n" +
-                          $"📋 <b>Siyahı:</b>\n<code>{string.Join(", ", cleanCoins)}</code>\n\n" +
-                          "<i>Seçimlərinizi aşağıdakı düymələrlə tənzimləyin:</i>";
-                await EditMessageTextAsync(chatId, messageId, msg, TelegramKeyboards.BuildCoinsInlineKeyboard());
-            }
-            else if (data == "cb_coins_40")
-            {
+                userSettings.PortfolioMode = "Standard40";
                 userSettings.Coins = new List<string>(Default40Coins);
                 SaveSettings();
                 var cleanList = string.Join(", ", Default40Coins.Select(c => c.Replace("USDT", "")));
                 var msg = $"✅ <b>Standart 40 institusional coin seçildi (40/40).</b>\n\n" +
                           $"📋 <b>İzlənən Coinlər:</b>\n<code>{cleanList}</code>\n\n" +
                           $"🚀 Bütün 40 aktiv skaner tərəfindən 24/7 analiz olunur.";
-                await EditMessageTextAsync(chatId, messageId, msg, TelegramKeyboards.BuildBackToTerminalKeyboard());
-            }
-            else if (data == "cb_coin_add")
-            {
-                _userStates[chatId] = "WAITING_ADD_CUSTOM_COIN";
-                var msg = "➕ <b>Yeni Coin Əlavə Et</b>\n\n" +
-                          "İzləmək istədiyiniz coinin adını mesaj olaraq yazın (məsələn: <code>SOL</code> və ya <code>SOLUSDT</code>):";
-                await EditMessageTextAsync(chatId, messageId, msg, TelegramKeyboards.BuildBackToTerminalKeyboard());
-            }
-            else if (data == "cb_coin_del")
-            {
-                _userStates[chatId] = "USER_WAITING_DELETE_COIN";
-                var msg = "🗑 <b>Coin Sil</b>\n\n" +
-                          "Siyahıdan çıxarmaq istədiyiniz coinin adını mesaj olaraq yazın (məsələn: <code>SOL</code>):";
-                await EditMessageTextAsync(chatId, messageId, msg, TelegramKeyboards.BuildBackToTerminalKeyboard());
+                await EditMessageTextAsync(chatId, messageId, msg, TelegramKeyboards.BuildStandard40TimeframeKeyboard());
             }
             else if (data == "cb_reset")
             {
+                var confirmMsg = TelegramMessageFormatter.FormatResetConfirmationPrompt();
+                await EditMessageTextAsync(chatId, messageId, confirmMsg, TelegramKeyboards.BuildResetConfirmationKeyboard());
+            }
+            else if (data == "cb_reset_confirm")
+            {
+                userSettings.IsActive = false;
+                userSettings.Timeframe = "Təyin olunmayıb";
                 userSettings.AlertCounter = 0;
                 userSettings.LastResumeTime = DateTime.UtcNow;
                 SaveSettings();
 
-                int coinCount = userSettings.Coins.Count > 0 ? userSettings.Coins.Count : Default40Coins.Count;
-                var resetMsg = "🧹 <b>Bildiriş Sayğacınız Sıfırlandı! ✅</b>\n\n" +
-                               "• Şəxsi siqnal sayğacınız (#1) sıfırlandı və yeni bildirişlər üçün hazırlandı.\n" +
-                               "• Baza statistikası və keçmiş ticarət nəticələri qorunub saxlanıldı.\n" +
-                               $"• Seçilmiş coin siyahınız (<b>{coinCount} coin</b>) aktivdir.\n" +
-                               $"• Bildiriş Statusu: {(userSettings.IsActive ? "Aktiv 🟢" : "Dayandırılıb 🔴")}";
-
+                var resetMsg = "🛑 <b>Bütün Bazar Sistemləri və Zaman Aralıqları Sıfırlandı!</b>\n\n" +
+                               "• Skaner və bildirişlər <b>dayandırıldı (Dayandırılıb 🔴)</b>.\n" +
+                               "• Bütün zaman aralıqları sıfırlandı (<b>Təyin olunmayıb</b>).\n" +
+                               "• Şəxsi siqnal sayğacınız (#0) sıfırlandı.\n" +
+                               $"• <b>Qorunan Portfeliniz:</b> {userSettings.Coins.Count} ədəd coin toxunulmaz qorunub saxlanıldı.\n\n" +
+                               "<i>Yenidən başlamaq üçün aşağıdakı düymə ilə Terminala qayıdın və portfel/zaman seçin.</i>";
                 await EditMessageTextAsync(chatId, messageId, resetMsg, TelegramKeyboards.BuildBackToTerminalKeyboard());
+            }
+            else if (data == "cb_admin_create_user")
+            {
+                _userStates[chatId] = "ADMIN_WAITING_CREATE_USER";
+                var prompt = "➕ <b>Yeni İstifadəçi Yaratmaq</b>\n\n" +
+                             "Yaratmaq istədiyiniz <b>İstifadəçi Adını</b> və <b>Parolu</b> aralarında boşluq qoyaraq yazın:\n\n" +
+                             "📌 <b>Məsələn:</b>\n" +
+                             "<code>Murad 123456</code>";
+                await EditMessageTextAsync(chatId, messageId, prompt, TelegramKeyboards.BuildBackToTerminalKeyboard());
+            }
+            else if (data == "cb_admin_list_users")
+            {
+                var userManager = scope.ServiceProvider.GetRequiredService<IUserManagerService>();
+                var allUsers = await userManager.GetAllUsersAsync();
+                var userListMsg = TelegramMessageFormatter.FormatUserList(allUsers);
+                await EditMessageTextAsync(chatId, messageId, userListMsg, TelegramKeyboards.BuildBackToTerminalKeyboard());
+            }
+            else if (data == "cb_admin_del_user")
+            {
+                _userStates[chatId] = "ADMIN_WAITING_DELETE_USER";
+                var prompt = "🗑 <b>İstifadəçi Silmək</b>\n\n" +
+                             "Silmək istədiyiniz <b>İstifadəçi Adını</b> yazın:\n\n" +
+                             "📌 <b>Məsələn:</b> <code>Murad</code>";
+                await EditMessageTextAsync(chatId, messageId, prompt, TelegramKeyboards.BuildBackToTerminalKeyboard());
+            }
+            else if (data == "cb_admin_change_pwd")
+            {
+                _userStates[chatId] = "ADMIN_WAITING_RESET_PWD";
+                var prompt = "🔑 <b>Parolu Dəyişmək</b>\n\n" +
+                             "İstifadəçi adını və yeni parolu aralarında boşluq qoyaraq yazın:\n\n" +
+                             "📌 <b>Məsələn:</b> <code>Murad yeniParol123</code>";
+                await EditMessageTextAsync(chatId, messageId, prompt, TelegramKeyboards.BuildBackToTerminalKeyboard());
+            }
+            else if (data == "cb_admin_export_db")
+            {
+                var volumeEnv = Environment.GetEnvironmentVariable("RAILWAY_VOLUME_MOUNT_PATH");
+                var currentDataDir = !string.IsNullOrEmpty(volumeEnv) && Directory.Exists(volumeEnv)
+                    ? volumeEnv
+                    : (Directory.Exists("/app/data") ? "/app/data" : Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "data"));
+                var currentDbPath = Path.Combine(currentDataDir, "cryptosense.db");
+                if (!File.Exists(currentDbPath)) currentDbPath = "cryptosense.db";
+
+                if (File.Exists(currentDbPath))
+                {
+                    var cap = $"💾 <b>CryptoSense SQLite Verilənlər Bazası</b>\n\n" +
+                              $"📅 <b>Tarix:</b> {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss} UTC";
+                    await SendDocumentAsync(currentDbPath, chatId, cap);
+                    await EditMessageTextAsync(chatId, messageId, "✅ <b>Baza faylı sənəd olaraq çatınıza göndərildi.</b>", TelegramKeyboards.BuildBackToTerminalKeyboard());
+                }
+                else
+                {
+                    await EditMessageTextAsync(chatId, messageId, "⚠️ <b>Baza faylı tapılmadı.</b>", TelegramKeyboards.BuildBackToTerminalKeyboard());
+                }
+            }
+            else if (data == "cb_admin_stats")
+            {
+                var stats = await signalEngine.GetPerformanceStatsAsync(userSettings.Timeframe, userSettings.Coins);
+                var statsMsg = TelegramMessageFormatter.FormatPerformanceStats(stats, "Qlobal Admin");
+                await EditMessageTextAsync(chatId, messageId, statsMsg, TelegramKeyboards.BuildBackToTerminalKeyboard());
             }
         }
 
@@ -1393,17 +1568,22 @@ namespace CryptoSense.Infrastructure.Telegram
             if (isAdmin && (text == "👑 Admin Paneli" || text == "/admin"))
             {
                 _userStates.TryRemove(chatId, out _);
-                var adminMsg = "👑 <b>Super Admin İdarəetmə Paneli (CRUD):</b>\n\n" +
-                               "İstifadəçiləri yaratmaq, silmək və ya parolları dəyişmək üçün aşağıdakı düymələrdən istifadə edin:\n\n" +
-                               "<i>Siqnallar menyusuna qayıtmaq üçün: <b>📊 Əsas Menyu (Siqnallar)</b></i>";
-                await SendMessageAsync(adminMsg, chatId, TelegramKeyboards.BuildAdminKeyboard());
+                var allUsers = await userManager.GetAllUsersAsync();
+                var totalCount = allUsers.Count;
+                var activeCount = allUsers.Count(u => u.IsActive);
+                var adminDash = TelegramMessageFormatter.FormatAdminDashboard(totalCount, activeCount);
+                await SendMessageAsync(adminDash, chatId, TelegramKeyboards.BuildAdminTerminalInlineKeyboard());
                 return;
             }
 
             if (isAdmin && (text == "📊 Əsas Menyu (Siqnallar)" || text == "⬅️ Əsas Menyu"))
             {
                 _userStates.TryRemove(chatId, out _);
-                await SendMessageAsync("📊 <b>Canlı Siqnal və Ticarət Paneli:</b>", chatId, TelegramKeyboards.BuildUserKeyboard(userSettings, isAdmin: true));
+                var unitOfWork = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
+                var openCount = await unitOfWork.Signals.GetActiveSignalsCountAsync();
+                var lastTime = userSettings.LastSignalSentUtc == default ? "" : Domain.Common.TimeHelper.FormatAz(userSettings.LastSignalSentUtc);
+                var dashText = TelegramMessageFormatter.FormatTerminalDashboard(userSettings, openCount, lastTime);
+                await SendMessageAsync(dashText, chatId, TelegramKeyboards.BuildTerminalInlineKeyboard(userSettings));
                 return;
             }
 
@@ -1422,11 +1602,11 @@ namespace CryptoSense.Infrastructure.Telegram
                                   $"👤 <b>İstifadəçi Adı:</b> <code>{newUsername}</code>\n" +
                                   $"🔑 <b>Parol:</b> <code>{newPassword}</code>\n\n" +
                                   $"<i>İstifadəçiyə bildirin ki, bota daxil olaraq <code>{newUsername} {newPassword}</code> yazsın.</i>";
-                        await SendMessageAsync(msg, chatId, TelegramKeyboards.BuildAdminKeyboard());
+                        await SendMessageAsync(msg, chatId, TelegramKeyboards.BuildAdminTerminalInlineKeyboard());
                     }
                     else
                     {
-                        await SendMessageAsync($"⚠️ <b>Xəta:</b> <code>{newUsername}</code> adlı istifadəçi artıq mövcuddur!", chatId, TelegramKeyboards.BuildAdminKeyboard());
+                        await SendMessageAsync($"⚠️ <b>Xəta:</b> <code>{newUsername}</code> adlı istifadəçi artıq mövcuddur!", chatId, TelegramKeyboards.BuildAdminTerminalInlineKeyboard());
                     }
                     return;
                 }
@@ -1436,7 +1616,7 @@ namespace CryptoSense.Infrastructure.Telegram
                              "Yaratmaq istədiyiniz <b>İstifadəçi Adını</b> və <b>Parolu</b> aralarında boşluq qoyaraq yazın:\n\n" +
                              "📌 <b>Məsələn:</b>\n" +
                              "<code>Murad 123456</code>";
-                await SendMessageAsync(prompt, chatId, TelegramKeyboards.BuildAdminKeyboard());
+                await SendMessageAsync(prompt, chatId, TelegramKeyboards.BuildAdminTerminalInlineKeyboard());
                 return;
             }
             if (isAdmin && (text == "👥 İstifadəçilərin Siyahısı" || text == "/users"))
@@ -1444,7 +1624,7 @@ namespace CryptoSense.Infrastructure.Telegram
                 _userStates.TryRemove(chatId, out _);
                 var users = await userManager.GetAllUsersAsync();
                 var msg = TelegramMessageFormatter.FormatUserList(users);
-                await SendMessageAsync(msg, chatId, TelegramKeyboards.BuildAdminKeyboard());
+                await SendMessageAsync(msg, chatId, TelegramKeyboards.BuildAdminTerminalInlineKeyboard());
                 return;
             }
             if (isAdmin && (text.StartsWith("/deleteuser", StringComparison.OrdinalIgnoreCase) || text == "🗑 İstifadəçi Sil"))
@@ -1458,11 +1638,11 @@ namespace CryptoSense.Infrastructure.Telegram
                     if (deleted)
                     {
                         await RevokeUserSessionAsync(userToDelete);
-                        await SendMessageAsync($"✅ <b>İstifadəçi '{userToDelete}' sistemdən silindi və bütün prosesləri dayandırıldı!</b>", chatId, TelegramKeyboards.BuildAdminKeyboard());
+                        await SendMessageAsync($"✅ <b>İstifadəçi '{userToDelete}' sistemdən silindi və bütün prosesləri dayandırıldı!</b>", chatId, TelegramKeyboards.BuildAdminTerminalInlineKeyboard());
                     }
                     else
                     {
-                        await SendMessageAsync($"⚠️ <b>'{userToDelete}' tapılmadı və ya silinə bilməz.</b>", chatId, TelegramKeyboards.BuildAdminKeyboard());
+                        await SendMessageAsync($"⚠️ <b>'{userToDelete}' tapılmadı və ya silinə bilməz.</b>", chatId, TelegramKeyboards.BuildAdminTerminalInlineKeyboard());
                     }
                     return;
                 }
@@ -1472,7 +1652,7 @@ namespace CryptoSense.Infrastructure.Telegram
                              "Sistemdən silmək istədiyiniz istifadəçinin <b>Adını</b> yazın:\n\n" +
                              "📌 <b>Məsələn:</b>\n" +
                              "<code>Murad</code>";
-                await SendMessageAsync(prompt, chatId, TelegramKeyboards.BuildAdminKeyboard());
+                await SendMessageAsync(prompt, chatId, TelegramKeyboards.BuildAdminTerminalInlineKeyboard());
                 return;
             }
             if (isAdmin && (text.StartsWith("/resetpwd", StringComparison.OrdinalIgnoreCase) || text == "🔑 Parolu Dəyiş"))
@@ -1486,11 +1666,11 @@ namespace CryptoSense.Infrastructure.Telegram
                     var changed = await userManager.ResetPasswordAsync(uName, newPwd);
                     if (changed)
                     {
-                        await SendMessageAsync($"✅ <b>'{uName}' üçün yeni parol təyin edildi:</b> <code>{newPwd}</code>", chatId, TelegramKeyboards.BuildAdminKeyboard());
+                        await SendMessageAsync($"✅ <b>'{uName}' üçün yeni parol təyin edildi:</b> <code>{newPwd}</code>", chatId, TelegramKeyboards.BuildAdminTerminalInlineKeyboard());
                     }
                     else
                     {
-                        await SendMessageAsync($"⚠️ <b>'{uName}' adlı istifadəçi tapılmadı!</b>", chatId, TelegramKeyboards.BuildAdminKeyboard());
+                        await SendMessageAsync($"⚠️ <b>'{uName}' adlı istifadəçi tapılmadı!</b>", chatId, TelegramKeyboards.BuildAdminTerminalInlineKeyboard());
                     }
                     return;
                 }
@@ -1602,7 +1782,7 @@ namespace CryptoSense.Infrastructure.Telegram
                           "🔍 <b>Skan Mexanizmi:</b>\n" +
                           $"Sistem arxa fonda hər 10 saniyədən bir bu {cleanCoins.Count} coinin hər birini aktiv zaman kəsiyində (EMA, MACD, RSI, ATR, Confluence və BTC Kompası) analiz edir və Confluence >= 78% olanda şam kilidi ilə istifadəçilərə çatdırır.";
 
-                await SendMessageAsync(msg, chatId, TelegramKeyboards.BuildAdminKeyboard());
+                await SendMessageAsync(msg, chatId, TelegramKeyboards.BuildAdminTerminalInlineKeyboard());
                 return;
             }
 
@@ -1624,11 +1804,11 @@ namespace CryptoSense.Infrastructure.Telegram
                                       $"👤 <b>İstifadəçi Adı:</b> <code>{newUsername}</code>\n" +
                                       $"🔑 <b>Parol:</b> <code>{newPassword}</code>\n\n" +
                                       $"<i>İstifadəçiyə bildirin ki, bota daxil olaraq <code>{newUsername} {newPassword}</code> yazsın.</i>";
-                            await SendMessageAsync(msg, chatId, TelegramKeyboards.BuildAdminKeyboard());
+                            await SendMessageAsync(msg, chatId, TelegramKeyboards.BuildAdminTerminalInlineKeyboard());
                         }
                         else
                         {
-                            await SendMessageAsync($"⚠️ <b>Xəta:</b> <code>{newUsername}</code> adlı istifadəçi artıq mövcuddur!", chatId, TelegramKeyboards.BuildAdminKeyboard());
+                            await SendMessageAsync($"⚠️ <b>Xəta:</b> <code>{newUsername}</code> adlı istifadəçi artıq mövcuddur!", chatId, TelegramKeyboards.BuildAdminTerminalInlineKeyboard());
                         }
                         return;
                     }
@@ -1641,11 +1821,11 @@ namespace CryptoSense.Infrastructure.Telegram
                     if (deleted)
                     {
                         await RevokeUserSessionAsync(userToDelete);
-                        await SendMessageAsync($"✅ <b>İstifadəçi '{userToDelete}' sistemdən silindi və bütün prosesləri dayandırıldı!</b>", chatId, TelegramKeyboards.BuildAdminKeyboard());
+                        await SendMessageAsync($"✅ <b>İstifadəçi '{userToDelete}' sistemdən silindi və bütün prosesləri dayandırıldı!</b>", chatId, TelegramKeyboards.BuildAdminTerminalInlineKeyboard());
                     }
                     else
                     {
-                        await SendMessageAsync($"⚠️ <b>'{userToDelete}' tapılmadı və ya silinə bilməz.</b>", chatId, TelegramKeyboards.BuildAdminKeyboard());
+                        await SendMessageAsync($"⚠️ <b>'{userToDelete}' tapılmadı və ya silinə bilməz.</b>", chatId, TelegramKeyboards.BuildAdminTerminalInlineKeyboard());
                     }
                     return;
                 }
@@ -1660,11 +1840,11 @@ namespace CryptoSense.Infrastructure.Telegram
                         var res = await userManager.ResetPasswordAsync(uName, newPwd);
                         if (res)
                         {
-                            await SendMessageAsync($"✅ <b>'{uName}' üçün yeni parol təyin edildi:</b> <code>{newPwd}</code>", chatId, TelegramKeyboards.BuildAdminKeyboard());
+                            await SendMessageAsync($"✅ <b>'{uName}' üçün yeni parol təyin edildi:</b> <code>{newPwd}</code>", chatId, TelegramKeyboards.BuildAdminTerminalInlineKeyboard());
                         }
                         else
                         {
-                            await SendMessageAsync($"⚠️ <b>'{uName}' adlı istifadəçi tapılmadı!</b>", chatId, TelegramKeyboards.BuildAdminKeyboard());
+                            await SendMessageAsync($"⚠️ <b>'{uName}' adlı istifadəçi tapılmadı!</b>", chatId, TelegramKeyboards.BuildAdminTerminalInlineKeyboard());
                         }
                         return;
                     }
@@ -1697,8 +1877,9 @@ namespace CryptoSense.Infrastructure.Telegram
                     if (!System.Text.RegularExpressions.Regex.IsMatch(clean, @"^[A-Z0-9]+$")) continue;
                     var coinToDel = clean + "USDT";
 
-                    if (userSettings.Coins.Contains(coinToDel))
+                    if (userSettings.CustomCoins.Contains(coinToDel) || userSettings.Coins.Contains(coinToDel))
                     {
+                        userSettings.CustomCoins.Remove(coinToDel);
                         userSettings.Coins.Remove(coinToDel);
                         removedCoins.Add(clean);
                     }
@@ -1708,7 +1889,16 @@ namespace CryptoSense.Infrastructure.Telegram
                     }
                 }
 
-                userSettings.Coins.RemoveAll(c => !System.Text.RegularExpressions.Regex.IsMatch(c, @"^[A-Z0-9]+USDT$") || c.Contains("⚡") || c.Contains("SIQNALLAR") || c.Contains("BÜTÜN") || c.Contains("BUTUN"));
+                if (userSettings.PortfolioMode == "Combined")
+                {
+                    var combSet = new HashSet<string>(Default40Coins);
+                    foreach (var c in userSettings.CustomCoins) combSet.Add(c);
+                    userSettings.Coins = combSet.ToList();
+                }
+                else if (userSettings.PortfolioMode == "Custom")
+                {
+                    userSettings.Coins = new List<string>(userSettings.CustomCoins);
+                }
 
                 if (removedCoins.Count > 0)
                 {
@@ -1716,37 +1906,22 @@ namespace CryptoSense.Infrastructure.Telegram
                     SaveSettings();
                 }
 
-                // Auto-stop trading if last coin is deleted
-                if (userSettings.Coins.Count == 0)
-                {
-                    userSettings.IsActive = false;
-                    SaveSettings();
-                    var sbWarn = new StringBuilder();
-                    if (removedCoins.Count > 0)
-                    {
-                        sbWarn.AppendLine($"✅ <b>Silinən coinlər:</b> <code>{string.Join(", ", removedCoins)}</code>\n");
-                    }
-                    sbWarn.AppendLine("⚠️ <b>Bütün coinlər siyahıdan silindi (0 coin qaldı).</b>");
-                    sbWarn.AppendLine("🛑 <b>Ticarət və canlı bildirişlər avtomatik DAYANDIRILDI 🔴.</b>\n");
-                    sbWarn.AppendLine("📌 <i>Yenidən başlamaq üçün <b>⚙️ Coin Seçimi</b> ilə ən azı 1 coin seçin.</i>");
-                    await SendMessageAsync(sbWarn.ToString(), chatId, TelegramKeyboards.BuildUserKeyboard(userSettings, isAdmin));
-                    return;
-                }
-
-                var cleanList = string.Join(", ", userSettings.Coins.Select(c => c.Replace("USDT", "")));
+                var cleanCust = userSettings.CustomCoins.Count > 0 
+                    ? string.Join(", ", userSettings.CustomCoins.Select(c => c.Replace("USDT", ""))) 
+                    : "Boşdur";
                 var sb = new StringBuilder();
                 if (removedCoins.Count > 0)
                 {
-                    sb.AppendLine($"✅ <b>Silinən coinlər ({removedCoins.Count} ədəd):</b> <code>{string.Join(", ", removedCoins)}</code>");
+                    sb.AppendLine($"✅ <b>Silinən coinlər ({removedCoins.Count} ədəd):</b> <code>{string.Join(", ", removedCoins)}</code>\n");
                 }
                 if (notFoundCoins.Count > 0)
                 {
-                    sb.AppendLine($"⚠️ <b>Siyahıda tapılmayanlar:</b> <code>{string.Join(", ", notFoundCoins)}</code>");
+                    sb.AppendLine($"⚠️ <b>Siyahıda tapılmayanlar:</b> <code>{string.Join(", ", notFoundCoins)}</code>\n");
                 }
-                sb.AppendLine();
-                sb.AppendLine($"Cari siyahınız ({userSettings.Coins.Count} coin):\n<code>{cleanList}</code>");
+                sb.AppendLine($"🪙 <b>Qalan Fərdi Coinləriniz ({userSettings.CustomCoins.Count} ədəd):</b>\n<code>{cleanCust}</code>\n");
+                sb.AppendLine($"📈 <b>Cari İzlənən Ümumi Portfel:</b> <b>{userSettings.Coins.Count} coin</b>");
 
-                await SendMessageAsync(sb.ToString(), chatId, TelegramKeyboards.BuildUserKeyboard(userSettings, isAdmin));
+                await SendMessageAsync(sb.ToString(), chatId, TelegramKeyboards.BuildCustomCoinsKeyboard(userSettings));
                 return;
             }
 
@@ -1766,19 +1941,19 @@ namespace CryptoSense.Infrastructure.Telegram
                     await SendMessageAsync(
                         $"⛔ Bu cütlük tapılmadı.\n“{rawInput}” Binance Futures USDT siyahısında yoxdur.\nDüzgün ticker yazın (məs: SOL, LINK, AVAX).",
                         chatId,
-                        TelegramKeyboards.BuildUserKeyboard(userSettings, isAdmin));
+                        TelegramKeyboards.BuildCustomCoinsKeyboard(userSettings));
                     return;
                 }
 
                 if (normalized == "PEPE") normalized = "1000PEPE";
                 var targetSymbol = normalized + "USDT";
 
-                if (userSettings.Coins.Contains(targetSymbol))
+                if (userSettings.CustomCoins.Contains(targetSymbol))
                 {
                     await SendMessageAsync(
-                        $"ℹ️ <b>{normalized} artıq izləmə siyahınızda mövcuddur.</b>\nİndi izlənilən: {userSettings.Coins.Count} coin.",
+                        $"ℹ️ <b>{normalized} artıq fərdi portfelinizdə mövcuddur.</b>\nFərdi coinlər: {userSettings.CustomCoins.Count} ədəd.",
                         chatId,
-                        TelegramKeyboards.BuildUserKeyboard(userSettings, isAdmin));
+                        TelegramKeyboards.BuildCustomCoinsKeyboard(userSettings));
                     return;
                 }
 
@@ -1804,17 +1979,32 @@ namespace CryptoSense.Infrastructure.Telegram
                     await SendMessageAsync(
                         $"⛔ Bu cütlük tapılmadı.\n“{rawInput}” Binance Futures USDT siyahısında yoxdur.\nDüzgün ticker yazın (məs: SOL, LINK, AVAX).",
                         chatId,
-                        TelegramKeyboards.BuildUserKeyboard(userSettings, isAdmin));
+                        TelegramKeyboards.BuildCustomCoinsKeyboard(userSettings));
                     return;
                 }
 
-                userSettings.Coins.Add(targetSymbol);
+                userSettings.CustomCoins.Add(targetSymbol);
+                if (userSettings.PortfolioMode == "Combined")
+                {
+                    var combSet = new HashSet<string>(Default40Coins);
+                    foreach (var c in userSettings.CustomCoins) combSet.Add(c);
+                    userSettings.Coins = combSet.ToList();
+                }
+                else
+                {
+                    userSettings.PortfolioMode = "Custom";
+                    userSettings.Coins = new List<string>(userSettings.CustomCoins);
+                }
+                userSettings.LastResumeTime = DateTime.UtcNow;
                 SaveSettings();
 
-                await SendMessageAsync(
-                    $"✅ {normalized} əlavə olundu. İndi izlənilən: {userSettings.Coins.Count} coin.",
-                    chatId,
-                    TelegramKeyboards.BuildUserKeyboard(userSettings, isAdmin));
+                var cleanCust = string.Join(", ", userSettings.CustomCoins.Select(c => c.Replace("USDT", "")));
+                var successMsg = $"✅ <b>{normalized} fərdi portfelinizə əlavə olundu!</b>\n\n" +
+                                 $"🪙 <b>Fərdi Coinləriniz ({userSettings.CustomCoins.Count} ədəd):</b>\n<code>{cleanCust}</code>\n" +
+                                 $"📊 <b>Aktiv Rejim:</b> <b>{(userSettings.PortfolioMode == "Combined" ? "🔥 40 + Fərdi Coin (Kombinə)" : "⭐ Yalnız Fərdi Coinlər")}</b>\n" +
+                                 $"📈 <b>Ümumi İzlənən:</b> {userSettings.Coins.Count} ədəd coin.\n\n" +
+                                 "<i>Aşağıdan zaman kəsiyini seçərək canlı skaneri aktivləşdirə bilərsiniz:</i>";
+                await SendMessageAsync(successMsg, chatId, TelegramKeyboards.BuildCustomCoinsKeyboard(userSettings));
                 return;
             }
 
@@ -2109,6 +2299,27 @@ namespace CryptoSense.Infrastructure.Telegram
             else if (text.Contains("Geri") || text.Contains("Əsas Menyu") || text == "/menu" || text == "/start" || text == "/help" || text.Contains("Menyu") || text == "🎛 Əsas Terminal" || text == "Terminal")
             {
                 _userStates.TryRemove(chatId, out _);
+
+                // Toggle logic: If user specifically clicked "🎛 Əsas Terminal" or "Terminal" and the terminal is already open
+                if ((text == "🎛 Əsas Terminal" || text == "Terminal") && userSettings.IsTerminalOpen && userSettings.LastTerminalMessageId.HasValue)
+                {
+                    var oldMsgId = userSettings.LastTerminalMessageId.Value;
+                    userSettings.IsTerminalOpen = false;
+                    userSettings.LastTerminalMessageId = null;
+                    SaveSettings();
+
+                    // Delete the open terminal so sections collapse back into place without duplicating messages
+                    await DeleteMessageAsync(chatId, oldMsgId);
+                    return;
+                }
+
+                // If opening a new terminal, delete the previous terminal message if it exists to avoid chat spam
+                if (userSettings.LastTerminalMessageId.HasValue)
+                {
+                    _ = DeleteMessageAsync(chatId, userSettings.LastTerminalMessageId.Value);
+                    userSettings.LastTerminalMessageId = null;
+                }
+
                 var unitOfWork = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
                 var openCount = await unitOfWork.Signals.GetActiveSignalsCountAsync();
                 var lastTime = userSettings.LastSignalSentUtc == default 
@@ -2118,7 +2329,10 @@ namespace CryptoSense.Infrastructure.Telegram
                 var dashText = TelegramMessageFormatter.FormatTerminalDashboard(userSettings, openCount, lastTime);
                 var inlineKb = TelegramKeyboards.BuildTerminalInlineKeyboard(userSettings);
 
-                await SendMessageAsync(dashText, chatId, inlineKb);
+                var newMsgId = await SendMessageReturnIdAsync(dashText, chatId, inlineKb);
+                userSettings.LastTerminalMessageId = newMsgId;
+                userSettings.IsTerminalOpen = true;
+                SaveSettings();
                 return;
             }
             else if (text.Contains("Dayandır") || text.Contains("Dayandir") || text == "/stop")
