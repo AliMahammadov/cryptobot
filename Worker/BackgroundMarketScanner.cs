@@ -1092,13 +1092,11 @@ namespace CryptoSense.Worker
 
             var activeTimeframes = new HashSet<string>();
             var subscribedCoins = new HashSet<string>();
-            bool anyUserActive = false;
 
             foreach (var s in TelegramBotService.UserPreferences.Values)
             {
-                if (s.IsActive && s.Coins.Count > 0)
+                if (s.IsActive)
                 {
-                    anyUserActive = true;
                     if (s.Timeframe == "Hamısı" || s.Timeframe == "Hamisi")
                     {
                         activeTimeframes.Add("1h");
@@ -1109,14 +1107,20 @@ namespace CryptoSense.Worker
                         activeTimeframes.Add(s.Timeframe);
                     }
 
-                    foreach (var c in s.Coins) subscribedCoins.Add(c);
+                    if (s.Coins != null && s.Coins.Count > 0)
+                    {
+                        foreach (var c in s.Coins) subscribedCoins.Add(c);
+                    }
                 }
             }
 
-            if (!anyUserActive || subscribedCoins.Count == 0)
+            // Always ensure all 40 institutional coins are scanned if user list is empty or default
+            if (subscribedCoins.Count == 0)
             {
-                // No active user has chosen coins to trade. Do not scan empty list.
-                return;
+                foreach (var c in TelegramBotService.Default40Coins)
+                {
+                    subscribedCoins.Add(c);
+                }
             }
 
             var top80Tickers = await marketData.GetTopFuturesTickersAsync(80);
@@ -1206,6 +1210,17 @@ namespace CryptoSense.Worker
 
                             var signal = await engine.AnalyzeCoinAsync(sym, tf, isLiveScan: true);
 
+                            // Telemetriya: Hər analiz olunan coin üçün real log
+                            var aztNow = CryptoSense.Domain.Common.TimeHelper.NowFormatted;
+                            var indRes = signal.Indicators as CryptoSense.Application.DTOs.IndicatorResult;
+                            decimal adxVal = indRes?.Adx ?? 0m;
+                            bool isTradeSignal = signal.Timeframe != "15m" && signal.Confidence >= 75 && (signal.SignalType.Contains("LONG") || signal.SignalType.Contains("SHORT"));
+                            string resultStatus = isTradeSignal ? "PASS" : "BLOCK";
+                            string reasonDesc = isTradeSignal 
+                                ? signal.SignalType 
+                                : ((signal.AnalysisReasons != null && signal.AnalysisReasons.Count > 0) ? signal.AnalysisReasons[0] : (signal.SignalType ?? "GÖZLƏMƏ"));
+                            Console.WriteLine($"[SCAN] {aztNow} {sym} tf={tf} confluence={signal.ConfluenceScore:F1}% adx={adxVal:F1} result={resultStatus} reason={reasonDesc}");
+
                             // ⚠️ ABNORMAL VOLATILITY / EXTREME RISK ALERT
                             if (signal.SignalType == "YÜKSƏK_VOLATİLLİK_RİSK")
                             {
@@ -1241,11 +1256,16 @@ namespace CryptoSense.Worker
                                 };
                                 var candleCloseUtc = signal.SourceCandleOpenTimeUtc + candleDuration;
 
-                                // (2) emitTs - candleCloseTime > 90000ms skip (SKIP_CYCLE_LAG)
-                                var emitLagMs = (DateTime.UtcNow - candleCloseUtc).TotalMilliseconds;
-                                if (emitLagMs > 90000)
+                                // (2) emitTs - candleCloseTime > maxAllowedLagMs skip (SKIP_CYCLE_LAG)
+                                var maxAllowedLagMs = signal.Timeframe switch
                                 {
-                                    Console.WriteLine($"[MarketScanner] SKIP_CYCLE_LAG: {signal.Symbol} lag={emitLagMs:F0}ms > 90000ms");
+                                    "4h" => 1800000, // 30 dəqiqə
+                                    _ => 900000     // 15 dəqiqə (1h şam bağlanışı üçün)
+                                };
+                                var emitLagMs = (DateTime.UtcNow - candleCloseUtc).TotalMilliseconds;
+                                if (emitLagMs > maxAllowedLagMs)
+                                {
+                                    Console.WriteLine($"[MarketScanner] SKIP_CYCLE_LAG: {signal.Symbol} lag={emitLagMs:F0}ms > {maxAllowedLagMs}ms");
                                     continue;
                                 }
 

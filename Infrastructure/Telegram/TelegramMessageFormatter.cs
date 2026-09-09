@@ -497,7 +497,28 @@ namespace CryptoSense.Infrastructure.Telegram
             catch { }
             if (string.IsNullOrEmpty(commitHash))
             {
-                commitHash = "0f93d25";
+                try
+                {
+                    var proc = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                    {
+                        FileName = "git",
+                        Arguments = "rev-parse --short HEAD",
+                        RedirectStandardOutput = true,
+                        UseShellExecute = false,
+                        CreateNoWindow = true
+                    });
+                    if (proc != null)
+                    {
+                        var outStr = proc.StandardOutput.ReadToEnd().Trim();
+                        proc.WaitForExit(1000);
+                        if (outStr.Length >= 7) commitHash = outStr.Substring(0, 7);
+                    }
+                }
+                catch { }
+            }
+            if (string.IsNullOrEmpty(commitHash))
+            {
+                commitHash = "f8827f5";
             }
             sb.AppendLine($"📌 <b>Deploy Versiyası:</b> <code>v2.0 (Commit: {commitHash})</code>");
             var tfDisplay = (settings.Timeframe == "Hamısı" || settings.Timeframe == "Hamisi") ? "1h, 4h" : (settings.Timeframe == "15m" ? "1h" : settings.Timeframe);
