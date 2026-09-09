@@ -107,9 +107,9 @@ namespace CryptoSense.Infrastructure.Telegram
                         foreach (var kvp in loaded)
                         {
                             var s = kvp.Value;
-                            if (s.Coins == null || s.Coins.Count == 0 || s.Coins.Count <= 16)
+                            if (s.Coins == null)
                             {
-                                s.Coins = new List<string>(Default40Coins);
+                                s.Coins = new List<string>();
                             }
                             UserPreferences[kvp.Key] = s;
                         }
@@ -194,8 +194,10 @@ namespace CryptoSense.Infrastructure.Telegram
                         {
                             Username = u.Username,
                             TelegramUserId = u.TelegramUserId,
-                            IsActive = true,
-                            Timeframe = "1h"
+                            IsActive = false,
+                            Timeframe = "Təyin olunmayıb",
+                            PortfolioMode = "Təyin olunmayıb",
+                            Coins = new List<string>()
                         });
                         s.Username = u.Username;
                         s.TelegramUserId = u.TelegramUserId;
@@ -236,21 +238,16 @@ namespace CryptoSense.Infrastructure.Telegram
         {
             var settings = UserPreferences.GetOrAdd(chatId, _ => new UserSettings
             {
-                Coins = new List<string>(Default40Coins),
-                Timeframe = "Hamısı",
-                IsActive = true
+                Coins = new List<string>(),
+                Timeframe = "Təyin olunmayıb",
+                PortfolioMode = "Təyin olunmayıb",
+                IsActive = false
             });
-            if (settings.Coins == null || settings.Coins.Count == 0 || settings.Coins.Count <= 16)
+            if (settings.Coins == null)
             {
-                settings.Coins = new List<string>(Default40Coins);
-                SaveSettings();
+                settings.Coins = new List<string>();
             }
             settings.Coins.RemoveAll(c => !System.Text.RegularExpressions.Regex.IsMatch(c, @"^[A-Z0-9]+USDT$") || c.Contains("⚡") || c.Contains("SIQNALLAR") || c.Contains("BÜTÜN") || c.Contains("BUTUN"));
-            if (settings.Coins.Count <= 16)
-            {
-                settings.Coins = new List<string>(Default40Coins);
-                SaveSettings();
-            }
             return settings;
         }
 
@@ -965,7 +962,7 @@ namespace CryptoSense.Infrastructure.Telegram
 
         private async Task ScanUserCoinsInstantlyAsync(UserSettings userSettings, string chatId, string timeframe)
         {
-            if (userSettings.Coins.Count == 0) return;
+            if (userSettings.Coins.Count == 0 || string.IsNullOrWhiteSpace(timeframe) || timeframe == "Təyin olunmayıb" || !userSettings.IsActive) return;
             using var scope = _serviceProvider.CreateScope();
             var uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
             var signalEngine = scope.ServiceProvider.GetRequiredService<ISignalEngine>();
@@ -990,7 +987,7 @@ namespace CryptoSense.Infrastructure.Telegram
             List<CoinTicker> matchedTickers = new();
             try
             {
-                var allTickers = await marketData.GetTopFuturesTickersAsync(120);
+                var allTickers = await marketData.GetTopFuturesTickersAsync(250);
                 var coinSet = new HashSet<string>(userSettings.Coins, StringComparer.OrdinalIgnoreCase);
                 matchedTickers = allTickers.Where(t => coinSet.Contains(t.Symbol) || coinSet.Contains(t.Symbol.Replace("1000", ""))).ToList();
             }
@@ -1017,9 +1014,10 @@ namespace CryptoSense.Infrastructure.Telegram
             {
                 var gainers = matchedTickers.Where(t => t.PriceChangePercent > 0).OrderByDescending(t => t.PriceChangePercent).ToList();
                 var losers = matchedTickers.Where(t => t.PriceChangePercent < 0).OrderBy(t => t.PriceChangePercent).ToList();
+                var neutral = matchedTickers.Where(t => t.PriceChangePercent == 0).ToList();
 
                 sb.AppendLine($"📈 <b>Portfeldəki Coinlərin Canlı Vəziyyəti:</b>");
-                sb.AppendLine($"• <b>Bazar Balansı:</b> 🟢 {gainers.Count} Yüksələn | 🔴 {losers.Count} Düşən\n");
+                sb.AppendLine($"• <b>Bazar Balansı:</b> 🟢 {gainers.Count} Yüksələn | 🔴 {losers.Count} Düşən{(neutral.Count > 0 ? $" | ⚪ {neutral.Count} Sabit" : "")}\n");
 
                 if (gainers.Count > 0)
                 {
@@ -1030,6 +1028,24 @@ namespace CryptoSense.Infrastructure.Telegram
                 {
                     var topLosers = string.Join(" | ", losers.Take(3).Select(t => $"{t.Symbol.Replace("USDT", "")}: {t.PriceChangePercent.ToString("F2", CultureInfo.InvariantCulture)}%"));
                     sb.AppendLine($"❄️ <b>Ən Çox Düşənlər:</b> <code>{topLosers}</code>");
+                }
+                sb.AppendLine();
+
+                sb.AppendLine($"📋 <b>Portfeldəki Bütün Coinlərin Canlı Qiyməti və 24s Dəyişimi:</b>");
+                var sorted = matchedTickers.OrderByDescending(t => t.PriceChangePercent).ToList();
+                var chunkList = new List<string>();
+                foreach (var t in sorted)
+                {
+                    var cName = t.Symbol.Replace("USDT", "");
+                    var pSign = t.PriceChangePercent >= 0 ? "+" : "";
+                    var pIcon = t.PriceChangePercent >= 0 ? "🟢" : "🔴";
+                    var priceFormatted = t.Price >= 1000 ? t.Price.ToString("N0", CultureInfo.InvariantCulture) : (t.Price >= 1 ? t.Price.ToString("F2", CultureInfo.InvariantCulture) : t.Price.ToString("F4", CultureInfo.InvariantCulture));
+                    chunkList.Add($"{cName}: ${priceFormatted} ({pSign}{t.PriceChangePercent.ToString("F2", CultureInfo.InvariantCulture)}% {pIcon})");
+                }
+                for (int i = 0; i < chunkList.Count; i += 2)
+                {
+                    var row = string.Join(" | ", chunkList.Skip(i).Take(2));
+                    sb.AppendLine($"• <code>{row}</code>");
                 }
                 sb.AppendLine();
             }
@@ -1493,7 +1509,15 @@ namespace CryptoSense.Infrastructure.Telegram
             }
             else if (data == "cb_stats")
             {
-                var stats = await signalEngine.GetPerformanceStatsAsync(userSettings.Timeframe, userSettings.Coins);
+                if (userSettings.Coins.Count == 0 || string.IsNullOrWhiteSpace(userSettings.Timeframe) || userSettings.Timeframe == "Təyin olunmayıb" || !userSettings.IsActive)
+                {
+                    var emptyStats = new PerformanceStats();
+                    var emptyMsg = TelegramMessageFormatter.FormatPerformanceStats(emptyStats, "Təyin olunmayıb");
+                    await EditMessageTextAsync(chatId, messageId, emptyMsg, TelegramKeyboards.BuildBackToTerminalKeyboard());
+                    return;
+                }
+
+                var stats = await signalEngine.GetUserPerformanceStatsAsync(chatId, userSettings.Timeframe, userSettings.Coins);
                 var statsMsg = TelegramMessageFormatter.FormatPerformanceStats(stats, userSettings.Timeframe);
                 await EditMessageTextAsync(chatId, messageId, statsMsg, TelegramKeyboards.BuildBackToTerminalKeyboard());
             }
@@ -1674,8 +1698,6 @@ namespace CryptoSense.Infrastructure.Telegram
                 var aSettings = GetSettings(chatId);
                 aSettings.TelegramUserId = userId ?? 1219998176;
                 aSettings.Username = "Ali (Super Admin)";
-                if (aSettings.Coins.Count == 0) aSettings.Coins = new List<string>(Default40Coins);
-                aSettings.IsActive = true;
                 SaveSettings();
             }
 
@@ -1863,8 +1885,9 @@ namespace CryptoSense.Infrastructure.Telegram
 
                         var settings = GetSettings(chatId);
                         settings.TelegramUserId = userId;
-                        settings.IsActive = settings.Coins.Count > 0;
-                        settings.Timeframe = "1h";
+                        settings.IsActive = false;
+                        settings.Timeframe = "Təyin olunmayıb";
+                        settings.PortfolioMode = "Təyin olunmayıb";
                         settings.LastResumeTime = DateTime.UtcNow;
                         settings.IsTerminalOpen = false;
                         settings.LastTerminalMessageId = null;
@@ -2946,21 +2969,18 @@ namespace CryptoSense.Infrastructure.Telegram
             }
             else if (text.Contains("Statistika") || text == "/stats")
             {
-                if (isAdmin)
+                if (userSettings.Coins.Count == 0 || string.IsNullOrWhiteSpace(userSettings.Timeframe) || userSettings.Timeframe == "Təyin olunmayıb" || !userSettings.IsActive)
                 {
-                    // SuperAdmin: Global system stats across ALL coins
-                    var stats = await signalEngine.GetPerformanceStatsAsync(null, null);
-                    var msg = TelegramMessageFormatter.FormatPerformanceStats(stats, "Hamısı (Qlobal Sistem)");
-                    await SendMessageAsync(msg, chatId, TelegramKeyboards.BuildUserKeyboard(userSettings, isAdmin));
+                    var emptyStats = new PerformanceStats();
+                    var emptyMsg = TelegramMessageFormatter.FormatPerformanceStats(emptyStats, "Təyin olunmayıb");
+                    await SendMessageAsync(emptyMsg, chatId, TelegramKeyboards.BuildUserKeyboard(userSettings, isAdmin));
+                    return;
                 }
-                else
-                {
-                    // Regular User: ONLY personal stats from delivered signals
-                    var stats = await signalEngine.GetUserPerformanceStatsAsync(chatId, userSettings.Timeframe, userSettings.Coins);
-                    var tfLabel = (userSettings.Timeframe == "Hamısı" || userSettings.Timeframe == "Hamisi") ? "1h, 4h" : userSettings.Timeframe;
-                    var msg = TelegramMessageFormatter.FormatPerformanceStats(stats, tfLabel);
-                    await SendMessageAsync(msg, chatId, TelegramKeyboards.BuildUserKeyboard(userSettings, isAdmin));
-                }
+
+                var stats = await signalEngine.GetUserPerformanceStatsAsync(chatId, userSettings.Timeframe, userSettings.Coins);
+                var tfLabel = (userSettings.Timeframe == "Hamısı" || userSettings.Timeframe == "Hamisi") ? "1h, 4h" : userSettings.Timeframe;
+                var msg = TelegramMessageFormatter.FormatPerformanceStats(stats, tfLabel);
+                await SendMessageAsync(msg, chatId, TelegramKeyboards.BuildUserKeyboard(userSettings, isAdmin));
             }
             else if (text.Contains("Coin Seçimi") || text.Contains("Coin Secimi") || text == "/setcoins" || text.Contains("Coinlərim") || text.Contains("Coinlerim") || text == "/my" || text == "⚡ Bütün Siqnallar" || text == "/scan")
             {

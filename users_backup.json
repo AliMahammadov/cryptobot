@@ -2,7 +2,7 @@
   {
     "Id": 47,
     "Username": "Ali",
-    "PasswordHash": "$2a$11$osmwX2rkzgaqQXEAmWcPtu5wTp6PlA/amuTwVsaRkFgRLF4KpVJHO",
+    "PasswordHash": "$2a$11$46IsA2Ex0MNQMhoFFbEOY.e4ueXD5B5dDusB3oL8ZjKhKjMUm401a",
     "Password": "",
     "Role": 0,
     "TelegramUsername": "Ali_Mahammadov",
@@ -10,7 +10,7 @@
     "TelegramUserId": 1219998176,
     "IsActive": true,
     "CreatedAtUtc": "2026-09-04T00:45:17.967678",
-    "LastLoginAt": "2026-09-09T20:56:39.8223653Z"
+    "LastLoginAt": "2026-09-09T21:12:51.2451405Z"
   },
   {
     "Id": 165,
@@ -52,6 +52,19 @@
     "LastLoginAt": "2026-09-08T15:06:46.1104417"
   },
   {
+    "Id": 213,
+    "Username": "AliTest_0ad7",
+    "PasswordHash": "$2a$11$ywKZcF0PgjC539jrYrpH4uiuO8fbtKZ8uB7gZNd6WOlmsz1nOb2J6",
+    "Password": "",
+    "Role": 1,
+    "TelegramUsername": "",
+    "TelegramChatId": "",
+    "TelegramUserId": null,
+    "IsActive": false,
+    "CreatedAtUtc": "2026-09-09T21:13:15.9688748Z",
+    "LastLoginAt": "2026-09-09T21:13:15.9688755Z"
+  },
+  {
     "Id": 185,
     "Username": "AliTest_2854",
     "PasswordHash": "$2a$11$hFNWLmEbeL6n/5r48y2Yeu9.nfZZXFCBcyeeJ2CT0Ui9972QY.6ey",
@@ -74,8 +87,8 @@
     "TelegramChatId": "",
     "TelegramUserId": null,
     "IsActive": false,
-    "CreatedAtUtc": "2026-09-09T20:56:57.4644835Z",
-    "LastLoginAt": "2026-09-09T20:56:57.4644847Z"
+    "CreatedAtUtc": "2026-09-09T20:56:57.4644835",
+    "LastLoginAt": "2026-09-09T20:56:57.4644847"
   },
   {
     "Id": 193,
@@ -195,6 +208,19 @@
     "LastLoginAt": "2026-09-08T15:08:10.6275208"
   },
   {
+    "Id": 211,
+    "Username": "qa_tester_26b683",
+    "PasswordHash": "$2a$11$Zz8LYARB.TOhbh8Kdsz5peEuQO1AwZCu96ByxO87L8vt0KqigWhW2",
+    "Password": "",
+    "Role": 1,
+    "TelegramUsername": "",
+    "TelegramChatId": "",
+    "TelegramUserId": null,
+    "IsActive": false,
+    "CreatedAtUtc": "2026-09-09T21:13:04.1443787Z",
+    "LastLoginAt": "2026-09-09T21:13:04.1443797Z"
+  },
+  {
     "Id": 187,
     "Username": "qa_tester_b52928",
     "PasswordHash": "$2a$11$n/OnGAesMVM8wdGGG02guuIkyR0C.mRjFGTP1KeRawb4nXE8satdi",
@@ -256,8 +282,8 @@
     "TelegramChatId": "",
     "TelegramUserId": null,
     "IsActive": false,
-    "CreatedAtUtc": "2026-09-09T20:56:45.4088938Z",
-    "LastLoginAt": "2026-09-09T20:56:45.4088943Z"
+    "CreatedAtUtc": "2026-09-09T20:56:45.4088938",
+    "LastLoginAt": "2026-09-09T20:56:45.4088943"
   },
   {
     "Id": 175,
@@ -399,8 +425,8 @@
     "TelegramChatId": "test_chat_d1b584dd",
     "TelegramUserId": 999888777,
     "IsActive": false,
-    "CreatedAtUtc": "2026-09-09T20:56:56.5001054Z",
-    "LastLoginAt": "2026-09-09T20:56:56.657615Z"
+    "CreatedAtUtc": "2026-09-09T20:56:56.5001054",
+    "LastLoginAt": "2026-09-09T20:56:56.657615"
   },
   {
     "Id": 196,
@@ -427,6 +453,19 @@
     "IsActive": false,
     "CreatedAtUtc": "2026-09-08T15:18:23.5885968",
     "LastLoginAt": "2026-09-08T15:18:23.7292457"
+  },
+  {
+    "Id": 212,
+    "Username": "session_user_f6e441",
+    "PasswordHash": "$2a$11$WfMLPe0XMLisFkxrwCaDweNH7W5V0CEWmbv97Rthg5qU6LPTZNgu2",
+    "Password": "",
+    "Role": 1,
+    "TelegramUsername": "",
+    "TelegramChatId": "test_chat_e3151a05",
+    "TelegramUserId": 999888777,
+    "IsActive": false,
+    "CreatedAtUtc": "2026-09-09T21:13:15.0482687Z",
+    "LastLoginAt": "2026-09-09T21:13:15.2061457Z"
   },
   {
     "Id": 174,
@@ -464,8 +503,21 @@
     "TelegramChatId": "",
     "TelegramUserId": null,
     "IsActive": false,
-    "CreatedAtUtc": "2026-09-09T20:56:40.0631019Z",
-    "LastLoginAt": "2026-09-09T20:56:40.8285088Z"
+    "CreatedAtUtc": "2026-09-09T20:56:40.0631019",
+    "LastLoginAt": "2026-09-09T20:56:40.8285088"
+  },
+  {
+    "Id": 210,
+    "Username": "testuser_53bef3",
+    "PasswordHash": "$2a$11$B3cMnx8yh3HoQSOLQYTxrel0KaCTjHH2NV77d9x2xEoryXkI.kGcu",
+    "Password": "",
+    "Role": 1,
+    "TelegramUsername": "",
+    "TelegramChatId": "",
+    "TelegramUserId": null,
+    "IsActive": false,
+    "CreatedAtUtc": "2026-09-09T21:12:51.5533045Z",
+    "LastLoginAt": "2026-09-09T21:12:52.1185739Z"
   },
   {
     "Id": 182,

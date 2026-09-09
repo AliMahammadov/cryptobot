@@ -318,6 +318,25 @@ namespace CryptoSense.Infrastructure.Telegram
             {
                 sb.AppendLine("🌐 <b>Əhatə:</b> <code>Bütün Əsas Zamanlar (1h, 4h)</code>");
             }
+
+            if (stats.TotalSignals == 0)
+            {
+                sb.AppendLine("-----------------------------------");
+                sb.AppendLine("📌 <b>Ümumi Analizlər:</b> 0 ədəd");
+                sb.AppendLine("🟡 <b>Açıq İzlənən:</b> 0 ədəd");
+                sb.AppendLine("✅ <b>Uğurlu (Qazanc / Hədəfə Çatan):</b> 0 ədəd");
+                sb.AppendLine("❌ <b>Uğursuz:</b> 0 ədəd");
+                sb.AppendLine("-----------------------------------");
+                sb.AppendLine("🎯 <b>Real Qələbə Faizi (Win Rate):</b> <b>0.0%</b>");
+                sb.AppendLine("📈 <b>Xalis Nəticə (PnL):</b> <b>+0.00%</b>");
+                sb.AppendLine("📊 <b>Orta Əməliyyat Gəliri:</b> +0.00%");
+                sb.AppendLine("💎 <b>Profit Factor:</b> <b>0.00</b> | <b>Expectancy:</b> <b>0.00R</b>");
+                sb.AppendLine("📉 <b>Maksimum Drawdown:</b> -0.00%");
+                sb.AppendLine("-----------------------------------");
+                sb.AppendLine("ℹ️ <i>Hələ heç bir əməliyyat və ya zaman seçilməyib. Bütün statistik göstəricilər sıfırdır. Başlamaq üçün Əsas Terminaldan portfel və zaman aralığı seçin.</i>");
+                return sb.ToString();
+            }
+
             sb.AppendLine("-----------------------------------");
             sb.AppendLine($"📌 <b>Ümumi Analizlər:</b> {stats.TotalSignals} ədəd");
             sb.AppendLine($"🟡 <b>Açıq İzlənən:</b> {stats.OpenSignals} ədəd");
@@ -560,10 +579,15 @@ namespace CryptoSense.Infrastructure.Telegram
                 portModeName = "⭐ Mənim Coinlərim (Fərdi)";
                 coinCount = settings.CustomCoins.Count > 0 ? $"{settings.CustomCoins.Count} ədəd (Fərdi)" : "0 ədəd (Boşdur)";
             }
-            else
+            else if (settings.PortfolioMode == "Standard40")
             {
                 portModeName = "🪙 Standart 40 Coin";
                 coinCount = $"{settings.Coins.Count} ədəd (İnstitusional 40)";
+            }
+            else
+            {
+                portModeName = "Təyin olunmayıb ⚠️";
+                coinCount = "0 ədəd (Seçilməyib)";
             }
 
             var sb = new StringBuilder();
@@ -576,9 +600,9 @@ namespace CryptoSense.Infrastructure.Telegram
             sb.AppendLine($"🔔 <b>Skaner Vəziyyəti:</b> <b>{statusIcon}</b>");
             sb.AppendLine($"🕒 <b>Son Siqnal:</b> <code>{(string.IsNullOrEmpty(lastSignalTime) ? "Hələ yoxdur" : lastSignalTime)}</code>");
             sb.AppendLine("━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-            if (string.IsNullOrWhiteSpace(settings.Timeframe) || settings.Timeframe == "Təyin olunmayıb" || !settings.IsActive)
+            if (string.IsNullOrWhiteSpace(settings.Timeframe) || settings.Timeframe == "Təyin olunmayıb" || settings.Coins.Count == 0 || !settings.IsActive)
             {
-                sb.AppendLine("⚠️ <i>Zaman rejimi təyin olunmayıb. Aşağıdan portfel və zaman seçərək skaneri aktivləşdirin.</i>");
+                sb.AppendLine("⚠️ <i>Hələ heç bir əməliyyat və zaman aralığı seçilməyib. Bazar sistemini başlatmaq üçün aşağıdakı düymələrlə portfel və zaman aralığını seçin.</i>");
             }
             else
             {

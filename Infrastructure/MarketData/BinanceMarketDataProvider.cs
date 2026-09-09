@@ -150,7 +150,7 @@ namespace CryptoSense.Infrastructure.MarketData
                     var list = ParseTopVolumeSymbols(response);
                     if (list.Count > 0)
                     {
-                        var top = list.Take(80).ToList();
+                        var top = list.Take(250).ToList();
                         lock (_top80Lock)
                         {
                             _cachedTop80 = top;
@@ -187,7 +187,7 @@ namespace CryptoSense.Infrastructure.MarketData
                     var list = ParseTopVolumeSymbols(response);
                     if (list.Count > 0)
                     {
-                        var top = list.Take(80).ToList();
+                        var top = list.Take(250).ToList();
                         lock (_top80Lock)
                         {
                             _cachedTop80 = top;
@@ -215,11 +215,23 @@ namespace CryptoSense.Infrastructure.MarketData
                 if (!symbol.EndsWith("USDT")) continue;
                 if (!decimal.TryParse(item.GetProperty("quoteVolume").GetString(), NumberStyles.Any, CultureInfo.InvariantCulture, out var quoteVol)) continue;
 
-                // Price is strictly 0 here: volume rank only, lastPrice does NOT enter price path
+                decimal priceChangePercent = 0;
+                if (item.TryGetProperty("priceChangePercent", out var pcpEl))
+                {
+                    decimal.TryParse(pcpEl.GetString(), NumberStyles.Any, CultureInfo.InvariantCulture, out priceChangePercent);
+                }
+
+                decimal lastPrice = 0;
+                if (item.TryGetProperty("lastPrice", out var lpEl))
+                {
+                    decimal.TryParse(lpEl.GetString(), NumberStyles.Any, CultureInfo.InvariantCulture, out lastPrice);
+                }
+
                 list.Add(new CoinTicker
                 {
                     Symbol = symbol,
-                    Price = 0,
+                    Price = lastPrice,
+                    PriceChangePercent = priceChangePercent,
                     VolumeQuote = quoteVol
                 });
             }

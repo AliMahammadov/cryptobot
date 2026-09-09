@@ -340,18 +340,13 @@ namespace CryptoSense.Infrastructure.Persistence.Repositories
                 .Select(d => d.SignalId)
                 .ToListAsync();
 
-            IQueryable<FuturesSignal> query;
-            if (deliveredSignalIds.Count > 0)
+            if (deliveredSignalIds.Count == 0)
             {
-                query = _context.Signals
-                    .Where(s => deliveredSignalIds.Contains(s.Id) && (s.SignalType.Contains("LONG") || s.SignalType.Contains("SHORT")));
+                return new PerformanceStats();
             }
-            else
-            {
-                // Fallback to all signals matching user criteria so stats are never 0 when signals exist
-                query = _context.Signals
-                    .Where(s => (s.SignalType.Contains("LONG") || s.SignalType.Contains("SHORT")) && (s.SignalAlertSent || s.IsClosed || s.Status != SignalStatus.Open));
-            }
+
+            var query = _context.Signals
+                .Where(s => deliveredSignalIds.Contains(s.Id) && (s.SignalType.Contains("LONG") || s.SignalType.Contains("SHORT")));
 
             if (!string.IsNullOrEmpty(specificTimeframe) && specificTimeframe != "Hamısı" && specificTimeframe != "Hamisi")
             {
