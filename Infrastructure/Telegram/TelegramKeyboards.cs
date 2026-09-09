@@ -28,6 +28,7 @@ namespace CryptoSense.Infrastructure.Telegram
                     },
                     new[]
                     {
+                        new { text = "🧹 Siqnalları Sıfırla", callback_data = "cb_reset" },
                         new { text = toggleText, callback_data = "cb_toggle" }
                     }
                 }
@@ -80,7 +81,7 @@ namespace CryptoSense.Infrastructure.Telegram
                     keyboard = new[]
                     {
                         new[] { new { text = "🎛 Əsas Terminal" }, new { text = "👑 Admin Paneli" } },
-                        new[] { new { text = "ℹ️ Bot Statusu" }, new { text = "📊 Statistika" } }
+                        new[] { new { text = "ℹ️ Bot Statusu" } }
                     },
                     resize_keyboard = true,
                     one_time_keyboard = false

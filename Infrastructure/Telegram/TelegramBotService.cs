@@ -104,7 +104,12 @@ namespace CryptoSense.Infrastructure.Telegram
                     {
                         foreach (var kvp in loaded)
                         {
-                            UserPreferences[kvp.Key] = kvp.Value;
+                            var s = kvp.Value;
+                            if (s.Coins == null || s.Coins.Count == 0 || s.Coins.Count <= 16)
+                            {
+                                s.Coins = new List<string>(Default40Coins);
+                            }
+                            UserPreferences[kvp.Key] = s;
                         }
                     }
                 }
@@ -206,11 +211,17 @@ namespace CryptoSense.Infrastructure.Telegram
                 Timeframe = "Hamısı",
                 IsActive = true
             });
-            if (settings.Coins == null)
+            if (settings.Coins == null || settings.Coins.Count == 0 || settings.Coins.Count <= 16)
             {
-                settings.Coins = new List<string>();
+                settings.Coins = new List<string>(Default40Coins);
+                SaveSettings();
             }
             settings.Coins.RemoveAll(c => !System.Text.RegularExpressions.Regex.IsMatch(c, @"^[A-Z0-9]+USDT$") || c.Contains("⚡") || c.Contains("SIQNALLAR") || c.Contains("BÜTÜN") || c.Contains("BUTUN"));
+            if (settings.Coins.Count <= 16)
+            {
+                settings.Coins = new List<string>(Default40Coins);
+                SaveSettings();
+            }
             return settings;
         }
 
@@ -1114,6 +1125,11 @@ namespace CryptoSense.Infrastructure.Telegram
             }
             else if (data == "cb_coins")
             {
+                if (userSettings.Coins == null || userSettings.Coins.Count <= 16)
+                {
+                    userSettings.Coins = new List<string>(Default40Coins);
+                    SaveSettings();
+                }
                 var cleanCoins = (userSettings.Coins.Count > 0 ? userSettings.Coins : Default40Coins)
                     .Select(c => c.Replace("USDT", "")).ToList();
                 var msg = "🪙 <b>Coin Portfel İdarəsi</b>\n\n" +
@@ -1145,6 +1161,21 @@ namespace CryptoSense.Infrastructure.Telegram
                 var msg = "🗑 <b>Coin Sil</b>\n\n" +
                           "Siyahıdan çıxarmaq istədiyiniz coinin adını mesaj olaraq yazın (məsələn: <code>SOL</code>):";
                 await EditMessageTextAsync(chatId, messageId, msg, TelegramKeyboards.BuildBackToTerminalKeyboard());
+            }
+            else if (data == "cb_reset")
+            {
+                userSettings.AlertCounter = 0;
+                userSettings.LastResumeTime = DateTime.UtcNow;
+                SaveSettings();
+
+                int coinCount = userSettings.Coins.Count > 0 ? userSettings.Coins.Count : Default40Coins.Count;
+                var resetMsg = "🧹 <b>Bildiriş Sayğacınız Sıfırlandı! ✅</b>\n\n" +
+                               "• Şəxsi siqnal sayğacınız (#1) sıfırlandı və yeni bildirişlər üçün hazırlandı.\n" +
+                               "• Baza statistikası və keçmiş ticarət nəticələri qorunub saxlanıldı.\n" +
+                               $"• Seçilmiş coin siyahınız (<b>{coinCount} coin</b>) aktivdir.\n" +
+                               $"• Bildiriş Statusu: {(userSettings.IsActive ? "Aktiv 🟢" : "Dayandırılıb 🔴")}";
+
+                await EditMessageTextAsync(chatId, messageId, resetMsg, TelegramKeyboards.BuildBackToTerminalKeyboard());
             }
         }
 
@@ -1566,7 +1597,6 @@ namespace CryptoSense.Infrastructure.Telegram
                           $"📊 <b>Ümumi Coin Sayı:</b> <b>{cleanCoins.Count} ədəd (Standart İnstitusional 40)</b>\n" +
                           $"🪙 <b>İzlənən Coinlər:</b>\n<code>{string.Join(", ", cleanCoins)}</code>\n\n" +
                           "⏱ <b>Dövri Olaraq Analiz Olunan Şamlar:</b>\n" +
-                          "• <b>15 Dəqiqə (15m)</b> — Yüksək dəqiqlikli standart trend\n" +
                           "• <b>1 Saat (1h)</b> — Orta müddətli güclü dalğa\n" +
                           "• <b>4 Saat (4h)</b> — Əsas makro trend və güclü səviyyələr\n\n" +
                           "🔍 <b>Skan Mexanizmi:</b>\n" +
@@ -2239,6 +2269,11 @@ namespace CryptoSense.Infrastructure.Telegram
             }
             else if (text.Contains("Coin Seçimi") || text.Contains("Coin Secimi") || text == "/setcoins")
             {
+                if (userSettings.Coins == null || userSettings.Coins.Count <= 16)
+                {
+                    userSettings.Coins = new List<string>(Default40Coins);
+                    SaveSettings();
+                }
                 var cleanList = userSettings.Coins.Count > 0 
                     ? string.Join(", ", userSettings.Coins.Select(c => c.Replace("USDT", ""))) 
                     : "Heç bir coin seçilməyib (0 coin)";
@@ -2246,7 +2281,7 @@ namespace CryptoSense.Infrastructure.Telegram
                              $"🪙 <b>Hazırda Seçilmiş Coinlər:</b> {userSettings.Coins.Count} coin\n" +
                              $"<code>{cleanList}</code>\n\n" +
                              "Aşağıdakı seçimlərdən birini edin:\n" +
-                             "• <b>📋 Standart 16 Coini Seç:</b> Əsas institusional 16 coini dərhal aktivləşdirin.\n" +
+                             "• <b>📋 Standart 40 Coini Seç:</b> Əsas institusional 40 coini dərhal aktivləşdirin.\n" +
                              "• <b>➕ Öz coini əlavə et:</b> Binance Futures USDT siyahısından istənilən coini əlavə edin.\n" +
                              "• <b>🗑 Coin Sil:</b> Siyahınızdakı coinləri silin.";
                 await SendMessageAsync(prompt, chatId, TelegramKeyboards.BuildCoinSelectionKeyboard());
