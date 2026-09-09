@@ -88,7 +88,8 @@ namespace CryptoSense.Application.Services
             SignalDirection direction,
             decimal calculationRefPrice,
             decimal atr14,
-            decimal vwap)
+            decimal vwap,
+            string timeframe = "1h")
         {
             var fail = new SrTargetResult(false, null, 0, 0, 0, 0, 0, 0, 0, 0, new List<decimal>());
             if (closedKlines == null || closedKlines.Count < 10 || calculationRefPrice <= 0)
@@ -96,10 +97,7 @@ namespace CryptoSense.Application.Services
                 return fail with { SkipReason = "SKIP_INSUFFICIENT_DATA" };
             }
 
-            // 1. 50 closed 15m candles
             var k50 = closedKlines.TakeLast(Math.Min(50, closedKlines.Count)).ToList();
-
-            // 2. Swing fractal ±2
             var swingHighs = new List<decimal>();
             var swingLows = new List<decimal>();
             for (int i = 2; i < k50.Count - 2; i++)
@@ -123,30 +121,23 @@ namespace CryptoSense.Application.Services
             decimal signalSwingHigh = swingHighs.LastOrDefault(h => h > calculationRefPrice);
             if (signalSwingHigh == 0) signalSwingHigh = k50.Max(k => k.High);
 
-            // 3. Previous day high/low
             var yesterdayUtc = DateTime.UtcNow.Date.AddDays(-1);
             var prevDayKlines = closedKlines.Where(k => k.Time.Date == yesterdayUtc).ToList();
             decimal prevDayHigh = prevDayKlines.Count > 0 ? prevDayKlines.Max(k => k.High) : 0m;
             decimal prevDayLow = prevDayKlines.Count > 0 ? prevDayKlines.Min(k => k.Low) : 0m;
 
-            // 4. UTC VWAP
-            decimal utcVwap = vwap;
-
-            // 5. Gather raw levels: swing fractal ±2, prev day high/low, UTC VWAP. Başqa səviyyə yox.
             var rawLevels = new List<decimal>();
             rawLevels.AddRange(swingHighs);
             rawLevels.AddRange(swingLows);
             if (prevDayHigh > 0) rawLevels.Add(prevDayHigh);
             if (prevDayLow > 0) rawLevels.Add(prevDayLow);
-            if (utcVwap > 0) rawLevels.Add(utcVwap);
+            if (vwap > 0) rawLevels.Add(vwap);
 
-            // 6. Cluster 0.15%
             var clusters = new List<decimal>();
             if (rawLevels.Count > 0)
             {
                 var sorted = rawLevels.OrderBy(x => x).ToList();
                 var currentCluster = new List<decimal> { sorted[0] };
-
                 for (int i = 1; i < sorted.Count; i++)
                 {
                     decimal clusterAvg = currentCluster.Average();
@@ -166,213 +157,59 @@ namespace CryptoSense.Application.Services
                 }
             }
 
-            // 7. Offset = clamp(0.15*ATR%, 0.05%, 0.20%)
             decimal atrPct = (atr14 > 0 && calculationRefPrice > 0) ? (atr14 / calculationRefPrice) * 100m : 1.0m;
-            decimal offsetPct = Math.Clamp(0.15m * atrPct, 0.05m, 0.20m);
-            decimal offsetDist = calculationRefPrice * (offsetPct / 100m);
-
             fail = new SrTargetResult(false, null, 0, 0, 0, 0, 0, atrPct, signalSwingLow, signalSwingHigh, clusters);
 
-            if (direction == SignalDirection.Buy) // LONG
+            decimal slPct, tp1Pct;
+            if (timeframe == "4h")
             {
-                // LONG TP1 = nearest resistance - offset
-                var resistances = clusters.Where(c => c > calculationRefPrice).OrderBy(c => c).ToList();
-                if (resistances.Count == 0)
-                {
-                    return fail with { SkipReason = "SKIP_TP_FAR (Müqavimət klasteri tapılmadı)" };
-                }
-
-                decimal nearestResistance = resistances[0];
-                decimal srDistPct = ((nearestResistance - calculationRefPrice) / calculationRefPrice) * 100m;
-                if (srDistPct > 2.5m)
-                {
-                    return fail with { SkipReason = $"SKIP_TP_FAR (S/R məsafəsi {srDistPct:F2}% > 2.5% tavan)" };
-                }
-
-                decimal rawTp1 = nearestResistance - offsetDist;
-                decimal distPct = ((rawTp1 - calculationRefPrice) / calculationRefPrice) * 100m;
-
-                // TP1 dist: minimum 0.60%, maksimum 2.50%. 0.60%-dən yaxın TP1 getməsin.
-                decimal minTp1Dist = Math.Max(0.60m, 0.6m * atrPct);
-                decimal maxTp1Dist = Math.Min(2.50m, Math.Max(minTp1Dist, 1.8m * atrPct));
-                distPct = Math.Clamp(distPct, minTp1Dist, maxTp1Dist);
-                if (distPct > 2.5m)
-                {
-                    return fail with { SkipReason = $"SKIP_TP_FAR (TP1 dist {distPct:F2}% > 2.5% tavan)" };
-                }
-                decimal tp1 = calculationRefPrice * (1m + distPct / 100m);
-
-                // SL = invalidation swing - offset, <= 1.8%, böyükdürsə SKIP_SL_FAR
-                decimal rawSl = signalSwingLow - offsetDist;
-                decimal slDistPct = ((calculationRefPrice - rawSl) / calculationRefPrice) * 100m;
-                if (slDistPct > 1.8m)
-                {
-                    return fail with { SkipReason = $"SKIP_SL_FAR (SL məsafəsi {slDistPct:F2}% > 1.8% tavan)" };
-                }
-                if (slDistPct <= 0m)
-                {
-                    slDistPct = Math.Max(0.5m, offsetPct);
-                    rawSl = calculationRefPrice * (1m - slDistPct / 100m);
-                }
-                decimal sl = rawSl;
-                decimal riskR = calculationRefPrice - sl;
-
-                // S/R < 0.45% və TP1 < 0.8R -> SKIP_RR; R yalnız filter: TP1 >= 0.8R
-                decimal rrRatio = slDistPct > 0 ? (distPct / slDistPct) : 0m;
-                if (srDistPct < 0.45m && rrRatio < 0.8m)
-                {
-                    return fail with { SkipReason = $"SKIP_RR (S/R < 0.45% və R:R {rrRatio:F2} < 0.8R)" };
-                }
-                if (rrRatio < 0.8m)
-                {
-                    return fail with { SkipReason = $"SKIP_RR (R:R {rrRatio:F2} < 0.8R)" };
-                }
-
-                // TP2 / TP3 = YALNIZ real növbəti klasterlər olduqda. Klaster yoxdursa TP2/TP3 UYDURULMUR!
-                var nextClusters = resistances.Where(c => c > tp1).OrderBy(c => c).ToList();
-                decimal tp2 = 0m;
-                if (nextClusters.Count > 0)
-                {
-                    decimal cDist = ((nextClusters[0] - calculationRefPrice) / calculationRefPrice) * 100m;
-                    if (cDist > distPct + 0.20m && cDist <= 3.50m)
-                    {
-                        decimal candTp2 = nextClusters[0] - offsetDist;
-                        if (candTp2 > tp1)
-                        {
-                            tp2 = candTp2;
-                        }
-                    }
-                }
-
-                decimal tp3 = 0m;
-                if (tp2 > 0m && nextClusters.Count > 1)
-                {
-                    decimal cDist3 = ((nextClusters[1] - calculationRefPrice) / calculationRefPrice) * 100m;
-                    decimal tp2DistPct = ((tp2 - calculationRefPrice) / calculationRefPrice) * 100m;
-                    if (cDist3 > tp2DistPct + 0.20m && cDist3 <= 5.0m)
-                    {
-                        decimal candTp3 = nextClusters[1] - offsetDist;
-                        if (candTp3 > tp2)
-                        {
-                            tp3 = candTp3;
-                        }
-                    }
-                }
-
-                return new SrTargetResult(
-                    Success: true,
-                    SkipReason: null,
-                    TakeProfit1: tp1,
-                    TakeProfit2: tp2,
-                    TakeProfit3: tp3,
-                    StopLoss: sl,
-                    InitialRiskR: riskR,
-                    AtrPercent: atrPct,
-                    SignalSwingLow: signalSwingLow,
-                    SignalSwingHigh: signalSwingHigh,
-                    Clusters: clusters
-                );
+                // 4h siqnal: SL = 1.0 * ATR(4h), cap min 1.00% max 2.50%; TP1 = 1.5 * ATR(4h), cap min 1.50% max 3.50%
+                slPct = Math.Clamp(1.0m * atrPct, 1.00m, 2.50m);
+                tp1Pct = Math.Clamp(1.5m * atrPct, 1.50m, 3.50m);
             }
-            else // SHORT
+            else // 1h (default)
             {
-                // SHORT TP1 = nearest support + offset
-                var supports = clusters.Where(c => c < calculationRefPrice).OrderByDescending(c => c).ToList();
-                if (supports.Count == 0)
-                {
-                    return fail with { SkipReason = "SKIP_TP_FAR (Dəstək klasteri tapılmadı)" };
-                }
-
-                decimal nearestSupport = supports[0];
-                decimal srDistPct = ((calculationRefPrice - nearestSupport) / calculationRefPrice) * 100m;
-                if (srDistPct > 2.5m)
-                {
-                    return fail with { SkipReason = $"SKIP_TP_FAR (S/R məsafəsi {srDistPct:F2}% > 2.5% tavan)" };
-                }
-
-                decimal rawTp1 = nearestSupport + offsetDist;
-                decimal distPct = ((calculationRefPrice - rawTp1) / calculationRefPrice) * 100m;
-
-                // TP1 dist: minimum 0.60%, maksimum 2.50%. 0.60%-dən yaxın TP1 getməsin.
-                decimal minTp1Dist = Math.Max(0.60m, 0.6m * atrPct);
-                decimal maxTp1Dist = Math.Min(2.50m, Math.Max(minTp1Dist, 1.8m * atrPct));
-                distPct = Math.Clamp(distPct, minTp1Dist, maxTp1Dist);
-                if (distPct > 2.5m)
-                {
-                    return fail with { SkipReason = $"SKIP_TP_FAR (TP1 dist {distPct:F2}% > 2.5% tavan)" };
-                }
-                decimal tp1 = calculationRefPrice * (1m - distPct / 100m);
-
-                // SL = invalidation swing + offset, <= 1.8%, böyükdürsə SKIP_SL_FAR
-                decimal rawSl = signalSwingHigh + offsetDist;
-                decimal slDistPct = ((rawSl - calculationRefPrice) / calculationRefPrice) * 100m;
-                if (slDistPct > 1.8m)
-                {
-                    return fail with { SkipReason = $"SKIP_SL_FAR (SL məsafəsi {slDistPct:F2}% > 1.8% tavan)" };
-                }
-                if (slDistPct <= 0m)
-                {
-                    slDistPct = Math.Max(0.5m, offsetPct);
-                    rawSl = calculationRefPrice * (1m + slDistPct / 100m);
-                }
-                decimal sl = rawSl;
-                decimal riskR = sl - calculationRefPrice;
-
-                // S/R < 0.45% və TP1 < 0.8R -> SKIP_RR; R yalnız filter: TP1 >= 0.8R
-                decimal rrRatio = slDistPct > 0 ? (distPct / slDistPct) : 0m;
-                if (srDistPct < 0.45m && rrRatio < 0.8m)
-                {
-                    return fail with { SkipReason = $"SKIP_RR (S/R < 0.45% və R:R {rrRatio:F2} < 0.8R)" };
-                }
-                if (rrRatio < 0.8m)
-                {
-                    return fail with { SkipReason = $"SKIP_RR (R:R {rrRatio:F2} < 0.8R)" };
-                }
-
-                // TP2 / TP3 = YALNIZ real növbəti klasterlər olduqda. Klaster yoxdursa TP2/TP3 UYDURULMUR!
-                var nextClusters = supports.Where(c => c < tp1).OrderByDescending(c => c).ToList();
-                decimal tp2 = 0m;
-                if (nextClusters.Count > 0)
-                {
-                    decimal cDist = ((calculationRefPrice - nextClusters[0]) / calculationRefPrice) * 100m;
-                    if (cDist > distPct + 0.20m && cDist <= 3.50m)
-                    {
-                        decimal candTp2 = nextClusters[0] + offsetDist;
-                        if (candTp2 < tp1)
-                        {
-                            tp2 = candTp2;
-                        }
-                    }
-                }
-
-                decimal tp3 = 0m;
-                if (tp2 > 0m && nextClusters.Count > 1)
-                {
-                    decimal cDist3 = ((calculationRefPrice - nextClusters[1]) / calculationRefPrice) * 100m;
-                    decimal tp2DistPct = ((calculationRefPrice - tp2) / calculationRefPrice) * 100m;
-                    if (cDist3 > tp2DistPct + 0.20m && cDist3 <= 5.0m)
-                    {
-                        decimal candTp3 = nextClusters[1] + offsetDist;
-                        if (candTp3 < tp2)
-                        {
-                            tp3 = candTp3;
-                        }
-                    }
-                }
-
-                return new SrTargetResult(
-                    Success: true,
-                    SkipReason: null,
-                    TakeProfit1: tp1,
-                    TakeProfit2: tp2,
-                    TakeProfit3: tp3,
-                    StopLoss: sl,
-                    InitialRiskR: riskR,
-                    AtrPercent: atrPct,
-                    SignalSwingLow: signalSwingLow,
-                    SignalSwingHigh: signalSwingHigh,
-                    Clusters: clusters
-                );
+                // 1h siqnal: SL = 1.0 * ATR(1h), cap min 0.70% max 1.50%; TP1 = 1.5 * ATR(1h), cap min 1.10% max 2.20%
+                slPct = Math.Clamp(1.0m * atrPct, 0.70m, 1.50m);
+                tp1Pct = Math.Clamp(1.5m * atrPct, 1.10m, 2.20m);
             }
+
+            // R:R = |TP1 - Entry| / |Entry - SL|
+            decimal rrRatio = slPct > 0 ? (tp1Pct / slPct) : 0m;
+            if (rrRatio < 1.30m)
+            {
+                Console.WriteLine($"[SignalEngine] R:R filter blocked (R:R {rrRatio:F2} < 1.30)");
+                return fail with { SkipReason = "R:R filter blocked" };
+            }
+
+            decimal tp1 = direction == SignalDirection.Buy
+                ? calculationRefPrice * (1m + tp1Pct / 100m)
+                : calculationRefPrice * (1m - tp1Pct / 100m);
+
+            decimal sl = direction == SignalDirection.Buy
+                ? calculationRefPrice * (1m - slPct / 100m)
+                : calculationRefPrice * (1m + slPct / 100m);
+
+            decimal riskR = Math.Abs(calculationRefPrice - sl);
+
+            // 1h-də TP2/TP3 yox. Yalnız TP1 + SL.
+            // 4h-də uzaq TP3 ilkin kartda yox.
+            decimal tp2 = 0m;
+            decimal tp3 = 0m;
+
+            return new SrTargetResult(
+                Success: true,
+                SkipReason: null,
+                TakeProfit1: tp1,
+                TakeProfit2: tp2,
+                TakeProfit3: tp3,
+                StopLoss: sl,
+                InitialRiskR: riskR,
+                AtrPercent: atrPct,
+                SignalSwingLow: signalSwingLow,
+                SignalSwingHigh: signalSwingHigh,
+                Clusters: clusters
+            );
         }
 
         public async Task<BtcMarketCompass> GetBtcCompassAsync()
@@ -502,10 +339,28 @@ namespace CryptoSense.Application.Services
             }
         }
 
-        public async Task<FuturesSignal> AnalyzeCoinAsync(string symbol, string timeframe = "15m", bool isLiveScan = false)
+        public async Task<FuturesSignal> AnalyzeCoinAsync(string symbol, string timeframe = "1h", bool isLiveScan = false)
         {
             symbol = symbol.ToUpper();
             if (!symbol.EndsWith("USDT")) symbol += "USDT";
+
+            if (timeframe == "15m")
+            {
+                var now = DateTime.UtcNow;
+                return new FuturesSignal
+                {
+                    Symbol = symbol,
+                    Timeframe = timeframe,
+                    Direction = SignalDirection.Buy,
+                    SignalType = "GÖZLƏMƏ ⚪",
+                    Status = SignalStatus.Open,
+                    OutcomeStatus = "GÖZLƏMƏ ⚪",
+                    GeneratedAt = now,
+                    ExpiryTimeUtc = now.AddMinutes(90),
+                    TimestampFormatted = CryptoSense.Domain.Common.TimeHelper.NowFormatted,
+                    AnalysisReasons = new List<string> { "15m zaman kəsiyi deaktiv edilib (Yalnız 1h və 4h aktivdir)." }
+                };
+            }
 
             var klines = await _marketData.GetKlinesAsync(symbol, timeframe, 100);
             if (klines.Count < 35)
@@ -528,13 +383,9 @@ namespace CryptoSense.Application.Services
                 var candleAge = DateTime.UtcNow - candleCloseTime;
                 var maxLiveDelay = timeframe switch
                 {
-                    "1m" => TimeSpan.FromSeconds(90),
-                    "3m" => TimeSpan.FromSeconds(90),
-                    "5m" => TimeSpan.FromSeconds(90),
-                    "15m" => TimeSpan.FromSeconds(90),
                     "1h" => TimeSpan.FromMinutes(15),
                     "4h" => TimeSpan.FromMinutes(30),
-                    _ => TimeSpan.FromSeconds(90)
+                    _ => TimeSpan.FromMinutes(15)
                 };
 
                 if (candleAge > maxLiveDelay)
@@ -775,11 +626,33 @@ namespace CryptoSense.Application.Services
                 if (isAltcoin && !btcConfirmsShort && direction == SignalDirection.Sell) reasons.Add("BTC rejim struktur uyğunsuzluğu səbəbilə altcoin SHORT-u bloklandı");
             }
 
+            if (timeframe == "1h" && direction == SignalDirection.Buy && determinedType.Contains("LONG"))
+            {
+                try
+                {
+                    var klines4h = await _marketData.GetKlinesAsync(symbol, "4h", 40);
+                    if (klines4h.Count >= 20)
+                    {
+                        var closed4h = klines4h.Count >= 2 ? klines4h.Take(klines4h.Count - 1).ToList() : klines4h;
+                        var ind4h = _indicatorEngine.CalculateIndicators(closed4h);
+                        bool is4hStrongShort = (ind4h.SuperTrendVote == IndicatorVote.Bearish && ind4h.ConfluenceScore <= 35m) ||
+                                               (closed4h.Last().Close < ind4h.Ema50 && ind4h.Ema20 < ind4h.Ema50 && ind4h.SuperTrendVote == IndicatorVote.Bearish);
+                        if (is4hStrongShort)
+                        {
+                            determinedType = "GÖZLƏMƏ ⚪";
+                            confidence = 50;
+                            reasons.Add("1h LONG, 4h güclü SHORT olduğu üçün bloklandı");
+                        }
+                    }
+                }
+                catch { }
+            }
+
             decimal directionalConfluence = direction == SignalDirection.Sell 
                 ? Math.Round(100m - indicators.ConfluenceScore, 1) 
                 : Math.Round(indicators.ConfluenceScore, 1);
 
-            // Confluence < 78% siqnal YASAQ (#3 XRP 76.7% kimi hallar üçün qəti qapı)
+            // Confluence < 78% siqnal YASAQ
             if (directionalConfluence < 78.0m)
             {
                 determinedType = "GÖZLƏMƏ ⚪";
@@ -787,40 +660,14 @@ namespace CryptoSense.Application.Services
                 reasons.Add($"Confluence Filtri: {directionalConfluence:F1}% < 78.0% (Siqnal üçün minimal 78% tələbi ödənmir)");
             }
 
-            // Dinamik Həqiqi Volatillik və Riskin Təyini (15m-də SL eni max ~0.8–1.2% ATR cap)
-            decimal minTfMultiplier = timeframe switch
-            {
-                "1m" => 0.012m,
-                "3m" => 0.015m,
-                "5m" => 0.018m,
-                "15m" => 0.008m, // 15m minimal risk 0.8%
-                "1h" => 0.025m,
-                "4h" => 0.040m,
-                _ => 0.008m
-            };
-
-            decimal atr = indicators.Atr > 0 ? indicators.Atr : (calculationRefPrice * minTfMultiplier);
-            decimal minRisk = calculationRefPrice * minTfMultiplier;
-            decimal dynamicAtrRisk = atr * 1.2m;
-            decimal calculatedRisk = Math.Max(dynamicAtrRisk, minRisk);
-
-            // 15m SL cap: SL eni max ~0.8–1.2%
-            if (timeframe == "15m")
-            {
-                decimal maxSlRisk15m = calculationRefPrice * 0.012m; // Max 1.2%
-                if (calculatedRisk > maxSlRisk15m) calculatedRisk = maxSlRisk15m;
-            }
-
-            // 15m expiry: TP1 vurulmayıbsa max 90 dəq (6 şam), 180 dəq QADAĞA!
             int durationMinutes = timeframe switch
             {
-                "1m" => 30,
+                "1m" => 15,
                 "3m" => 60,
-                "5m" => 75,
-                "15m" => 90,  // Max 90 dəq (6 şam). 180 dəqiqə QƏTİ QADAĞANDIR!
-                "1h" => 480,  // 8 saat
+                "5m" => 60,
+                "15m" => 90,
                 "4h" => 1440, // 24 saat
-                _ => 90
+                _ => 480      // 1h üçün 8 saat (default)
             };
 
             bool isTradeSignal = determinedType.Contains("LONG") || determinedType.Contains("SHORT");
@@ -854,8 +701,8 @@ namespace CryptoSense.Application.Services
 
             if (isTradeSignal)
             {
-                // S/R Target and Exit calculation (Problem 2)
-                var srResult = CalculateSrTargetsAndStops(closedKlines, direction, calculationRefPrice, indicators.Atr, indicators.Vwap);
+                // S/R Target and Exit calculation (1h / 4h ATR Cap and R:R >= 1.30)
+                var srResult = CalculateSrTargetsAndStops(closedKlines, direction, calculationRefPrice, indicators.Atr, indicators.Vwap, timeframe);
                 if (!srResult.Success)
                 {
                     return new FuturesSignal
@@ -892,12 +739,8 @@ namespace CryptoSense.Application.Services
                 }
 
                 newSignal.TakeProfit1 = RoundToCoinPrecision(calculationRefPrice, srResult.TakeProfit1);
-                newSignal.TakeProfit2 = (srResult.TakeProfit2 > 0 && srResult.TakeProfit2 != srResult.TakeProfit1)
-                    ? RoundToCoinPrecision(calculationRefPrice, srResult.TakeProfit2)
-                    : 0m;
-                newSignal.TakeProfit3 = (srResult.TakeProfit3 > 0 && srResult.TakeProfit3 != srResult.TakeProfit2 && srResult.TakeProfit3 != srResult.TakeProfit1)
-                    ? RoundToCoinPrecision(calculationRefPrice, srResult.TakeProfit3)
-                    : 0m;
+                newSignal.TakeProfit2 = 0m;
+                newSignal.TakeProfit3 = 0m;
                 newSignal.StopLoss = RoundToCoinPrecision(calculationRefPrice, srResult.StopLoss);
                 newSignal.InitialRiskR = srResult.InitialRiskR;
                 newSignal.AtrPercent = srResult.AtrPercent;

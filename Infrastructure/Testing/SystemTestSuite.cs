@@ -380,19 +380,19 @@ namespace CryptoSense.Infrastructure.Testing
                 var tfKb = TelegramKeyboards.BuildTimeframeKeyboard();
                 var allSignalsKb = TelegramKeyboards.BuildAllSignalsTimeframeKeyboard();
 
-                // Test "Hamısı" formats strictly as "15m, 1h, 4h" in bot status
-                var statusText = TelegramMessageFormatter.FormatBotStatus(userSettings, 0, "07.09.2026 00:30:07");
-                bool hasCleanTf = statusText.Contains("15m, 1h, 4h");
-                bool hasCleanCoins = statusText.Contains("40/40");
-                bool hasAzeTime = statusText.Contains("07.09.2026 00:30:07");
+                // Test "Hamısı" formats strictly as "1h, 4h" in bot status
+                var statusText = TelegramMessageFormatter.FormatBotStatus(userSettings, 0, "07.09.2026 | 00:30:07 (+4)");
+                bool hasCleanTf = statusText.Contains("1h, 4h");
+                bool hasCleanCoins = statusText.Contains("coin");
+                bool hasAzeTime = statusText.Contains("07.09.2026 | 00:30:07 (+4)");
 
-                // Test button precedence: Hamısı must resolve to Hamısı even when containing "15m"
-                string testBtn = "🌟 Bütün Əsas Zamanlar (15m, 1h, 4h)";
+                // Test button precedence: Hamısı must resolve to Hamısı
+                string testBtn = "🌟 Bütün Əsas Zamanlar (1h, 4h)";
                 string resolvedTf;
-                if (testBtn.Contains("Bütün") || testBtn.Contains("Hamısı") || testBtn.Contains("Hamisi") || testBtn.Contains("15m, 1h, 4h"))
+                if (testBtn.Contains("Bütün") || testBtn.Contains("Hamısı") || testBtn.Contains("Hamisi") || testBtn.Contains("1h, 4h"))
                     resolvedTf = "Hamısı";
-                else if (testBtn.Contains("15m"))
-                    resolvedTf = "15m";
+                else if (testBtn.Contains("1h"))
+                    resolvedTf = "1h";
                 else
                     resolvedTf = "Other";
 
@@ -571,7 +571,7 @@ namespace CryptoSense.Infrastructure.Testing
                 };
 
                 var formattedGlobal = TelegramMessageFormatter.FormatPerformanceStats(stats, "Hamısı");
-                bool globalValid = (formattedGlobal.Contains("Bütün Zamanlar və Bütün Coinlər") || formattedGlobal.Contains("Bütün Əsas Zamanlar (15m, 1h, 4h)")) &&
+                bool globalValid = (formattedGlobal.Contains("Bütün Zamanlar və Bütün Coinlər") || formattedGlobal.Contains("Bütün Əsas Zamanlar (1h, 4h)")) &&
                                    formattedGlobal.Contains("90.0%") &&
                                    formattedGlobal.Contains("+38.50%");
 

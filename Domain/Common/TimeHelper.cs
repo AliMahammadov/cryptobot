@@ -40,10 +40,11 @@ namespace CryptoSense.Domain.Common
 
         public static string FormatAz(this DateTime dt)
         {
+            if (dt == default) return "Hələ yoxdur";
             var azTime = dt.Kind == DateTimeKind.Utc ? dt.ToAzerbaijanTime() : dt;
-            return azTime.ToString("dd.MM.yyyy | HH:mm:ss");
+            return azTime.ToString("dd.MM.yyyy | HH:mm:ss (+4)");
         }
 
-        public static string NowFormatted => NowAz.ToString("dd.MM.yyyy | HH:mm:ss");
+        public static string NowFormatted => NowAz.ToString("dd.MM.yyyy | HH:mm:ss (+4)");
     }
 }

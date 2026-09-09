@@ -44,6 +44,8 @@ namespace CryptoSense.Worker
         private static readonly ConcurrentDictionary<string, DateTime> _coinCooldowns = new();
         private static readonly ConcurrentDictionary<string, byte> _coinActiveLocks = new();
         private static readonly ConcurrentDictionary<string, DateTime> _lastVolatilityAlertSent = new();
+        private static readonly ConcurrentDictionary<string, DateTime> _lastSymbolAlertTime = new();
+        private static readonly object _heartbeatLock = new();
         private static readonly SemaphoreSlim _signalDispatchLock = new(1, 1);
         private static DateTime _lastDailyReportDateUtc = DateTime.MinValue;
 
@@ -56,6 +58,7 @@ namespace CryptoSense.Worker
             _coinCooldowns.Clear();
             _lastAlertSent.Clear();
             _lastVolatilityAlertSent.Clear();
+            _lastSymbolAlertTime.Clear();
             _signalOutcomeSemaphores.Clear();
             _sentOutcomeDeduplication.Clear();
             _lastPriceUpdateHandled.Clear();
@@ -301,10 +304,10 @@ namespace CryptoSense.Worker
                     ? (sig.InitialRiskR / sig.EntryPrice) * 100m
                     : (Math.Abs(sig.EntryPrice - sig.StopLoss) / (sig.EntryPrice > 0 ? sig.EntryPrice : 1m)) * 100m;
                 decimal atrPct = sig.AtrPercent > 0 ? sig.AtrPercent : 1.0m;
-                decimal beTrigger = Math.Max(0.55m * riskRPct, 0.7m * atrPct);
+                decimal beTrigger = (sig.Timeframe == "4h") ? 0.70m : 0.50m;
 
-                // Problem 6 & Qızıl Qayda: BE stopu çəksin, treydi bağlamasın!
-                // Tetik MFE >= max(0.55R, 0.7*ATR%) -> SL = Entry + side*0.12%. Treyd AÇIQ qalır!
+                // Problem 6 & Qayda: MFE >= 0.50% (1h) / 0.70% (4h) -> SL girise (+0.12% bufer).
+                // MFE serti odenibse SL-e getmek bug-dur — BE o tick-de yerdeyissin derhal! Treyd ACIQ qalir!
                 if (!sig.BreakevenTriggered && !sig.Tp1Notified && mfe >= beTrigger)
                 {
                     sig.BreakevenTriggered = true;
@@ -480,8 +483,18 @@ namespace CryptoSense.Worker
                             sig.RealizedProfitPercent += (sig.RemainingPositionRatio * exitPnl);
                             sig.RemainingPositionRatio = 0m;
                             sig.ResultPercent = Math.Round(sig.RealizedProfitPercent - 0.10m, 2);
-                            sig.Status = (sig.ResultPercent >= 0) ? SignalStatus.Success : SignalStatus.Failed;
-                            sig.OutcomeStatus = "Qorunmuş Breakeven ilə Bağlandı (BE +0.12% bufer) ✅";
+
+                            // BE xalis < +0.20% qələbə SAYILMASIN (NEUTRAL)
+                            if (sig.ResultPercent < 0.20m)
+                            {
+                                sig.Status = SignalStatus.Neutral;
+                                sig.OutcomeStatus = "Qorunmuş Breakeven ilə Bağlandı (BE NEYTRAL) ⚪";
+                            }
+                            else
+                            {
+                                sig.Status = SignalStatus.Success;
+                                sig.OutcomeStatus = "Qorunmuş Breakeven ilə Bağlandı (BE +0.12% bufer) ✅";
+                            }
 
                             await unitOfWork.Signals.UpdateAsync(sig);
                             await unitOfWork.SaveChangesAsync(stoppingToken);
@@ -489,7 +502,8 @@ namespace CryptoSense.Worker
                             string dedupKey = $"{sig.Id}_BE";
                             if (_sentOutcomeDeduplication.TryAdd(dedupKey, DateTime.UtcNow))
                             {
-                                if (sig.SignalAlertSent) await _telegramService.SendOutcomeAlertAsync(sig, "Breakeven (+0.12% bufer ilə Qorundu)", exitPrice, sig.ResultPercent.Value);
+                                string beOutcomeText = sig.ResultPercent < 0.20m ? "Breakeven (NEYTRAL)" : "Breakeven (+0.12% bufer ilə Qorundu)";
+                                if (sig.SignalAlertSent) await _telegramService.SendOutcomeAlertAsync(sig, beOutcomeText, exitPrice, sig.ResultPercent.Value);
                             }
                         }
                         else
@@ -710,8 +724,18 @@ namespace CryptoSense.Worker
                             sig.RealizedProfitPercent += (sig.RemainingPositionRatio * exitPnl);
                             sig.RemainingPositionRatio = 0m;
                             sig.ResultPercent = Math.Round(sig.RealizedProfitPercent - 0.10m, 2);
-                            sig.Status = (sig.ResultPercent >= 0) ? SignalStatus.Success : SignalStatus.Failed;
-                            sig.OutcomeStatus = "Qorunmuş Breakeven ilə Bağlandı (BE +0.12% bufer) ✅";
+
+                            // BE xalis < +0.20% qələbə SAYILMASIN (NEUTRAL)
+                            if (sig.ResultPercent < 0.20m)
+                            {
+                                sig.Status = SignalStatus.Neutral;
+                                sig.OutcomeStatus = "Qorunmuş Breakeven ilə Bağlandı (BE NEYTRAL) ⚪";
+                            }
+                            else
+                            {
+                                sig.Status = SignalStatus.Success;
+                                sig.OutcomeStatus = "Qorunmuş Breakeven ilə Bağlandı (BE +0.12% bufer) ✅";
+                            }
 
                             await unitOfWork.Signals.UpdateAsync(sig);
                             await unitOfWork.SaveChangesAsync(stoppingToken);
@@ -719,7 +743,8 @@ namespace CryptoSense.Worker
                             string dedupKey = $"{sig.Id}_BE";
                             if (_sentOutcomeDeduplication.TryAdd(dedupKey, DateTime.UtcNow))
                             {
-                                if (sig.SignalAlertSent) await _telegramService.SendOutcomeAlertAsync(sig, "Breakeven (+0.12% bufer ilə Qorundu)", exitPrice, sig.ResultPercent.Value);
+                                string beOutcomeText = sig.ResultPercent < 0.20m ? "Breakeven (NEYTRAL)" : "Breakeven (+0.12% bufer ilə Qorundu)";
+                                if (sig.SignalAlertSent) await _telegramService.SendOutcomeAlertAsync(sig, beOutcomeText, exitPrice, sig.ResultPercent.Value);
                             }
                         }
                         else
@@ -1078,9 +1103,8 @@ namespace CryptoSense.Worker
                     {
                         activeTimeframes.Add("1h");
                         activeTimeframes.Add("4h");
-                        activeTimeframes.Add("15m");
                     }
-                    else if (!string.IsNullOrWhiteSpace(s.Timeframe))
+                    else if (!string.IsNullOrWhiteSpace(s.Timeframe) && s.Timeframe != "15m")
                     {
                         activeTimeframes.Add(s.Timeframe);
                     }
@@ -1107,7 +1131,7 @@ namespace CryptoSense.Worker
             if (activeTimeframes.Count == 0)
             {
                 activeTimeframes.Add("1h");
-                activeTimeframes.Add("15m");
+                activeTimeframes.Add("4h");
             }
 
             // Qayda 1 & Qayda 2: Filter coins at the root level before launching any analysis
@@ -1165,14 +1189,14 @@ namespace CryptoSense.Worker
                             return;
                         }
 
-                        // Qızıl Qayda: Evaluate in order of institutional significance (1h -> 4h -> 15m)
-                        var prioritizedTfs = new[] { "1h", "4h", "15m" }
+                        // Qızıl Qayda: Evaluate in order of institutional significance (1h -> 4h)
+                        var prioritizedTfs = new[] { "1h", "4h" }
                             .Where(tf => activeTimeframes.Contains(tf))
                             .ToList();
 
                         if (prioritizedTfs.Count == 0)
                         {
-                            prioritizedTfs = new List<string> { "1h", "15m" };
+                            prioritizedTfs = new List<string> { "1h", "4h" };
                         }
 
                         foreach (var tf in prioritizedTfs)
@@ -1208,17 +1232,12 @@ namespace CryptoSense.Worker
                             }
 
                             // HIGH-CONVICTION TRADE DISPATCH (Faza A: Live WebSocket Price, Emit Lag & Stale Filter, Atomic Send-Success Numbering)
-                            if (signal.Confidence >= 75 && (signal.SignalType.Contains("LONG") || signal.SignalType.Contains("SHORT")))
+                            if (signal.Timeframe != "15m" && signal.Confidence >= 75 && (signal.SignalType.Contains("LONG") || signal.SignalType.Contains("SHORT")))
                             {
                                 var candleDuration = signal.Timeframe switch
                                 {
-                                    "1m" => TimeSpan.FromMinutes(1),
-                                    "3m" => TimeSpan.FromMinutes(3),
-                                    "5m" => TimeSpan.FromMinutes(5),
-                                    "15m" => TimeSpan.FromMinutes(15),
-                                    "1h" => TimeSpan.FromHours(1),
                                     "4h" => TimeSpan.FromHours(4),
-                                    _ => TimeSpan.FromMinutes(15)
+                                    _ => TimeSpan.FromHours(1)
                                 };
                                 var candleCloseUtc = signal.SourceCandleOpenTimeUtc + candleDuration;
 
@@ -1230,30 +1249,19 @@ namespace CryptoSense.Worker
                                     continue;
                                 }
 
-                                // (3) Subscribe, 1500ms ws_last age<=3000, yoxdursa 1x REST aggTrade
+                                // (3) Subscribe, 1500ms ws_last age<=2000, rest_fallback qadağandır
                                 _wsClient.Subscribe(signal.Symbol);
                                 var snap = _livePriceCache.GetSnapshot(signal.Symbol);
                                 var waitDeadline = DateTime.UtcNow.AddMilliseconds(1500);
-                                while ((snap == null || snap.DataAgeMs > 3000) && DateTime.UtcNow < waitDeadline)
+                                while ((snap == null || snap.DataAgeMs > 2000 || snap.Source == "rest_fallback") && DateTime.UtcNow < waitDeadline)
                                 {
                                     await Task.Delay(100, ct);
                                     snap = _livePriceCache.GetSnapshot(signal.Symbol);
                                 }
 
-                                if (snap == null || snap.DataAgeMs > 3000)
+                                if (snap == null || snap.DataAgeMs > 2000 || snap.Source == "rest_fallback")
                                 {
-                                    var restAgg = await marketData.GetLastAggTradeAsync(signal.Symbol);
-                                    if (restAgg.HasValue)
-                                    {
-                                        _livePriceCache.UpdateFromAggTrade(signal.Symbol, restAgg.Value.Price, restAgg.Value.ExchangeTsMs, isRestFallback: true);
-                                        snap = _livePriceCache.GetSnapshot(signal.Symbol);
-                                    }
-                                }
-
-                                // (4) yenə age>3000 → SKIP_STALE
-                                if (snap == null || snap.DataAgeMs > 3000)
-                                {
-                                    Console.WriteLine($"[MarketScanner] SKIP_STALE: {signal.Symbol} dataAgeMs={(snap?.DataAgeMs ?? -1)} > 3000ms");
+                                    Console.WriteLine($"[MarketScanner] SKIP_STALE_OR_REST: {signal.Symbol} dataAgeMs={(snap?.DataAgeMs ?? -1)} source={snap?.Source}");
                                     continue;
                                 }
 
@@ -1267,28 +1275,29 @@ namespace CryptoSense.Worker
                                 _livePriceCache.ResetSession(signal.Symbol);
 
                                 // (6) Risk:Reward & Target Gate:
-                                // Şərt yalnız: TP1 0.60–2.50%, R:R >= 0.8, TP2 != TP1 (yoxdursa TP2 də yox)
+                                // 1h: SL 0.70%-1.50%, TP1 1.10%-2.20%
+                                // 4h: SL 1.00%-2.50%, TP1 1.50%-3.50%
+                                // R:R >= 1.30
                                 decimal tp1Dist = Math.Abs(signal.TakeProfit1 - signal.EntryPrice);
                                 decimal slDist = Math.Abs(signal.StopLoss - signal.EntryPrice);
                                 decimal tp1Pct = signal.EntryPrice > 0 ? (tp1Dist / signal.EntryPrice) * 100m : 0m;
                                 decimal slPct = signal.EntryPrice > 0 ? (slDist / signal.EntryPrice) * 100m : 0m;
                                 decimal rr = slDist > 0 ? (tp1Dist / slDist) : 0m;
 
-                                if (tp1Pct < 0.60m)
+                                decimal minSlPct = signal.Timeframe == "4h" ? 1.00m : 0.70m;
+                                decimal maxSlPct = signal.Timeframe == "4h" ? 2.50m : 1.50m;
+                                decimal minTpPct = signal.Timeframe == "4h" ? 1.50m : 1.10m;
+                                decimal maxTpPct = signal.Timeframe == "4h" ? 3.50m : 2.20m;
+
+                                if (tp1Pct < minTpPct || tp1Pct > maxTpPct || slPct < minSlPct || slPct > maxSlPct)
                                 {
-                                    Console.WriteLine($"[MarketScanner] SKIP_TP_NEAR send=NO {signal.Symbol} tp1%={tp1Pct:F2}% < 0.60% floor");
+                                    Console.WriteLine($"[MarketScanner] CAP filter blocked: {signal.Symbol} tp1%={tp1Pct:F2}% sl%={slPct:F2}%");
                                     continue;
                                 }
 
-                                if (tp1Pct > 2.50m)
+                                if (rr < 1.30m)
                                 {
-                                    Console.WriteLine($"[MarketScanner] SKIP_TP_FAR send=NO {signal.Symbol} tp1%={tp1Pct:F2}% > 2.50% ceiling");
-                                    continue;
-                                }
-
-                                if (rr < 0.8m)
-                                {
-                                    Console.WriteLine($"[MarketScanner] SKIP_RR send=NO {signal.Symbol} tp1%={tp1Pct:F2}% sl%={slPct:F2}% rr={rr:F2}");
+                                    Console.WriteLine($"[MarketScanner] R:R filter blocked: {signal.Symbol} rr={rr:F2} < 1.30");
                                     continue;
                                 }
 
@@ -1313,40 +1322,49 @@ namespace CryptoSense.Worker
                                         break;
                                     }
 
-                                    var alertKey = $"{signal.Symbol}_{signal.Timeframe}_{signal.SourceCandleOpenTimeUtc:yyyyMMddHHmmss}";
-                                    if (!_lastAlertSent.ContainsKey(alertKey) && !signal.SignalAlertSent)
+                                    // Eyni Symbol + Side + Timeframe = həmin 1h/4h şamda BİR siqnal
+                                    var alertKey = $"{signal.Symbol}_{signal.Direction}_{signal.Timeframe}_{signal.SourceCandleOpenTimeUtc:yyyyMMddHHmmss}";
+                                    if (_lastAlertSent.ContainsKey(alertKey) || signal.SignalAlertSent)
                                     {
-                                        _lastAlertSent[alertKey] = DateTime.UtcNow;
+                                        break;
+                                    }
 
-                                        int n;
+                                    // 8–14 saniyə fərqlə iki kart QADAĞA (Minimum 15 dəqiqə fasilə)
+                                    if (_lastSymbolAlertTime.TryGetValue(signal.Symbol, out var lastSymTime) && (DateTime.UtcNow - lastSymTime).TotalMinutes < 15)
+                                    {
+                                        break;
+                                    }
+
+                                    int n;
+                                    lock (_sendLock)
+                                    {
+                                        n = _nextSignalNumber + 1;
+                                        signal.Number = n;
+                                    }
+
+                                    // Persist immediately to SQLite DB so it gets an ID before dispatching
+                                    if (signal.Id == 0)
+                                    {
+                                        await uow.Signals.AddAsync(signal);
+                                        await uow.SaveChangesAsync(ct);
+                                    }
+
+                                    var ok = await _telegramService.SendSignalAlertAsync(signal);
+                                    if (ok)
+                                    {
                                         lock (_sendLock)
                                         {
-                                            n = _nextSignalNumber + 1;
-                                            signal.Number = n;
+                                            _nextSignalNumber = n;
                                         }
-
-                                        // Persist immediately to SQLite DB so it gets an ID before dispatching
-                                        if (signal.Id == 0)
-                                        {
-                                            await uow.Signals.AddAsync(signal);
-                                            await uow.SaveChangesAsync(ct);
-                                        }
-
-                                        var ok = await _telegramService.SendSignalAlertAsync(signal);
-                                        if (ok)
-                                        {
-                                            lock (_sendLock)
-                                            {
-                                                _nextSignalNumber = n;
-                                            }
-                                            _coinActiveLocks.TryAdd(sym, 1);
-                                            break;
-                                        }
-                                        else
-                                        {
-                                            signal.Number = 0;
-                                            _coinActiveLocks.TryRemove(sym, out _);
-                                        }
+                                        _lastAlertSent[alertKey] = DateTime.UtcNow;
+                                        _lastSymbolAlertTime[signal.Symbol] = DateTime.UtcNow;
+                                        _coinActiveLocks.TryAdd(sym, 1);
+                                        break;
+                                    }
+                                    else
+                                    {
+                                        signal.Number = 0;
+                                        _coinActiveLocks.TryRemove(sym, out _);
                                     }
                                 }
                                 finally
@@ -1362,7 +1380,7 @@ namespace CryptoSense.Worker
                 });
             }
 
-            // Anti-Spam Hourly Status Heartbeat (Maximum once per 60 minutes with concrete reason)
+            // Anti-Spam Heartbeat (Minimum once per 30 minutes per chat with lock, real reason, persisted LastHeartbeatSentUtc)
             var nowUtc = DateTime.UtcNow;
             foreach (var kvp in TelegramBotService.UserPreferences)
             {
@@ -1373,32 +1391,46 @@ namespace CryptoSense.Worker
                 if (s.LastHeartbeatSentUtc == default)
                 {
                     s.LastHeartbeatSentUtc = nowUtc;
+                    TelegramBotService.SaveSettings();
                     continue;
                 }
 
                 var minutesSinceSignal = (nowUtc - s.LastSignalSentUtc).TotalMinutes;
                 var minutesSinceHeartbeat = (nowUtc - s.LastHeartbeatSentUtc).TotalMinutes;
 
-                if (minutesSinceSignal >= 60 && minutesSinceHeartbeat >= 60)
+                // Son 30 dəq-də siqnal gedibsə heartbeat yox.
+                // 30 dəq dolmayıbsa İKİNCİ yox.
+                if (minutesSinceSignal < 30 || minutesSinceHeartbeat < 30)
                 {
-                    s.LastHeartbeatSentUtc = nowUtc;
-                    string noSignalReason;
-                    if (s.Coins.Count == 0)
-                    {
-                        noSignalReason = "heç bir coin seçilməyib";
-                    }
-                    else if (_coinActiveLocks.Count >= MaxGlobalOpenPositions)
-                    {
-                        noSignalReason = "limit dolu (maksimum 5 açıq mövqe)";
-                    }
-                    else
-                    {
-                        noSignalReason = "ADX < 20 və ya Confluence < 78% (A+ tələbi ödənmir)";
-                    }
-
-                    var heartbeatMsg = TelegramMessageFormatter.FormatNoSignalReason(noSignalReason, nextCheckMinutes: 30);
-                    await _telegramService.SendMessageAsync(heartbeatMsg, chatId);
+                    continue;
                 }
+
+                lock (_heartbeatLock)
+                {
+                    if ((DateTime.UtcNow - s.LastHeartbeatSentUtc).TotalMinutes < 30)
+                    {
+                        continue;
+                    }
+                    s.LastHeartbeatSentUtc = DateTime.UtcNow;
+                    TelegramBotService.SaveSettings();
+                }
+
+                string noSignalReason;
+                if (s.Coins.Count == 0)
+                {
+                    noSignalReason = "heç bir coin seçilməyib";
+                }
+                else if (_coinActiveLocks.Count >= MaxGlobalOpenPositions)
+                {
+                    noSignalReason = "limit dolu (maksimum 5 açıq mövqe)";
+                }
+                else
+                {
+                    noSignalReason = "ADX / Confluence və ya 1h şam bağlanmayıb";
+                }
+
+                var heartbeatMsg = TelegramMessageFormatter.FormatNoSignalReason(noSignalReason, nextCheckMinutes: 30);
+                await _telegramService.SendMessageAsync(heartbeatMsg, chatId);
             }
 
             // Daily Report Dispatch (Once per day at Baku midnight = 20:00 UTC)

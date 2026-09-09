@@ -79,8 +79,7 @@ namespace CryptoSense.Infrastructure.Telegram
                 keyboard = new[]
                 {
                     new[] { new { text = "⏱ 1 Saat (1h) Siqnalları" }, new { text = "⏱ 4 Saat (4h) Siqnalları" } },
-                    new[] { new { text = "⏱ 15 Dəqiqə (15m) Siqnalları" } },
-                    new[] { new { text = "🌟 Bütün Əsas Zamanlar (15m, 1h, 4h)" } },
+                    new[] { new { text = "🌟 Bütün Əsas Zamanlar (1h, 4h)" } },
                     new[] { new { text = "⬅️ Əsas Menyu" } }
                 },
                 resize_keyboard = true,
@@ -95,8 +94,7 @@ namespace CryptoSense.Infrastructure.Telegram
                 keyboard = new[]
                 {
                     new[] { new { text = "⏱ 1 Saat (1h)" }, new { text = "⏱ 4 Saat (4h)" } },
-                    new[] { new { text = "⏱ 15 Dəqiqə (15m)" } },
-                    new[] { new { text = "🌟 Bütün Əsas Zamanlar (15m, 1h, 4h)" } },
+                    new[] { new { text = "🌟 Bütün Əsas Zamanlar (1h, 4h)" } },
                     new[] { new { text = "⬅️ Əsas Menyu" } }
                 },
                 resize_keyboard = true,

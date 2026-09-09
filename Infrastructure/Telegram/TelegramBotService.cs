@@ -406,19 +406,31 @@ namespace CryptoSense.Infrastructure.Telegram
             using var scope = _serviceProvider.CreateScope();
             var uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
 
+            // Strict Timeframe check: Only 1h, 4h
+            if (signal.Timeframe == "15m") return false;
+
+            decimal tp1DistCheck = Math.Abs(signal.TakeProfit1 - signal.EntryPrice);
+            decimal slDistCheck = Math.Abs(signal.StopLoss - signal.EntryPrice);
+            decimal rrCheck = slDistCheck > 0 ? (tp1DistCheck / slDistCheck) : 0m;
+            if (rrCheck < 1.30m)
+            {
+                Console.WriteLine($"[TelegramBotService] R:R filter blocked (R:R {rrCheck:F2} < 1.30)");
+                return false;
+            }
+
             if (!string.IsNullOrEmpty(specificChatId))
             {
                 var settings = GetSettings(specificChatId);
-                var userSigNum = signal.SignalNumber > 0 ? signal.SignalNumber : signal.UserSignalNumbers.GetOrAdd(specificChatId, _ => ++settings.AlertCounter);
-                settings.AlertCounter = Math.Max(settings.AlertCounter, userSigNum);
+                var userSigNum = signal.SignalNumber > 0 ? signal.SignalNumber : 1;
                 _signalUserNumberMap[$"{signal.Id}_{specificChatId}"] = userSigNum;
-                SaveSettings();
                 var msg = TelegramMessageFormatter.FormatSignalAlert(signal, userSigNum);
-                settings.LastSignalSentUtc = DateTime.UtcNow;
-                settings.LastHeartbeatSentUtc = DateTime.UtcNow;
                 bool sent = await SendMessageAsync(msg, specificChatId);
                 if (sent)
                 {
+                    settings.AlertCounter = Math.Max(settings.AlertCounter, userSigNum);
+                    settings.LastSignalSentUtc = DateTime.UtcNow;
+                    settings.LastHeartbeatSentUtc = DateTime.UtcNow;
+                    SaveSettings();
                     await uow.Signals.RecordDeliveryAsync(signal.Id, specificChatId, userSigNum);
                     signal.SignalAlertSent = true;
                     try
@@ -462,7 +474,7 @@ namespace CryptoSense.Infrastructure.Telegram
                 var settings = GetSettings(chatId);
                 if (!settings.IsActive) continue;
 
-                // Strict Timeframe check: Only 15m, 1h, 4h
+                // Strict Timeframe check: Only 1h, 4h
                 if (settings.Timeframe != "Hamısı" && settings.Timeframe != "Hamisi" && settings.Timeframe != signal.Timeframe)
                 {
                     continue;
@@ -477,17 +489,13 @@ namespace CryptoSense.Infrastructure.Telegram
                 // Strict Candle Freshness check: never deliver a signal whose closed candle is older than tolerance
                 var candleDuration = signal.Timeframe switch
                 {
-                    "15m" => TimeSpan.FromMinutes(15),
-                    "1h" => TimeSpan.FromHours(1),
                     "4h" => TimeSpan.FromHours(4),
-                    _ => TimeSpan.FromMinutes(15)
+                    _ => TimeSpan.FromHours(1)
                 };
                 var maxTolerance = signal.Timeframe switch
                 {
-                    "15m" => TimeSpan.FromSeconds(90),
-                    "1h" => TimeSpan.FromMinutes(15),
                     "4h" => TimeSpan.FromMinutes(30),
-                    _ => TimeSpan.FromSeconds(90)
+                    _ => TimeSpan.FromMinutes(15)
                 };
                 var candleCloseUtc = signal.SourceCandleOpenTimeUtc + candleDuration;
                 if (DateTime.UtcNow - candleCloseUtc > maxTolerance)
@@ -495,11 +503,11 @@ namespace CryptoSense.Infrastructure.Telegram
                     continue;
                 }
 
-                // Strict R:R Gate: R:R = (TP1 məsafəsi) / (SL məsafəsi). R:R < 0.8 isə send=NO
+                // Strict R:R Gate: R:R = (TP1 məsafəsi) / (SL məsafəsi). R:R < 1.30 isə send=NO
                 decimal tp1Dist = Math.Abs(signal.TakeProfit1 - signal.EntryPrice);
                 decimal slDist = Math.Abs(signal.StopLoss - signal.EntryPrice);
                 decimal rr = slDist > 0 ? (tp1Dist / slDist) : 0m;
-                if (rr < 0.8m)
+                if (rr < 1.30m)
                 {
                     continue;
                 }
@@ -530,16 +538,16 @@ namespace CryptoSense.Infrastructure.Telegram
                 var openCount = await uow.Signals.GetUserOpenSignalsCountAsync(chatId);
                 if (openCount >= 5) continue;
 
-                var userSigNum = signal.SignalNumber > 0 ? signal.SignalNumber : signal.UserSignalNumbers.GetOrAdd(chatId, _ => ++settings.AlertCounter);
-                settings.AlertCounter = Math.Max(settings.AlertCounter, userSigNum);
+                var userSigNum = signal.SignalNumber > 0 ? signal.SignalNumber : 1;
                 _signalUserNumberMap[$"{signal.Id}_{chatId}"] = userSigNum;
-                SaveSettings();
                 var msg = TelegramMessageFormatter.FormatSignalAlert(signal, userSigNum);
-                settings.LastSignalSentUtc = DateTime.UtcNow;
-                settings.LastHeartbeatSentUtc = DateTime.UtcNow;
                 bool sent = await SendMessageAsync(msg, chatId);
                 if (sent)
                 {
+                    settings.AlertCounter = Math.Max(settings.AlertCounter, userSigNum);
+                    settings.LastSignalSentUtc = DateTime.UtcNow;
+                    settings.LastHeartbeatSentUtc = DateTime.UtcNow;
+                    SaveSettings();
                     await uow.Signals.RecordDeliveryAsync(signal.Id, chatId, userSigNum);
                     anyDelivered = true;
                 }
@@ -770,7 +778,7 @@ namespace CryptoSense.Infrastructure.Telegram
             using var scope = _serviceProvider.CreateScope();
             var uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
 
-            var tfDisplay = (timeframe == "Hamısı" || timeframe == "Hamisi") ? "Bütün Əsas Zamanlar (15m, 1h, 4h)" : timeframe;
+            var tfDisplay = (timeframe == "Hamısı" || timeframe == "Hamisi") ? "1h, 4h" : timeframe;
             var userOpenSignals = await uow.Signals.GetUserOpenSignalsAsync(chatId);
             if (timeframe != "Hamısı" && timeframe != "Hamisi")
             {
@@ -1684,7 +1692,8 @@ namespace CryptoSense.Infrastructure.Telegram
             }
 
             // DIRECT TIMEFRAME PREFERENCE SELECTION
-            if (text == "🌟 Bütün Əsas Zamanlar (15m, 1h, 4h)" || 
+            if (text == "🌟 Bütün Əsas Zamanlar (1h, 4h)" ||
+                text == "🌟 Bütün Əsas Zamanlar (15m, 1h, 4h)" || 
                 text == "🌟 Bütün Zamanlar (Hamısı)" || 
                 text.Equals("Hamisi", StringComparison.OrdinalIgnoreCase) || 
                 text.Equals("Hamısı", StringComparison.OrdinalIgnoreCase) ||
@@ -1705,7 +1714,7 @@ namespace CryptoSense.Infrastructure.Telegram
                 SaveSettings();
                 var cleanList = string.Join(", ", userSettings.Coins.Select(c => c.Replace("USDT", "")));
                 var startMsg = $"✅ <b>Ticarət başladı</b>\n" +
-                               $"⏱ <b>Rejim:</b> <code>15m, 1h, 4h</code>\n" +
+                               $"⏱ <b>Rejim:</b> <code>1h, 4h</code>\n" +
                                $"🪙 <b>İzlənən:</b> {userSettings.Coins.Count} coin\n" +
                                $"<code>{cleanList}</code>";
                 await SendMessageAsync(startMsg, chatId, TelegramKeyboards.BuildUserKeyboard(userSettings, isAdmin));
@@ -1722,20 +1731,20 @@ namespace CryptoSense.Infrastructure.Telegram
                         TelegramKeyboards.BuildCoinSelectionKeyboard());
                     return;
                 }
-                userSettings.Timeframe = "15m";
+                userSettings.Timeframe = "1h";
                 userSettings.IsActive = true;
                 userSettings.LastResumeTime = DateTime.UtcNow;
                 SaveSettings();
                 var cleanList = string.Join(", ", userSettings.Coins.Select(c => c.Replace("USDT", "")));
                 var startMsg = $"✅ <b>Ticarət başladı</b>\n" +
-                               $"⏱ <b>Rejim:</b> <code>15m</code>\n" +
+                               $"⏱ <b>Rejim:</b> <code>1h</code> (15m deaktiv edilib)\n" +
                                $"🪙 <b>İzlənən:</b> {userSettings.Coins.Count} coin\n" +
                                $"<code>{cleanList}</code>";
                 await SendMessageAsync(startMsg, chatId, TelegramKeyboards.BuildUserKeyboard(userSettings, isAdmin));
-                await ScanUserCoinsInstantlyAsync(userSettings, chatId, "15m");
+                await ScanUserCoinsInstantlyAsync(userSettings, chatId, "1h");
                 return;
             }
-            else if (text == "⏱ 1 Saat (1h)" || text == "1h")
+            else if (text == "⏱ 1 Saat (1h) Siqnalları" || text == "⏱ 1 Saat (1h)" || text == "1h")
             {
                 if (userSettings.Coins.Count == 0)
                 {
@@ -1813,7 +1822,7 @@ namespace CryptoSense.Infrastructure.Telegram
 
                 string? lastTime = userSettings.LastSignalSentUtc == default 
                     ? null 
-                    : CryptoSense.Domain.Common.TimeHelper.ToAzerbaijanTime(userSettings.LastSignalSentUtc).ToString("dd.MM.yyyy HH:mm:ss");
+                    : CryptoSense.Domain.Common.TimeHelper.FormatAz(userSettings.LastSignalSentUtc);
                 var statusMsg = TelegramMessageFormatter.FormatBotStatus(userSettings, openCount, lastTime);
                 await SendMessageAsync(statusMsg, chatId, TelegramKeyboards.BuildUserKeyboard(userSettings, isAdmin));
                 return;
@@ -1830,7 +1839,7 @@ namespace CryptoSense.Infrastructure.Telegram
                     ? $"{userSettings.Coins.Count} coin ({string.Join(", ", userSettings.Coins.Select(c => c.Replace("USDT", "")))})"
                     : "Heç bir coin seçilməyib (0 coin)";
 
-                var tfDisplay = (userSettings.Timeframe == "Hamısı" || userSettings.Timeframe == "Hamisi") ? "15m, 1h, 4h" : userSettings.Timeframe;
+                var tfDisplay = (userSettings.Timeframe == "Hamısı" || userSettings.Timeframe == "Hamisi") ? "1h, 4h" : userSettings.Timeframe;
 
                 var greeting = $"👋 <b>Xoş gəldiniz, {telegramUsername}!</b>\n\n" +
                                $"🚀 <b>CryptoSense v2 — Peşəkar Fyuçers Siqnal və Bazar İntellekti Botu</b>\n" +
@@ -1842,7 +1851,7 @@ namespace CryptoSense.Infrastructure.Telegram
                                $"🔔 <b>Canlı Siqnallar:</b> <b>{(userSettings.IsActive ? "AKTİV 🟢" : "DAYANDIRILIB 🔴")}</b>\n\n" +
                                $"📌 <b>Əsas Funksiyalar:</b>\n" +
                                $"• <b>⭐ Mənim Coinlərim:</b> Yalnız seçdiyiniz coinləri izləyin və ticarətə başlayın.\n" +
-                               $"• <b>⚙️ Coin Seçimi:</b> Standart 40 coini seçin, yeni coin əlavə edin və ya siyahını tənzimləyin.\n" +
+                               $"• <b>⚙️ Coin Seçimi:</b> Seçilmiş coin siyahısını tənzimləyin və ya yeni coin əlavə edin.\n" +
                                $"• <b>🗑 Coin Sil:</b> İzləmək istəmədiyiniz coinləri siyahıdan çıxarın.\n" +
                                $"• <b>🧭 Bitcoin Kompası:</b> Canlı BTC trendi, RSI, EMA və Dominans (BTC.D) təhlili.\n" +
                                $"• <b>📊 Statistika:</b> Şəxsi əməliyyat performansınızı görün.\n" +
@@ -1886,7 +1895,7 @@ namespace CryptoSense.Infrastructure.Telegram
                 userSettings.LastResumeTime = DateTime.UtcNow;
                 SaveSettings();
 
-                var tfDisplay = (userSettings.Timeframe == "Hamısı" || userSettings.Timeframe == "Hamisi") ? "15m, 1h, 4h" : userSettings.Timeframe;
+                var tfDisplay = (userSettings.Timeframe == "Hamısı" || userSettings.Timeframe == "Hamisi") ? "1h, 4h" : userSettings.Timeframe;
                 var cleanList = string.Join(", ", userSettings.Coins.Select(c => c.Replace("USDT", "")));
 
                 var startMsg = $"✅ <b>Ticarət başladı</b>\n" +
@@ -1941,7 +1950,7 @@ namespace CryptoSense.Infrastructure.Telegram
                 {
                     // Regular User: ONLY personal stats from delivered signals
                     var stats = await signalEngine.GetUserPerformanceStatsAsync(chatId, userSettings.Timeframe, userSettings.Coins);
-                    var tfLabel = (userSettings.Timeframe == "Hamısı" || userSettings.Timeframe == "Hamisi") ? "15m, 1h, 4h" : userSettings.Timeframe;
+                    var tfLabel = (userSettings.Timeframe == "Hamısı" || userSettings.Timeframe == "Hamisi") ? "1h, 4h" : userSettings.Timeframe;
                     var msg = TelegramMessageFormatter.FormatPerformanceStats(stats, tfLabel);
                     await SendMessageAsync(msg, chatId, TelegramKeyboards.BuildUserKeyboard(userSettings, isAdmin));
                 }
@@ -1959,7 +1968,7 @@ namespace CryptoSense.Infrastructure.Telegram
 
                 var tfAskMsg = "⚡ <b>Seçilmiş Coinlər Üzrə Siqnal Axtarışı</b>\n\n" +
                                $"🪙 İzlənən: <b>{userSettings.Coins.Count} coin</b>\n" +
-                               "Hansı zaman aralığı üzrə 78%+ Confluence siqnalları axtarmaq istəyirsiniz?\n\n" +
+                               "Hansı zaman aralığı üzrə siqnalları axtarmaq istəyirsiniz?\n\n" +
                                "Aşağıdakı seçimlərdən birinə vurun:";
                 await SendMessageAsync(tfAskMsg, chatId, TelegramKeyboards.BuildAllSignalsTimeframeKeyboard());
                 return;
@@ -1979,7 +1988,7 @@ namespace CryptoSense.Infrastructure.Telegram
                 var prompt = "⭐ <b>Mənim Coinlərimlə Ticarət Sistemi</b>\n\n" +
                              $"🪙 <b>Ticarət Üçün Seçilmiş Coinləriniz ({userSettings.Coins.Count} coin):</b>\n" +
                              $"<code>{cleanList}</code>\n\n" +
-                             $"Cari rejim: <b>{(userSettings.IsActive ? "AKTİV 🟢" : "DAYANDIRILIB 🔴")}</b> | Cari Zaman: <b>{(userSettings.Timeframe == "Hamısı" ? "15m, 1h, 4h" : userSettings.Timeframe)}</b>\n\n" +
+                             $"Cari rejim: <b>{(userSettings.IsActive ? "AKTİV 🟢" : "DAYANDIRILIB 🔴")}</b> | Cari Zaman: <b>{(userSettings.Timeframe == "Hamısı" ? "1h, 4h" : userSettings.Timeframe)}</b>\n\n" +
                              "⏱ <b>Hansı zaman çərçivəsində ticarət/siqnal axınına başlamaq istəyirsiniz?</b>\n" +
                              "<i>Aşağıdakı zaman kəsiklərindən birini seçin:</i>";
 

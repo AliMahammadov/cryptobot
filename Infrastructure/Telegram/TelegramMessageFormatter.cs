@@ -26,10 +26,10 @@ namespace CryptoSense.Infrastructure.Telegram
             sb.AppendLine($"🎯 <b>Confluence Razılaşma Balı:</b> <b>{signal.ConfluenceScore.ToString("F1", CultureInfo.InvariantCulture)}%</b> (İndiqatorların razılığı)");
             sb.AppendLine($"💵 <b>Giriş (Entry):</b> ${signal.EntryPrice.ToString(CultureInfo.InvariantCulture)}");
             sb.AppendLine($"📡 <b>Mənbə:</b> <code>{signal.PriceSource}</code>");
-            sb.AppendLine($"⏱️ <b>ExchangeTs:</b> {signal.ExchangeTsMs} (DataAge: {signal.DataAgeMs}ms)");
+            sb.AppendLine($"⏱️ <b>DataAge:</b> {signal.DataAgeMs}ms");
             if (signal.CandleCloseTimeUtc != default)
             {
-                sb.AppendLine($"🕯️ <b>Şam bağlandı:</b> {signal.CandleCloseTimeUtc:HH:mm:ss} UTC");
+                sb.AppendLine($"🕯️ <b>Şam bağlandı:</b> {CryptoSense.Domain.Common.TimeHelper.FormatAz(signal.CandleCloseTimeUtc)}");
             }
             sb.AppendLine($"📰 <b>Xəbər Sentimenti:</b> {sentimentText}");
             sb.AppendLine("-----------------------------------");
@@ -41,13 +41,9 @@ namespace CryptoSense.Infrastructure.Telegram
 
             sb.AppendLine($"📍 <b>Giriş Zonası:</b> ${signal.EntryLow.ToString(CultureInfo.InvariantCulture)} - ${signal.EntryHigh.ToString(CultureInfo.InvariantCulture)}");
             sb.AppendLine($"🎯 <b>Hədəf 1 (TP1):</b> ${signal.TakeProfit1.ToString(CultureInfo.InvariantCulture)} (+{tp1Pct.ToString("F2", CultureInfo.InvariantCulture)}%)");
-            if (signal.TakeProfit2 > 0 && signal.TakeProfit2 != signal.TakeProfit1)
+            if (signal.Timeframe != "1h" && signal.TakeProfit2 > 0 && signal.TakeProfit2 != signal.TakeProfit1)
             {
                 sb.AppendLine($"🎯 <b>Hədəf 2 (TP2):</b> ${signal.TakeProfit2.ToString(CultureInfo.InvariantCulture)}");
-            }
-            if (signal.TakeProfit3 > 0 && signal.TakeProfit3 != signal.TakeProfit2 && signal.TakeProfit3 != signal.TakeProfit1)
-            {
-                sb.AppendLine($"🌟 <b>Hədəf 3 (TP3):</b> ${signal.TakeProfit3.ToString(CultureInfo.InvariantCulture)}");
             }
             sb.AppendLine($"⛔ <b>Stop Loss (SL):</b> ${signal.StopLoss.ToString(CultureInfo.InvariantCulture)} (-{slPct.ToString("F2", CultureInfo.InvariantCulture)}%)");
             sb.AppendLine($"⚖️ <b>Risk:Mükafat (R:R):</b> <b>{rr.ToString("F2", CultureInfo.InvariantCulture)}</b>");
@@ -57,27 +53,34 @@ namespace CryptoSense.Infrastructure.Telegram
 
         public static string FormatOutcomeAlert(FuturesSignal signal, int userSigNum, string outcomeType, decimal hitPrice, decimal profitPct)
         {
-            // Decisive outcome evaluation: Only TWO outcomes exist - UĞURLU ✅ or UĞURSUZ ❌
-            bool isExplicitFail = outcomeType.Contains("Stop Loss") || outcomeType.Contains("SL") || signal.Status == SignalStatus.Failed || profitPct < 0;
-            bool isExplicitWin = signal.Status == SignalStatus.Success || outcomeType.Contains("Hədəf") || outcomeType.Contains("TP") || outcomeType.Contains("Uğurlu") || outcomeType.Contains("Ugurlu") || outcomeType.Contains("Breakeven") || outcomeType.Contains("Qorundu") || signal.Tp1Notified || profitPct >= 0;
+            decimal netPnl = signal.NetResultPercent != 0 ? signal.NetResultPercent : profitPct;
+            decimal grossPnl = signal.GrossResultPercent != 0 ? signal.GrossResultPercent : (netPnl + 0.10m);
 
-            bool isWin = isExplicitWin && !isExplicitFail;
+            bool isNeutral = signal.Status == SignalStatus.Neutral || (outcomeType.Contains("Breakeven") && netPnl < 0.20m);
+            bool isExplicitFail = outcomeType.Contains("Stop Loss") || outcomeType.Contains("SL") || signal.Status == SignalStatus.Failed || (!isNeutral && profitPct < 0);
+            bool isExplicitWin = !isNeutral && (signal.Status == SignalStatus.Success || outcomeType.Contains("Hədəf") || outcomeType.Contains("TP") || outcomeType.Contains("Uğurlu") || outcomeType.Contains("Ugurlu") || (outcomeType.Contains("Breakeven") && netPnl >= 0.20m) || signal.Tp1Notified || profitPct >= 0);
+
+            bool isWin = isExplicitWin && !isExplicitFail && !isNeutral;
             if (outcomeType.Contains("Stop Loss") || outcomeType.Contains("SL"))
             {
                 isWin = false;
             }
 
-            if (!isWin && profitPct > 0)
+            if (!isWin && !isNeutral && profitPct > 0)
             {
                 profitPct = -Math.Abs(profitPct);
             }
 
-            var icon = isWin ? "🎯" : "⛔";
             var cleanSymbol = signal.Symbol.Replace("USDT", "");
             var directionStr = (signal.Direction == SignalDirection.Buy || signal.SignalType.Contains("LONG")) ? "LONG" : "SHORT";
 
             var sb = new StringBuilder();
-            if (outcomeType.Contains("Stop Loss") || outcomeType.Contains("SL") || !isWin)
+            if (isNeutral)
+            {
+                sb.AppendLine($"🎯 <b>#{userSigNum} NƏTİCƏ HESABATI (NEYTRAL ⚪)</b>");
+                sb.AppendLine($"📌 <b>#{userSigNum} nömrəli əməliyyat üzrə: Breakeven (+0.12% bufer ilə Qorundu - NEYTRAL) ⚪</b>");
+            }
+            else if (outcomeType.Contains("Stop Loss") || outcomeType.Contains("SL") || !isWin)
             {
                 sb.AppendLine($"⛔ <b>#{userSigNum} NƏTİCƏ HESABATI</b>");
                 sb.AppendLine($"📌 <b>#{userSigNum} nömrəli əməliyyat üzrə: {(outcomeType.Contains("Stop Loss") ? "Stop-Loss vurdu" : outcomeType)} (UĞURSUZ OLDU) ❌</b>");
@@ -100,9 +103,7 @@ namespace CryptoSense.Infrastructure.Telegram
             sb.AppendLine();
             sb.AppendLine($"🪙 <b>Cütlük:</b> {cleanSymbol} Futures ({directionStr} - {signal.Timeframe})");
             sb.AppendLine($"📍 <b>İlkin Giriş Qiyməti:</b> ${signal.EntryPrice.ToString(CultureInfo.InvariantCulture)}");
-            sb.AppendLine($"💵 <b>Bağlanış / Last:</b> ${hitPrice.ToString(CultureInfo.InvariantCulture)}");
-            decimal netPnl = signal.NetResultPercent != 0 ? signal.NetResultPercent : profitPct;
-            decimal grossPnl = signal.GrossResultPercent != 0 ? signal.GrossResultPercent : (netPnl + 0.10m);
+            sb.AppendLine($"💵 <b>Bağlanış / Last:</b> ${hitPrice.ToString(CultureInfo.InvariantCulture)} (DataAge: {signal.DataAgeMs}ms)");
             sb.AppendLine($"📊 <b>Gross PnL:</b> {(grossPnl >= 0 ? "+" : "")}{grossPnl.ToString("F2", CultureInfo.InvariantCulture)}%");
             sb.AppendLine($"💰 <b>Net PnL (fee -0.10%):</b> {(netPnl >= 0 ? "+" : "")}{netPnl.ToString("F2", CultureInfo.InvariantCulture)}%");
             sb.AppendLine($"📈 <b>MFE:</b> +{signal.MfePercent.ToString("F2", CultureInfo.InvariantCulture)}% | <b>MAE:</b> -{Math.Abs(signal.MaePercent).ToString("F2", CultureInfo.InvariantCulture)}%");
@@ -315,7 +316,7 @@ namespace CryptoSense.Infrastructure.Telegram
             }
             else
             {
-                sb.AppendLine("🌐 <b>Əhatə:</b> <code>Bütün Əsas Zamanlar (15m, 1h, 4h)</code>");
+                sb.AppendLine("🌐 <b>Əhatə:</b> <code>Bütün Əsas Zamanlar (1h, 4h)</code>");
             }
             sb.AppendLine("-----------------------------------");
             sb.AppendLine($"📌 <b>Ümumi Analizlər:</b> {stats.TotalSignals} ədəd");
@@ -430,7 +431,7 @@ namespace CryptoSense.Infrastructure.Telegram
             sb.AppendLine("ℹ️ <b>CryptoSense Sistem Statusu:</b>");
             sb.AppendLine("-----------------------------------");
             sb.AppendLine("🤖 <b>Skaner Vəziyyəti:</b> İşləyir 🟢 (24/7 Canlı Rejim)");
-            var commitHash = "1d817af";
+            var commitHash = "";
             try
             {
                 var envSha = Environment.GetEnvironmentVariable("RAILWAY_GIT_COMMIT_SHA")
@@ -441,29 +442,75 @@ namespace CryptoSense.Infrastructure.Telegram
                 }
                 else
                 {
-                    var headFile = System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, ".git", "refs", "heads", "main");
-                    if (System.IO.File.Exists(headFile))
+                    var searchDirs = new[] { AppDomain.CurrentDomain.BaseDirectory, Directory.GetCurrentDirectory() };
+                    foreach (var startDir in searchDirs)
                     {
-                        var hash = System.IO.File.ReadAllText(headFile).Trim();
-                        if (hash.Length >= 7) commitHash = hash.Substring(0, 7);
+                        var dir = new DirectoryInfo(startDir);
+                        while (dir != null)
+                        {
+                            var gitDir = Path.Combine(dir.FullName, ".git");
+                            if (Directory.Exists(gitDir))
+                            {
+                                var headPath = Path.Combine(gitDir, "HEAD");
+                                if (File.Exists(headPath))
+                                {
+                                    var headContent = File.ReadAllText(headPath).Trim();
+                                    if (headContent.StartsWith("ref: "))
+                                    {
+                                        var refSubPath = headContent.Substring(5).Trim().Replace('/', Path.DirectorySeparatorChar);
+                                        var refPath = Path.Combine(gitDir, refSubPath);
+                                        if (File.Exists(refPath))
+                                        {
+                                            var h = File.ReadAllText(refPath).Trim();
+                                            if (h.Length >= 7) { commitHash = h.Substring(0, 7); break; }
+                                        }
+                                        else
+                                        {
+                                            var packedRefs = Path.Combine(gitDir, "packed-refs");
+                                            if (File.Exists(packedRefs))
+                                            {
+                                                foreach (var line in File.ReadAllLines(packedRefs))
+                                                {
+                                                    if (line.EndsWith(refSubPath.Replace(Path.DirectorySeparatorChar, '/')))
+                                                    {
+                                                        var parts = line.Split(' ');
+                                                        if (parts[0].Length >= 7) { commitHash = parts[0].Substring(0, 7); break; }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                    else if (headContent.Length >= 7)
+                                    {
+                                        commitHash = headContent.Substring(0, 7);
+                                        break;
+                                    }
+                                }
+                            }
+                            if (!string.IsNullOrEmpty(commitHash)) break;
+                            dir = dir.Parent;
+                        }
+                        if (!string.IsNullOrEmpty(commitHash)) break;
                     }
                 }
             }
             catch { }
+            if (string.IsNullOrEmpty(commitHash))
+            {
+                commitHash = "0f93d25";
+            }
             sb.AppendLine($"📌 <b>Deploy Versiyası:</b> <code>v2.0 (Commit: {commitHash})</code>");
-            var tfDisplay = (settings.Timeframe == "Hamısı" || settings.Timeframe == "Hamisi") ? "15m, 1h, 4h" : settings.Timeframe;
+            var tfDisplay = (settings.Timeframe == "Hamısı" || settings.Timeframe == "Hamisi") ? "1h, 4h" : (settings.Timeframe == "15m" ? "1h" : settings.Timeframe);
             sb.AppendLine($"⏱ <b>Aktiv Rejim:</b> <code>{tfDisplay}</code>");
             string coinText;
             if (settings.Coins.Count == 0)
             {
-                coinText = "0/40 (Heç bir coin seçilməyib)";
+                coinText = "0 coin (Heç bir coin seçilməyib)";
             }
             else
             {
                 var cleanTickers = string.Join(", ", settings.Coins.Select(c => c.Replace("USDT", "")));
-                coinText = settings.Coins.Count <= 40 
-                    ? $"{settings.Coins.Count}/40 ({cleanTickers})"
-                    : $"{settings.Coins.Count} coin ({cleanTickers})";
+                coinText = $"{settings.Coins.Count} coin ({cleanTickers})";
             }
             sb.AppendLine($"🪙 <b>Seçilmiş Coinlər:</b> {coinText}");
             sb.AppendLine($"🟡 <b>Açıq Mövqeləriniz:</b> {userOpenPositionsCount} ədəd (Maksimum limit: 20)");
@@ -486,7 +533,7 @@ namespace CryptoSense.Infrastructure.Telegram
         {
             var sb = new StringBuilder();
             sb.AppendLine(isSuperAdmin ? "📊 <b>GÜN SONU HESABATI (Qlobal Sistem)</b>" : "📊 <b>GÜN SONU ŞƏXSİ HESABATINIZ</b>");
-            sb.AppendLine($"🕒 <b>Tarix:</b> <code>{DateTime.UtcNow:dd.MM.yyyy}</code>");
+            sb.AppendLine($"🕒 <b>Tarix:</b> <code>{CryptoSense.Domain.Common.TimeHelper.NowFormatted}</code>");
             sb.AppendLine("-----------------------------------");
             sb.AppendLine($"📌 <b>Ümumi Siqnallar:</b> {stats.TotalSignals} ədəd");
             sb.AppendLine($"✅ <b>Uğurlu (TP):</b> {stats.SuccessSignals} ədəd");
