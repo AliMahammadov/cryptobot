@@ -24,6 +24,8 @@ namespace CryptoSense.Application.DTOs
         public List<string> CustomCoins { get; set; } = new(); // User's private custom-added coins
         public long? LastTerminalMessageId { get; set; }
         public bool IsTerminalOpen { get; set; } = false;
+        public long? LastAdminMessageId { get; set; }
+        public bool IsAdminOpen { get; set; } = false;
         public System.DateTime LastResumeTime { get; set; } = System.DateTime.UtcNow;
         public System.DateTime LastSignalSentUtc { get; set; } = System.DateTime.UtcNow;
         public System.DateTime LastHeartbeatSentUtc { get; set; } = System.DateTime.UtcNow;

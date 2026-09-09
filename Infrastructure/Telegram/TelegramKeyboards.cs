@@ -163,6 +163,44 @@ namespace CryptoSense.Infrastructure.Telegram
             };
         }
 
+        public static object BuildBackToAdminKeyboard()
+        {
+            return new
+            {
+                inline_keyboard = new[]
+                {
+                    new[]
+                    {
+                        new { text = "⬅️ Admin Panelinə Qayıt", callback_data = "cb_admin_menu" },
+                        new { text = "🎛 Əsas Terminal", callback_data = "cb_menu" }
+                    }
+                }
+            };
+        }
+
+        public static object BuildCombinedTimeframeKeyboard()
+        {
+            return new
+            {
+                inline_keyboard = new[]
+                {
+                    new[]
+                    {
+                        new { text = "⏱ 1 Saat (1h)", callback_data = "cb_comb_tf_1h" },
+                        new { text = "⏱ 4 Saat (4h)", callback_data = "cb_comb_tf_4h" }
+                    },
+                    new[]
+                    {
+                        new { text = "🌟 Hər İkisi (1h + 4h)", callback_data = "cb_comb_tf_all" }
+                    },
+                    new[]
+                    {
+                        new { text = "⬅️ Fərdi Portfelə Qayıt", callback_data = "cb_portfolio_custom" }
+                    }
+                }
+            };
+        }
+
         public static object BuildUserKeyboard(UserSettings settings, bool isAdmin = false)
         {
             if (isAdmin)
@@ -189,65 +227,9 @@ namespace CryptoSense.Infrastructure.Telegram
             };
         }
 
-        public static object BuildCoinSelectionKeyboard()
-        {
-            return new
-            {
-                keyboard = new[]
-                {
-                    new[] { new { text = "📋 Standart 40 Coini Seç" } },
-                    new[] { new { text = "➕ Öz coini əlavə et" }, new { text = "🗑 Coin Sil" } },
-                    new[] { new { text = "⬅️ Əsas Menyu" } }
-                },
-                resize_keyboard = true,
-                one_time_keyboard = false
-            };
-        }
-
-        public static object BuildAdminKeyboard()
-        {
-            return new
-            {
-                keyboard = new[]
-                {
-                    new[] { new { text = "➕ İstifadəçi Yarat" }, new { text = "👥 İstifadəçilərin Siyahısı" } },
-                    new[] { new { text = "🗑 İstifadəçi Sil" }, new { text = "🔑 Parolu Dəyiş" } },
-                    new[] { new { text = "📥 Bazanı Yüklə" }, new { text = "📈 Dərin Statistika" } },
-                    new[] { new { text = "🌐 Bütün Coinlərin Siyahısı" }, new { text = "📊 Əsas Menyu (Siqnallar)" } }
-                },
-                resize_keyboard = true,
-                one_time_keyboard = false
-            };
-        }
-
-        public static object BuildAllSignalsTimeframeKeyboard()
-        {
-            return new
-            {
-                keyboard = new[]
-                {
-                    new[] { new { text = "⏱ 1 Saat (1h) Siqnalları" }, new { text = "⏱ 4 Saat (4h) Siqnalları" } },
-                    new[] { new { text = "🌟 Bütün Əsas Zamanlar (1h, 4h)" } },
-                    new[] { new { text = "⬅️ Əsas Menyu" } }
-                },
-                resize_keyboard = true,
-                one_time_keyboard = false
-            };
-        }
-
-        public static object BuildTimeframeKeyboard()
-        {
-            return new
-            {
-                keyboard = new[]
-                {
-                    new[] { new { text = "⏱ 1 Saat (1h)" }, new { text = "⏱ 4 Saat (4h)" } },
-                    new[] { new { text = "🌟 Bütün Əsas Zamanlar (1h, 4h)" } },
-                    new[] { new { text = "⬅️ Əsas Menyu" } }
-                },
-                resize_keyboard = true,
-                one_time_keyboard = false
-            };
-        }
+        public static object BuildCoinSelectionKeyboard() => BuildUserKeyboard(new UserSettings(), false);
+        public static object BuildAdminKeyboard() => BuildUserKeyboard(new UserSettings(), true);
+        public static object BuildAllSignalsTimeframeKeyboard() => BuildUserKeyboard(new UserSettings(), false);
+        public static object BuildTimeframeKeyboard() => BuildUserKeyboard(new UserSettings(), false);
     }
 }
