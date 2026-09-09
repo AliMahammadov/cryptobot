@@ -4,22 +4,83 @@ namespace CryptoSense.Infrastructure.Telegram
 {
     public static class TelegramKeyboards
     {
+        public static object BuildTerminalInlineKeyboard(UserSettings settings)
+        {
+            var toggleText = settings.IsActive ? "🛑 Bildirişləri Dayandır" : "▶️ Bildirişləri Başlat";
+            return new
+            {
+                inline_keyboard = new[]
+                {
+                    new[]
+                    {
+                        new { text = "⏱ 1h Siqnalları", callback_data = "cb_sig_1h" },
+                        new { text = "⏱ 4h Siqnalları", callback_data = "cb_sig_4h" }
+                    },
+                    new[]
+                    {
+                        new { text = "🧭 Bitcoin Trend", callback_data = "cb_btc" },
+                        new { text = "📊 Canlı Statistika", callback_data = "cb_stats" }
+                    },
+                    new[]
+                    {
+                        new { text = "🪙 Coinləri İdarə Et", callback_data = "cb_coins" },
+                        new { text = "ℹ️ Sistem Statusu", callback_data = "cb_status" }
+                    },
+                    new[]
+                    {
+                        new { text = toggleText, callback_data = "cb_toggle" }
+                    }
+                }
+            };
+        }
+
+        public static object BuildBackToTerminalKeyboard()
+        {
+            return new
+            {
+                inline_keyboard = new[]
+                {
+                    new[]
+                    {
+                        new { text = "⬅️ Terminala Qayıt", callback_data = "cb_menu" }
+                    }
+                }
+            };
+        }
+
+        public static object BuildCoinsInlineKeyboard()
+        {
+            return new
+            {
+                inline_keyboard = new[]
+                {
+                    new[]
+                    {
+                        new { text = "📋 Standart 40 Coini Seç", callback_data = "cb_coins_40" }
+                    },
+                    new[]
+                    {
+                        new { text = "➕ Coin Əlavə Et", callback_data = "cb_coin_add" },
+                        new { text = "🗑 Coin Sil", callback_data = "cb_coin_del" }
+                    },
+                    new[]
+                    {
+                        new { text = "⬅️ Terminala Qayıt", callback_data = "cb_menu" }
+                    }
+                }
+            };
+        }
+
         public static object BuildUserKeyboard(UserSettings settings, bool isAdmin = false)
         {
-            var toggleBtn = settings.IsActive ? "🛑 Bildirişləri Dayandır" : "▶️ Bildirişləri Başlat";
-
             if (isAdmin)
             {
                 return new
                 {
                     keyboard = new[]
                     {
-                        new[] { new { text = "👑 Admin Paneli" }, new { text = "🧭 Bitcoin Kompası" } },
-                        new[] { new { text = "⭐ Mənim Coinlərim" }, new { text = "⚙️ Coin Seçimi" } },
-                        new[] { new { text = "🗑 Coin Sil" }, new { text = "ℹ️ Bot Statusu" } },
-                        new[] { new { text = "📊 Statistika" }, new { text = "📈 Dərin Statistika" } },
-                        new[] { new { text = "📰 Bazar Xəbərləri" }, new { text = "🧹 Siqnalları Sıfırla" } },
-                        new[] { new { text = toggleBtn } }
+                        new[] { new { text = "🎛 Əsas Terminal" }, new { text = "👑 Admin Paneli" } },
+                        new[] { new { text = "ℹ️ Bot Statusu" }, new { text = "📊 Statistika" } }
                     },
                     resize_keyboard = true,
                     one_time_keyboard = false
@@ -30,11 +91,7 @@ namespace CryptoSense.Infrastructure.Telegram
             {
                 keyboard = new[]
                 {
-                    new[] { new { text = "⭐ Mənim Coinlərim" }, new { text = "🧭 Bitcoin Kompası" } },
-                    new[] { new { text = "⚙️ Coin Seçimi" }, new { text = "🗑 Coin Sil" } },
-                    new[] { new { text = "📊 Statistika" }, new { text = "ℹ️ Bot Statusu" } },
-                    new[] { new { text = "📰 Bazar Xəbərləri" }, new { text = "🧹 Siqnalları Sıfırla" } },
-                    new[] { new { text = toggleBtn } }
+                    new[] { new { text = "🎛 Əsas Terminal" }, new { text = "ℹ️ Bot Statusu" } }
                 },
                 resize_keyboard = true,
                 one_time_keyboard = false

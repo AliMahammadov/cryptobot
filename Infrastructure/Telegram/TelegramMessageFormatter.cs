@@ -541,6 +541,25 @@ namespace CryptoSense.Infrastructure.Telegram
             return sb.ToString();
         }
 
+        public static string FormatTerminalDashboard(UserSettings settings, int activePositionsCount, string lastSignalTime)
+        {
+            var statusIcon = settings.IsActive ? "İşləyir 🟢" : "Dayandırılıb 🔴";
+            var tfDisplay = (settings.Timeframe == "Hamısı" || settings.Timeframe == "Hamisi") ? "1h, 4h" : (settings.Timeframe == "15m" ? "1h" : settings.Timeframe);
+            var coinCount = settings.Coins.Count == 0 ? "40 (Standart İnstitusional)" : $"{settings.Coins.Count} ədəd";
+
+            var sb = new StringBuilder();
+            sb.AppendLine("🤖 <b>CryptoSense v2.0 | Canlı Terminal</b>");
+            sb.AppendLine("━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+            sb.AppendLine($"⏱ <b>Aktiv Rejim:</b> <code>{tfDisplay}</code>");
+            sb.AppendLine($"🪙 <b>İzlənən Portfel:</b> <code>{coinCount}</code>");
+            sb.AppendLine($"⚡ <b>Açıq Mövqelər:</b> <code>{activePositionsCount} ədəd (Maksimum: 20)</code>");
+            sb.AppendLine($"🔔 <b>Skaner Vəziyyəti:</b> <b>{statusIcon}</b>");
+            sb.AppendLine($"🕒 <b>Son Siqnal:</b> <code>{(string.IsNullOrEmpty(lastSignalTime) ? "Hələ yoxdur" : lastSignalTime)}</code>");
+            sb.AppendLine("━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+            sb.AppendLine("<i>Aşağıdakı düymələrlə terminalı interaktiv idarə edin:</i>");
+            return sb.ToString();
+        }
+
         public static string FormatNoSignalReason(string reason, int nextCheckMinutes = 30)
         {
             var sb = new StringBuilder();
