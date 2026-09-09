@@ -33,6 +33,10 @@ namespace CryptoSense.Infrastructure.Telegram
                     new[]
                     {
                         new { text = toggleText, callback_data = "cb_toggle" }
+                    },
+                    new[]
+                    {
+                        new { text = "🔽 Terminalı Bağla / Yerinə Qayıt", callback_data = "cb_close_terminal" }
                     }
                 }
             };
@@ -157,7 +161,8 @@ namespace CryptoSense.Infrastructure.Telegram
                     },
                     new[]
                     {
-                        new { text = "⬅️ Əsas Terminala Qayıt", callback_data = "cb_menu" }
+                        new { text = "⬅️ Əsas Terminala Qayıt", callback_data = "cb_menu" },
+                        new { text = "🔽 Paneli Bağla", callback_data = "cb_close_admin" }
                     }
                 }
             };

@@ -35,6 +35,7 @@ namespace CryptoSense.Infrastructure.Telegram
         private static readonly ConcurrentDictionary<long, DateTime> _processedMessageIds = new();
         private static readonly ConcurrentDictionary<string, (string Text, DateTime Time)> _lastUserAction = new();
         private static readonly ConcurrentDictionary<string, bool> _loggedOutChats = new();
+        private static readonly ConcurrentDictionary<string, string> _authenticatedSessions = new();
         private static readonly string DataDirectory = !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("RAILWAY_VOLUME_MOUNT_PATH")) && Directory.Exists(Environment.GetEnvironmentVariable("RAILWAY_VOLUME_MOUNT_PATH"))
             ? Environment.GetEnvironmentVariable("RAILWAY_VOLUME_MOUNT_PATH")!
             : (Directory.Exists("/app/data") ? "/app/data" : Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "data"));
@@ -550,6 +551,7 @@ namespace CryptoSense.Infrastructure.Telegram
             if (target != null && !string.IsNullOrEmpty(target.TelegramChatId))
             {
                 var chatId = target.TelegramChatId;
+                _authenticatedSessions.TryRemove(chatId, out _);
                 UserPreferences.TryRemove(chatId, out _);
                 _userStates.TryRemove(chatId, out _);
 
@@ -1380,31 +1382,76 @@ namespace CryptoSense.Infrastructure.Telegram
                 var statsMsg = TelegramMessageFormatter.FormatPerformanceStats(stats, "Qlobal Admin");
                 await EditMessageTextAsync(chatId, messageId, statsMsg, TelegramKeyboards.BuildBackToAdminKeyboard());
             }
+            else if (data == "cb_close_terminal")
+            {
+                userSettings.IsTerminalOpen = false;
+                userSettings.LastTerminalMessageId = null;
+                SaveSettings();
+                await DeleteMessageAsync(chatId, messageId);
+            }
+            else if (data == "cb_close_admin")
+            {
+                userSettings.IsAdminOpen = false;
+                userSettings.LastAdminMessageId = null;
+                SaveSettings();
+                await DeleteMessageAsync(chatId, messageId);
+            }
         }
 
         private async Task HandleIncomingMessageAsync(string chatId, string telegramUsername, long? userId, long messageId, string text)
         {
-            // Action debouncer: ignore rapid double-taps/clicks of the exact same action within 1.5 seconds
-            var nowUtc = DateTime.UtcNow;
-            if (_lastUserAction.TryGetValue(chatId, out var lastAct))
+            // Action debouncer: ignore rapid double-taps/clicks of the exact same action within 1.5 seconds,
+            // EXCEPT for toggle buttons (🎛 Əsas Terminal and 👑 Admin Paneli) which require immediate double-tap to collapse!
+            bool isToggleCommand = text == "🎛 Əsas Terminal" || 
+                                   text.Contains("Əsas Terminal") || 
+                                   text.Contains("Esas Terminal") || 
+                                   text == "Terminal" ||
+                                   text == "👑 Admin Paneli" || 
+                                   text.Contains("Admin Paneli");
+
+            if (!isToggleCommand)
             {
-                if (lastAct.Text == text && (nowUtc - lastAct.Time).TotalMilliseconds < 1500)
+                var nowUtc = DateTime.UtcNow;
+                if (_lastUserAction.TryGetValue(chatId, out var lastAct))
                 {
-                    return;
+                    if (lastAct.Text == text && (nowUtc - lastAct.Time).TotalMilliseconds < 1500)
+                    {
+                        return;
+                    }
                 }
+                _lastUserAction[chatId] = (text, nowUtc);
             }
-            _lastUserAction[chatId] = (text, nowUtc);
+
+            // Immediately delete incoming user message for toggle buttons so chat remains 100% clean
+            if (isToggleCommand)
+            {
+                _ = DeleteMessageAsync(chatId, messageId);
+            }
 
             using var scope = _serviceProvider.CreateScope();
             var userManager = scope.ServiceProvider.GetRequiredService<IUserManagerService>();
+            var uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
             var signalEngine = scope.ServiceProvider.GetRequiredService<ISignalEngine>();
             var newsService = scope.ServiceProvider.GetRequiredService<INewsService>();
+
+            bool isMenuButtonClick = text.StartsWith("🧭") || text.StartsWith("⚡") || text.StartsWith("⭐") || 
+                                     text.StartsWith("📊") || text.StartsWith("📈") || text.StartsWith("⚙️") || 
+                                     text.StartsWith("🗑") || text.StartsWith("⏱") || text.StartsWith("🌟") || 
+                                     text.StartsWith("🧹") || text.StartsWith("🛑") || text.StartsWith("▶️") || 
+                                     text.StartsWith("📰") || text.StartsWith("⬅️") || text.StartsWith("👥") || 
+                                     text.StartsWith("🔑") || text.StartsWith("👑") || text.StartsWith("📋") || 
+                                     text.StartsWith("ℹ️") || text.StartsWith("📥") || text.StartsWith("🎛") ||
+                                     text == "➕ Öz coini əlavə et" || text == "➕ İstifadəçi Yarat" ||
+                                     text.Contains("Siqnallar") || text.Contains("Menyu") || text.Contains("Statistika") ||
+                                     (text.StartsWith("/") && !text.StartsWith("/login", StringComparison.OrdinalIgnoreCase) && !text.StartsWith("/admin ", StringComparison.OrdinalIgnoreCase));
 
             // =========================================================================
             // 0. LOGOUT COMMAND (ALWAYS CLEARS DATABASE & SESSION)
             // =========================================================================
             if (text == "/logout" || text.Equals("/cixis", StringComparison.OrdinalIgnoreCase) || text.Equals("/exit", StringComparison.OrdinalIgnoreCase) || text.Equals("Çıxış", StringComparison.OrdinalIgnoreCase) || text.Equals("Cixis", StringComparison.OrdinalIgnoreCase) || text.Equals("logout", StringComparison.OrdinalIgnoreCase))
             {
+                _ = DeleteMessageAsync(chatId, messageId);
+                _authenticatedSessions.TryRemove(chatId, out _);
                 _loggedOutChats[chatId] = true;
                 UserPreferences.TryRemove(chatId, out _);
                 _userStates.TryRemove(chatId, out _);
@@ -1415,135 +1462,137 @@ namespace CryptoSense.Infrastructure.Telegram
                 await SendMessageAsync(
                     "👋 <b>Hesabınızdan çıxış edildi!</b>\n\n" +
                     "Yenidən daxil olmaq üçün <b>İstifadəçi Adınızı</b> və <b>Parolunuzu</b> yazın:\n" +
-                    "💡 <b>Nümunə:</b> <code>Alibay 123456</code>", 
+                    "💡 <b>Nümunə:</b> <code>Murad 123456</code>", 
                     chatId, 
                     new { remove_keyboard = true });
                 return;
             }
 
             // =========================================================================
-            // 1. CHECK PERSISTENT USER IN DATABASE
+            // 0.1 /START COMMAND (STRICT LOGIN CHECK - ZERO LEAKS)
             // =========================================================================
-            var currentUser = await userManager.GetUserByChatIdOrTelegramIdAsync(chatId, userId);
-
-            // 👑 AUTO-RECOGNIZE SUPER ADMIN ALI (NEVER PROMPT FOR LOGIN AGAIN UNLESS EXPLICITLY LOGGED OUT)
-            if (currentUser == null && !_loggedOutChats.ContainsKey(chatId) && (userId == 1219998176 || chatId == "1219998176" || (!string.IsNullOrEmpty(telegramUsername) && telegramUsername.Equals("Ali_Mahammadov", StringComparison.OrdinalIgnoreCase))))
+            if (text == "/start" || text.Equals("/baslat", StringComparison.OrdinalIgnoreCase) || text.Equals("start", StringComparison.OrdinalIgnoreCase))
             {
-                var (validAdmin, adminAcc) = await userManager.ValidateLoginAsync("Ali", "23031999Am", userId ?? 1219998176, chatId, !string.IsNullOrEmpty(telegramUsername) ? telegramUsername : "Ali_Mahammadov");
-                if (validAdmin && adminAcc != null)
-                {
-                    currentUser = adminAcc;
-                }
-            }
-
-            if (currentUser != null && (currentUser.TelegramChatId != chatId || (userId.HasValue && currentUser.TelegramUserId != userId.Value)))
-            {
-                currentUser.TelegramChatId = chatId;
-                if (userId.HasValue && userId.Value > 0) currentUser.TelegramUserId = userId.Value;
-                if (!string.IsNullOrEmpty(telegramUsername)) currentUser.TelegramUsername = telegramUsername;
-                currentUser.LastLoginAt = DateTime.UtcNow;
-                var uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
-                await uow.Users.UpdateAsync(currentUser);
-                await uow.SaveChangesAsync();
-            }
-
-            // If user typed explicit login credentials or 2-word login (only if unauthenticated):
-            var loginParts = text.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-            bool isExplicitLoginCommand = text.StartsWith("/login", StringComparison.OrdinalIgnoreCase) ||
-                                          text.StartsWith("/admin ", StringComparison.OrdinalIgnoreCase);
-
-            bool isMenuButtonClick = text.StartsWith("🧭") || text.StartsWith("⚡") || text.StartsWith("⭐") || 
-                                     text.StartsWith("📊") || text.StartsWith("📈") || text.StartsWith("⚙️") || 
-                                     text.StartsWith("🗑") || text.StartsWith("⏱") || text.StartsWith("🌟") || 
-                                     text.StartsWith("🧹") || text.StartsWith("🛑") || text.StartsWith("▶️") || 
-                                     text.StartsWith("📰") || text.StartsWith("⬅️") || text.StartsWith("👥") || 
-                                     text.StartsWith("🔑") || text.StartsWith("👑") || text.StartsWith("📋") || 
-                                     text.StartsWith("ℹ️") || text.StartsWith("📥") || text == "➕ Öz coini əlavə et" || text == "➕ İstifadəçi Yarat" ||
-                                     text.Contains("Siqnallar") || text.Contains("Menyu") || text.Contains("Statistika") ||
-                                     (text.StartsWith("/") && !isExplicitLoginCommand);
-
-            bool hasActiveState = _userStates.ContainsKey(chatId);
-
-            // =========================================================================
-            // 2. PROCESS LOGIN IF NOT LOGGED IN OR EXPLICIT LOGIN ATTEMPT
-            // =========================================================================
-            bool shouldAttemptLogin = (currentUser == null && !hasActiveState && !isMenuButtonClick && (loginParts.Length >= 2 || text.Contains("23031999Am"))) ||
-                                      (isExplicitLoginCommand && !hasActiveState && !isMenuButtonClick);
-
-            if (shouldAttemptLogin)
-            {
-                string cleanText = text;
-                if (cleanText.StartsWith("/login", StringComparison.OrdinalIgnoreCase)) cleanText = cleanText.Substring(6).Trim();
-                if (cleanText.StartsWith("/admin", StringComparison.OrdinalIgnoreCase)) cleanText = "Ali " + cleanText.Substring(6).Trim();
-
-                var parts = cleanText.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-                string inputUser = parts.Length >= 2 ? parts[0] : "Ali";
-                string inputPass = parts.Length >= 2 ? string.Join(" ", parts.Skip(1)) : "23031999Am";
-
                 _ = DeleteMessageAsync(chatId, messageId);
 
-                var (isValid, user) = await userManager.ValidateLoginAsync(inputUser, inputPass, userId, chatId, telegramUsername);
-
-                if (isValid && user != null)
+                if (!_authenticatedSessions.TryGetValue(chatId, out var sessionUser))
                 {
-                    _loggedOutChats.TryRemove(chatId, out _);
-                    currentUser = user;
-                    _userStates.TryRemove(chatId, out _);
-                    var settings = GetSettings(chatId);
-                    settings.TelegramUserId = userId;
-                    settings.IsActive = settings.Coins.Count > 0;
-                    settings.Timeframe = "1h";
-                    settings.LastResumeTime = DateTime.UtcNow;
+                    // User has not logged in yet: Send ONLY the login screen with keyboard removed
+                    var welcomeAndAuth = "👋 <b>Salam! Kripto Signals Bot Xidmətinə xoş gəlmisiniz.</b>\n\n" +
+                                         "⚠️ <b>Sistemdən istifadə etmək üçün daxil olmalısınız!</b>\n\n" +
+                                         "Sistemə daxil olmaq üçün <b>İstifadəçi Adınızı</b> və <b>Parolunuzu</b> bir sətirdə, aralarında boşluq qoyaraq yazın:\n\n" +
+                                         "💡 <b>Nümunə:</b>\n" +
+                                         "<code>Murad 123456</code>\n\n" +
+                                         "-----------------------------------\n" +
+                                         "Hesabınız yoxdur? Qeydiyyat və giriş icazəsi üçün <b>Admin</b> ilə əlaqə saxlayın:\n" +
+                                         "👉 <a href=\"https://t.me/Ali_Mahammadov\">@Ali_Mahammadov</a>";
 
-                    if (user.Role == UserRole.Admin || user.Username.Equals("Ali", StringComparison.OrdinalIgnoreCase))
-                    {
-                        SuperAdminChatId = chatId;
-                        settings.Username = "Ali (Super Admin)";
-
-                        var welcomeAdmin = $"👑 <b>Giriş Təsdiqləndi! Xoş Gəldiniz, Super Admin ({user.Username})!</b>\n\n" +
-                                           $"🚀 <b>Kripto Signals Bot Xidməti AKTİVDİR 🟢</b>\n\n" +
-                                           $"📖 <b>Sistemdən Necə İstifadə Etməli?</b>\n" +
-                                           $"• <b>⭐ Mənim Coinlərim:</b> Yalnız seçdiyiniz coinlər üzrə istədiyiniz zaman kəsiyində ticarət aparın.\n" +
-                                           $"• <b>⚙️ Coin Seçimi:</b> Standart 40 coini seçin, yeni coin əlavə edin və ya siyahını tənzimləyin.\n" +
-                                           $"• <b>🗑 Coin Sil:</b> İzləmək istəmədiyiniz coinləri siyahıdan çıxarın.\n" +
-                                           $"• <b>🧭 Bitcoin Kompası:</b> Bazarın ümumi trendini və qüvvəsini izləyin.\n" +
-                                           $"• <b>📊 Statistika:</b> Şəxsi əməliyyat performansınızı görün.\n" +
-                                           $"• <b>📈 Dərin Statistika:</b> Seçilmiş coinlərin şamlar üzrə dərin win-rate və əməliyyat nəticələrinə baxın.\n" +
-                                           $"• <b>🛑 Dayandır / 🧹 Sıfırla:</b> Bildirişləri dayandırın və ya bütün tarixi sıfırlayın.\n" +
-                                           $"• <b>👑 Admin Paneli:</b> İstifadəçi idarəetməsi.\n\n" +
-                                           $"<i>Sistem 24/7 rejimdə canlı bazar qiymətlərini analiz edir və yüksək dəqiqlikli fürsətləri sizə göndərir.</i>\n\n" +
-                                           $"<i>Çıxış etmək üçün: <code>/logout</code></i>";
-
-                        await SendMessageAsync(welcomeAdmin, chatId, TelegramKeyboards.BuildUserKeyboard(settings, isAdmin: true));
-                        SaveSettings();
-                        return;
-                    }
-                    else
-                    {
-                        settings.Username = user.Username;
-
-                        var onboardingMsg = $"✅ <b>Giriş Təsdiqləndi! Xoş Gəldiniz, {user.Username}!</b>\n\n" +
-                                            $"🚀 <b>Kripto Signals Bot Xidməti AKTİVDİR 🟢</b>\n\n" +
-                                            $"📖 <b>Sistemdən Necə İstifadə Etməli?</b>\n" +
-                                            $"• <b>⭐ Mənim Coinlərim:</b> Yalnız seçdiyiniz coinlər üzrə istədiyiniz zaman kəsiyində ticarət aparın.\n" +
-                                            $"• <b>⚙️ Coin Seçimi:</b> Standart 40 coini seçin, yeni coin əlavə edin və ya siyahını tənzimləyin.\n" +
-                                            $"• <b>🗑 Coin Sil:</b> İzləmək istəmədiyiniz coinləri siyahıdan çıxarın.\n" +
-                                            $"• <b>🧭 Bitcoin Kompası:</b> Bazarın ümumi trendini və qüvvəsini izləyin.\n" +
-                                            $"• <b>📊 Statistika:</b> Şəxsi əməliyyat performansınızı görün.\n" +
-                                            $"• <b>🛑 Dayandır / 🧹 Sıfırla:</b> Bildirişləri dayandırın və ya bütün tarixi sıfırlayın.\n\n" +
-                                            $"<i>Sistem 24/7 rejimdə canlı bazar qiymətlərini analiz edir və yüksək dəqiqlikli fürsətləri sizə göndərir.</i>\n\n" +
-                                            $"<i>Çıxış etmək üçün: <code>/logout</code></i>";
-                        
-                        await SendMessageAsync(onboardingMsg, chatId, TelegramKeyboards.BuildUserKeyboard(settings, isAdmin: false));
-                        await NotifySuperAdminUserLoginAsync(user.Username, $"Telegram (@{telegramUsername})");
-                        SaveSettings();
-                        return;
-                    }
+                    await SendMessageAsync(welcomeAndAuth, chatId, new { remove_keyboard = true });
+                    return;
                 }
                 else
                 {
-                    if (currentUser == null || text.StartsWith("/login", StringComparison.OrdinalIgnoreCase) || text.StartsWith("/admin", StringComparison.OrdinalIgnoreCase))
+                    // Already logged in user pressed /start: reset any open terminal state and show welcome greeting with button
+                    var uSettings = GetSettings(chatId);
+                    if (uSettings.IsTerminalOpen && uSettings.LastTerminalMessageId.HasValue)
                     {
+                        _ = DeleteMessageAsync(chatId, uSettings.LastTerminalMessageId.Value);
+                        uSettings.IsTerminalOpen = false;
+                        uSettings.LastTerminalMessageId = null;
+                    }
+                    if (uSettings.IsAdminOpen && uSettings.LastAdminMessageId.HasValue)
+                    {
+                        _ = DeleteMessageAsync(chatId, uSettings.LastAdminMessageId.Value);
+                        uSettings.IsAdminOpen = false;
+                        uSettings.LastAdminMessageId = null;
+                    }
+                    SaveSettings();
+
+                    var dbUser = await uow.Users.GetByUsernameAsync(sessionUser);
+                    bool isAdm = dbUser != null && (dbUser.Role == UserRole.Admin || dbUser.Username.Equals("Ali", StringComparison.OrdinalIgnoreCase) || (userId.HasValue && userId.Value == 1219998176));
+
+                    var greeting = $"👋 <b>Salam, {sessionUser}! Kripto Signals Bot hazırdır 🟢</b>\n\n" +
+                                   "Terminalı açmaq üçün aşağıdakı <b>🎛 Əsas Terminal</b> düyməsinə toxunun.";
+                    await SendMessageAsync(greeting, chatId, TelegramKeyboards.BuildUserKeyboard(uSettings, isAdm));
+                    return;
+                }
+            }
+
+            // =========================================================================
+            // 1. AUTHENTICATION GATING (STRICT: NO AUTO-LOGIN BYPASS)
+            // =========================================================================
+            bool isAuthenticated = _authenticatedSessions.TryGetValue(chatId, out var currentUsername);
+
+            if (!isAuthenticated)
+            {
+                var cleanLogin = text;
+                if (cleanLogin.StartsWith("/login", StringComparison.OrdinalIgnoreCase)) cleanLogin = cleanLogin.Substring(6).Trim();
+                if (cleanLogin.StartsWith("/admin", StringComparison.OrdinalIgnoreCase)) cleanLogin = "Ali " + cleanLogin.Substring(6).Trim();
+
+                var parts = cleanLogin.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                bool isCredentialAttempt = parts.Length >= 2 || text.Contains("23031999Am");
+
+                if (isCredentialAttempt)
+                {
+                    string inputUser = parts.Length >= 2 ? parts[0] : "Ali";
+                    string inputPass = parts.Length >= 2 ? string.Join(" ", parts.Skip(1)) : "23031999Am";
+
+                    _ = DeleteMessageAsync(chatId, messageId);
+
+                    var (isValid, user) = await userManager.ValidateLoginAsync(inputUser, inputPass, userId, chatId, telegramUsername);
+                    if (isValid && user != null)
+                    {
+                        _authenticatedSessions[chatId] = user.Username;
+                        _loggedOutChats.TryRemove(chatId, out _);
+                        _userStates.TryRemove(chatId, out _);
+
+                        var settings = GetSettings(chatId);
+                        settings.TelegramUserId = userId;
+                        settings.IsActive = settings.Coins.Count > 0;
+                        settings.Timeframe = "1h";
+                        settings.LastResumeTime = DateTime.UtcNow;
+                        settings.IsTerminalOpen = false;
+                        settings.LastTerminalMessageId = null;
+                        settings.IsAdminOpen = false;
+                        settings.LastAdminMessageId = null;
+                        SaveSettings();
+
+                        bool isAdm = (user.Role == UserRole.Admin) || 
+                                     user.Username.Equals("Ali", StringComparison.OrdinalIgnoreCase) || 
+                                     (userId.HasValue && userId.Value == 1219998176);
+
+                        if (isAdm)
+                        {
+                            SuperAdminChatId = chatId;
+                            settings.Username = "Ali (Super Admin)";
+                            SaveSettings();
+
+                            var welcomeAdmin = $"👑 <b>Xoş Gəldiniz, Baş Admin ({user.Username})!</b>\n\n" +
+                                               $"🚀 <b>CryptoSense Terminal Xidməti AKTİVDİR 🟢</b>\n\n" +
+                                               $"Terminalı açmaq üçün aşağıdakı <b>🎛 Əsas Terminal</b> düyməsinə toxunun.\n\n" +
+                                               $"<i>Çıxış etmək üçün: <code>/logout</code></i>";
+
+                            await SendMessageAsync(welcomeAdmin, chatId, TelegramKeyboards.BuildUserKeyboard(settings, isAdmin: true));
+                            return;
+                        }
+                        else
+                        {
+                            settings.Username = user.Username;
+                            SaveSettings();
+
+                            var onboardingMsg = $"✅ <b>Giriş Təsdiqləndi! Xoş Gəldiniz, {user.Username}!</b>\n\n" +
+                                                $"🚀 <b>Kripto Signals Bot Xidməti AKTİVDİR 🟢</b>\n\n" +
+                                                $"Terminalı açmaq üçün aşağıdakı <b>🎛 Əsas Terminal</b> düyməsinə toxunun.\n\n" +
+                                                $"<i>Çıxış etmək üçün: <code>/logout</code></i>";
+                            
+                            await SendMessageAsync(onboardingMsg, chatId, TelegramKeyboards.BuildUserKeyboard(settings, isAdmin: false));
+                            await NotifySuperAdminUserLoginAsync(user.Username, $"Telegram (@{telegramUsername})");
+                            return;
+                        }
+                    }
+                    else
+                    {
+                        _ = DeleteMessageAsync(chatId, messageId);
                         var failMsg = "❌ <b>Giriş Uğursuz Oldu!</b>\n\n" +
                                       "İstifadəçi adı və ya parol yalnışdır.\n" +
                                       "Zəhmət olmasa məlumatlarınızı yoxlayıb yenidən daxil edin:\n\n" +
@@ -1554,29 +1603,36 @@ namespace CryptoSense.Infrastructure.Telegram
                         return;
                     }
                 }
+                else
+                {
+                    _ = DeleteMessageAsync(chatId, messageId);
+                    var welcomeAndAuth = "👋 <b>Salam! Kripto Signals Bot Xidmətinə xoş gəlmisiniz.</b>\n\n" +
+                                         "⚠️ <b>Sistemdən istifadə etmək üçün daxil olmalısınız!</b>\n\n" +
+                                         "Sistemə daxil olmaq üçün <b>İstifadəçi Adınızı</b> və <b>Parolunuzu</b> bir sətirdə, aralarında boşluq qoyaraq yazın:\n\n" +
+                                         "💡 <b>Nümunə:</b>\n" +
+                                         "<code>Murad 123456</code>\n\n" +
+                                         "-----------------------------------\n" +
+                                         "Hesabınız yoxdur? Qeydiyyat və giriş icazəsi üçün <b>Admin</b> ilə əlaqə saxlayın:\n" +
+                                         "👉 <a href=\"https://t.me/Ali_Mahammadov\">@Ali_Mahammadov</a>";
+
+                    await SendMessageAsync(welcomeAndAuth, chatId, new { remove_keyboard = true });
+                    return;
+                }
             }
 
             // =========================================================================
-            // 3. UNAUTHENTICATED USERS PROMPT (IF NOT IN DATABASE)
+            // 2. USER IS FULLY AUTHENTICATED
             // =========================================================================
+            var currentUser = await uow.Users.GetByUsernameAsync(currentUsername!) ?? 
+                              await userManager.GetUserByChatIdOrTelegramIdAsync(chatId, userId);
+
             if (currentUser == null)
             {
-                var welcomeAndAuth = "👋 <b>Salam! Kripto Signals Bot Xidmətinə xoş gəlmisiniz.</b>\n\n" +
-                                     "⚠️ <b>Sistemdən istifadə etmək üçün daxil olmalısınız!</b>\n\n" +
-                                     "Sistemə daxil olmaq üçün <b>İstifadəçi Adınızı</b> və <b>Parolunuzu</b> bir sətirdə, aralarında boşluq qoyaraq yazın:\n\n" +
-                                     "💡 <b>Nümunə:</b>\n" +
-                                     "<code>Murad 123456</code>\n\n" +
-                                     "-----------------------------------\n" +
-                                     "Hesabınız yoxdur? Qeydiyyat və giriş icazəsi üçün <b>Admin</b> ilə əlaqə saxlayın:\n" +
-                                     "👉 <a href=\"https://t.me/Ali_Mahammadov\">@Ali_Mahammadov</a>";
-                
-                await SendMessageAsync(welcomeAndAuth, chatId, new { remove_keyboard = true });
+                _authenticatedSessions.TryRemove(chatId, out _);
+                await SendMessageAsync("⚠️ Sessiya bitmişdir. Zəhmət olmasa yenidən daxil olun.", chatId, new { remove_keyboard = true });
                 return;
             }
 
-            // =========================================================================
-            // 4. USER IS FULLY AUTHENTICATED VIA DATABASE
-            // =========================================================================
             bool isAdmin = (currentUser.Role == UserRole.Admin) || 
                            currentUser.Username.Equals("Ali", StringComparison.OrdinalIgnoreCase) || 
                            (userId.HasValue && userId.Value == 1219998176);
@@ -1591,7 +1647,7 @@ namespace CryptoSense.Infrastructure.Telegram
             userSettings.TelegramUserId = userId;
 
             // =========================================================================
-            // 5. ADMIN SWITCH & CRUD FLOW
+            // 3. ADMIN SWITCH & CRUD FLOW
             // =========================================================================
             bool isAdminToggleClick = isAdmin && (text == "👑 Admin Paneli" || 
                                                  text.Contains("Admin Paneli", StringComparison.OrdinalIgnoreCase) || 
@@ -1600,6 +1656,7 @@ namespace CryptoSense.Infrastructure.Telegram
             if (isAdminToggleClick)
             {
                 _userStates.TryRemove(chatId, out _);
+                _ = DeleteMessageAsync(chatId, messageId);
 
                 // Toggle logic: If user clicked "👑 Admin Paneli" and it is already open, close it cleanly
                 if (userSettings.IsAdminOpen && userSettings.LastAdminMessageId.HasValue)
@@ -1633,6 +1690,61 @@ namespace CryptoSense.Infrastructure.Telegram
                 var newAdminMsgId = await SendMessageReturnIdAsync(adminDash, chatId, TelegramKeyboards.BuildAdminTerminalInlineKeyboard());
                 userSettings.LastAdminMessageId = newAdminMsgId;
                 userSettings.IsAdminOpen = true;
+                SaveSettings();
+                return;
+            }
+
+            // =========================================================================
+            // 3.1 DEDICATED TERMINAL TOGGLE (INSTANT OPEN / CLOSE WITH NO RESIDUAL BUBBLES)
+            // =========================================================================
+            bool isExplicitTerminal = text == "🎛 Əsas Terminal" || 
+                                      text.Contains("Əsas Terminal") || 
+                                      text.Contains("Esas Terminal") || 
+                                      text == "Terminal";
+
+            if (isExplicitTerminal)
+            {
+                _userStates.TryRemove(chatId, out _);
+                _ = DeleteMessageAsync(chatId, messageId);
+
+                // Toggle logic: If user clicked 🎛 Əsas Terminal and it is already open, cleanly collapse it into place!
+                if (userSettings.IsTerminalOpen && userSettings.LastTerminalMessageId.HasValue)
+                {
+                    var oldMsgId = userSettings.LastTerminalMessageId.Value;
+                    userSettings.IsTerminalOpen = false;
+                    userSettings.LastTerminalMessageId = null;
+                    SaveSettings();
+                    await DeleteMessageAsync(chatId, oldMsgId);
+                    return;
+                }
+
+                // If Admin was open, close it
+                if (userSettings.IsAdminOpen && userSettings.LastAdminMessageId.HasValue)
+                {
+                    _ = DeleteMessageAsync(chatId, userSettings.LastAdminMessageId.Value);
+                    userSettings.IsAdminOpen = false;
+                    userSettings.LastAdminMessageId = null;
+                }
+
+                // If opening a new terminal, remove previous one if any
+                if (userSettings.LastTerminalMessageId.HasValue)
+                {
+                    _ = DeleteMessageAsync(chatId, userSettings.LastTerminalMessageId.Value);
+                    userSettings.LastTerminalMessageId = null;
+                }
+
+                var unitOfWork = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
+                var openCount = await unitOfWork.Signals.GetActiveSignalsCountAsync();
+                var lastTime = userSettings.LastSignalSentUtc == default 
+                    ? "" 
+                    : Domain.Common.TimeHelper.FormatAz(userSettings.LastSignalSentUtc);
+
+                var dashText = TelegramMessageFormatter.FormatTerminalDashboard(userSettings, openCount, lastTime);
+                var inlineKb = TelegramKeyboards.BuildTerminalInlineKeyboard(userSettings);
+
+                var newMsgId = await SendMessageReturnIdAsync(dashText, chatId, inlineKb);
+                userSettings.LastTerminalMessageId = newMsgId;
+                userSettings.IsTerminalOpen = true;
                 SaveSettings();
                 return;
             }
@@ -2344,8 +2456,6 @@ namespace CryptoSense.Infrastructure.Telegram
                 int openCount = 0;
                 try
                 {
-                    using var sc = _serviceProvider.CreateScope();
-                    var uow = sc.ServiceProvider.GetRequiredService<IUnitOfWork>();
                     openCount = await uow.Signals.GetUserOpenSignalsCountAsync(chatId);
                 }
                 catch { }
@@ -2357,24 +2467,9 @@ namespace CryptoSense.Infrastructure.Telegram
                 await SendMessageAsync(statusMsg, chatId, TelegramKeyboards.BuildUserKeyboard(userSettings, isAdmin));
                 return;
             }
-            else if (text.Contains("Geri") || text.Contains("Əsas Menyu") || text == "/menu" || text == "/start" || text == "/help" || text.Contains("Menyu") || text.Contains("Əsas Terminal") || text.Contains("Esas Terminal") || text == "Terminal")
+            else if (text.Contains("Geri") || text.Contains("Əsas Menyu") || text == "/menu" || text == "/help" || text.Contains("Menyu"))
             {
                 _userStates.TryRemove(chatId, out _);
-
-                bool isExplicitTerminal = text.Contains("Əsas Terminal") || text.Contains("Esas Terminal") || text == "Terminal";
-
-                // Toggle logic: If user specifically clicked "🎛 Əsas Terminal" or "Terminal" and the terminal is already open
-                if (isExplicitTerminal && userSettings.IsTerminalOpen && userSettings.LastTerminalMessageId.HasValue)
-                {
-                    var oldMsgId = userSettings.LastTerminalMessageId.Value;
-                    userSettings.IsTerminalOpen = false;
-                    userSettings.LastTerminalMessageId = null;
-                    SaveSettings();
-
-                    // Delete the open terminal so sections collapse back into place without duplicating messages
-                    await DeleteMessageAsync(chatId, oldMsgId);
-                    return;
-                }
 
                 // If Admin Panel was open, close it cleanly
                 if (userSettings.IsAdminOpen && userSettings.LastAdminMessageId.HasValue)
