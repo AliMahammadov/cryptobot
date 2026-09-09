@@ -41,7 +41,8 @@ namespace CryptoSense.Domain.Common
         public static string FormatAz(this DateTime dt)
         {
             if (dt == default) return "Hələ yoxdur";
-            var azTime = dt.Kind == DateTimeKind.Utc ? dt.ToAzerbaijanTime() : dt;
+            var utc = dt.Kind == DateTimeKind.Utc ? dt : DateTime.SpecifyKind(dt, DateTimeKind.Utc);
+            var azTime = TimeZoneInfo.ConvertTimeFromUtc(utc, AzerbaijanTz);
             return azTime.ToString("dd.MM.yyyy | HH:mm:ss (+4)");
         }
 

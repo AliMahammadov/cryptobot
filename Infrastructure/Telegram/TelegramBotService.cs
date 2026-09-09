@@ -608,6 +608,12 @@ namespace CryptoSense.Infrastructure.Telegram
 
             if (!string.IsNullOrEmpty(specificChatId))
             {
+                var deliveredChats = await uow.Signals.GetDeliveredChatIdsAsync(signal.Id);
+                if (deliveredChats.Contains(specificChatId))
+                {
+                    return false;
+                }
+
                 var settings = GetSettings(specificChatId);
                 var userSigNum = signal.SignalNumber > 0 ? signal.SignalNumber : 1;
                 _signalUserNumberMap[$"{signal.Id}_{specificChatId}"] = userSigNum;
@@ -615,14 +621,14 @@ namespace CryptoSense.Infrastructure.Telegram
                 bool sent = await SendMessageAsync(msg, specificChatId);
                 if (sent)
                 {
-                    settings.AlertCounter = Math.Max(settings.AlertCounter, userSigNum);
-                    settings.LastSignalSentUtc = DateTime.UtcNow;
-                    settings.LastHeartbeatSentUtc = DateTime.UtcNow;
-                    SaveSettings();
-                    await uow.Signals.RecordDeliveryAsync(signal.Id, specificChatId, userSigNum);
-                    signal.SignalAlertSent = true;
                     try
                     {
+                        settings.AlertCounter = Math.Max(settings.AlertCounter, userSigNum);
+                        settings.LastSignalSentUtc = DateTime.UtcNow;
+                        settings.LastHeartbeatSentUtc = DateTime.UtcNow;
+                        SaveSettings();
+                        await uow.Signals.RecordDeliveryAsync(signal.Id, specificChatId, userSigNum);
+                        signal.SignalAlertSent = true;
                         var dbSig = await uow.Signals.GetByIdAsync(signal.Id);
                         if (dbSig != null)
                         {
@@ -631,7 +637,10 @@ namespace CryptoSense.Infrastructure.Telegram
                             await uow.SaveChangesAsync();
                         }
                     }
-                    catch { }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"[TelegramBotService] RecordDelivery specific error: {ex.Message}");
+                    }
                 }
                 return sent;
             }
@@ -719,6 +728,13 @@ namespace CryptoSense.Infrastructure.Telegram
                     }
                 }
 
+                // Strict Delivery Dedup: Never deliver the same signal twice to the same user
+                var deliveredChats = await uow.Signals.GetDeliveredChatIdsAsync(signal.Id);
+                if (deliveredChats.Contains(chatId))
+                {
+                    continue;
+                }
+
                 // Limit checks: Max 10 signals per day, Max 5 open positions
                 var todayCount = await uow.Signals.GetUserTodaySignalsCountAsync(chatId);
                 if (todayCount >= 10) continue;
@@ -732,12 +748,19 @@ namespace CryptoSense.Infrastructure.Telegram
                 bool sent = await SendMessageAsync(msg, chatId);
                 if (sent)
                 {
-                    settings.AlertCounter = Math.Max(settings.AlertCounter, userSigNum);
-                    settings.LastSignalSentUtc = DateTime.UtcNow;
-                    settings.LastHeartbeatSentUtc = DateTime.UtcNow;
-                    SaveSettings();
-                    await uow.Signals.RecordDeliveryAsync(signal.Id, chatId, userSigNum);
                     anyDelivered = true;
+                    try
+                    {
+                        settings.AlertCounter = Math.Max(settings.AlertCounter, userSigNum);
+                        settings.LastSignalSentUtc = DateTime.UtcNow;
+                        settings.LastHeartbeatSentUtc = DateTime.UtcNow;
+                        SaveSettings();
+                        await uow.Signals.RecordDeliveryAsync(signal.Id, chatId, userSigNum);
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"[TelegramBotService] RecordDelivery error: {ex.Message}");
+                    }
                 }
             }
 
@@ -754,7 +777,10 @@ namespace CryptoSense.Infrastructure.Telegram
                         await uow.SaveChangesAsync();
                     }
                 }
-                catch { }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[TelegramBotService] Error updating signal alert sent status: {ex.Message}");
+                }
             }
 
             return anyDelivered;

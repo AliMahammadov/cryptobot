@@ -2,7 +2,7 @@
   {
     "Id": 47,
     "Username": "Ali",
-    "PasswordHash": "$2a$11$46IsA2Ex0MNQMhoFFbEOY.e4ueXD5B5dDusB3oL8ZjKhKjMUm401a",
+    "PasswordHash": "$2a$11$c2KMM0QguMt8Xt8xbDi3qeNn2ReqR6029tSfSR3PgFIgh/.Xsvb3u",
     "Password": "",
     "Role": 0,
     "TelegramUsername": "Ali_Mahammadov",
@@ -10,7 +10,7 @@
     "TelegramUserId": 1219998176,
     "IsActive": true,
     "CreatedAtUtc": "2026-09-04T00:45:17.967678",
-    "LastLoginAt": "2026-09-09T21:12:51.2451405Z"
+    "LastLoginAt": "2026-09-09T21:38:17.2354522Z"
   },
   {
     "Id": 165,
@@ -61,8 +61,8 @@
     "TelegramChatId": "",
     "TelegramUserId": null,
     "IsActive": false,
-    "CreatedAtUtc": "2026-09-09T21:13:15.9688748Z",
-    "LastLoginAt": "2026-09-09T21:13:15.9688755Z"
+    "CreatedAtUtc": "2026-09-09T21:13:15.9688748",
+    "LastLoginAt": "2026-09-09T21:13:15.9688755"
   },
   {
     "Id": 185,
@@ -143,6 +143,19 @@
     "LastLoginAt": "2026-09-09T20:19:37.4461765"
   },
   {
+    "Id": 217,
+    "Username": "AliTest_b449",
+    "PasswordHash": "$2a$11$BXy1Bn9/UQ9F7REalg406eK3Fb2BIxFUYAMgofyCps5h7lrcw66py",
+    "Password": "",
+    "Role": 1,
+    "TelegramUsername": "",
+    "TelegramChatId": "",
+    "TelegramUserId": null,
+    "IsActive": false,
+    "CreatedAtUtc": "2026-09-09T21:38:42.3435939Z",
+    "LastLoginAt": "2026-09-09T21:38:42.3435951Z"
+  },
+  {
     "Id": 181,
     "Username": "AliTest_d911",
     "PasswordHash": "$2a$11$Bk/ZbBVEVbmgJpRFFjpgq.f29mUHdPNA53pjVZLzY2IKBlgssDaHK",
@@ -195,6 +208,19 @@
     "LastLoginAt": "2026-09-09T20:11:07.0767783"
   },
   {
+    "Id": 215,
+    "Username": "qa_tester_175639",
+    "PasswordHash": "$2a$11$xESfi7ZZxYkfx1XCI090RuKNoChvaZM1AqsHI/ZymZ2bJrNLnXWfu",
+    "Password": "",
+    "Role": 1,
+    "TelegramUsername": "",
+    "TelegramChatId": "",
+    "TelegramUserId": null,
+    "IsActive": false,
+    "CreatedAtUtc": "2026-09-09T21:38:29.4291786Z",
+    "LastLoginAt": "2026-09-09T21:38:29.4291795Z"
+  },
+  {
     "Id": 179,
     "Username": "qa_tester_17af98",
     "PasswordHash": "$2a$11$.Y9WQlGLqV4/QuxjtkKKG.F9TkqQVcmIpSkJA5rh7feYdljPlmh3y",
@@ -217,8 +243,8 @@
     "TelegramChatId": "",
     "TelegramUserId": null,
     "IsActive": false,
-    "CreatedAtUtc": "2026-09-09T21:13:04.1443787Z",
-    "LastLoginAt": "2026-09-09T21:13:04.1443797Z"
+    "CreatedAtUtc": "2026-09-09T21:13:04.1443787",
+    "LastLoginAt": "2026-09-09T21:13:04.1443797"
   },
   {
     "Id": 187,
@@ -390,6 +416,19 @@
     "LastLoginAt": "2026-09-08T15:08:21.9496119"
   },
   {
+    "Id": 216,
+    "Username": "session_user_6abba2",
+    "PasswordHash": "$2a$11$iyhc9b9qhWOHFjZISSKVCerD0sRLNbqtSsgN11dGrPOzA3AHp.W6W",
+    "Password": "",
+    "Role": 1,
+    "TelegramUsername": "",
+    "TelegramChatId": "test_chat_c36ce382",
+    "TelegramUserId": 999888777,
+    "IsActive": false,
+    "CreatedAtUtc": "2026-09-09T21:38:41.3359631Z",
+    "LastLoginAt": "2026-09-09T21:38:41.5486508Z"
+  },
+  {
     "Id": 188,
     "Username": "session_user_6ae9f9",
     "PasswordHash": "$2a$11$je5eG8NlxOU101TQ8sePruBwrpn50GBP9ME4KGl1H9aajgoZgQEzy",
@@ -464,8 +503,8 @@
     "TelegramChatId": "test_chat_e3151a05",
     "TelegramUserId": 999888777,
     "IsActive": false,
-    "CreatedAtUtc": "2026-09-09T21:13:15.0482687Z",
-    "LastLoginAt": "2026-09-09T21:13:15.2061457Z"
+    "CreatedAtUtc": "2026-09-09T21:13:15.0482687",
+    "LastLoginAt": "2026-09-09T21:13:15.2061457"
   },
   {
     "Id": 174,
@@ -507,6 +546,19 @@
     "LastLoginAt": "2026-09-09T20:56:40.8285088"
   },
   {
+    "Id": 214,
+    "Username": "testuser_487328",
+    "PasswordHash": "$2a$11$mBJhTqdsd7BpHX/9eBCLM.65t5s/ju5GX0XCHwSbtU3M3vrECub.q",
+    "Password": "",
+    "Role": 1,
+    "TelegramUsername": "",
+    "TelegramChatId": "",
+    "TelegramUserId": null,
+    "IsActive": false,
+    "CreatedAtUtc": "2026-09-09T21:38:17.6761112Z",
+    "LastLoginAt": "2026-09-09T21:38:18.9952429Z"
+  },
+  {
     "Id": 210,
     "Username": "testuser_53bef3",
     "PasswordHash": "$2a$11$B3cMnx8yh3HoQSOLQYTxrel0KaCTjHH2NV77d9x2xEoryXkI.kGcu",
@@ -516,8 +568,8 @@
     "TelegramChatId": "",
     "TelegramUserId": null,
     "IsActive": false,
-    "CreatedAtUtc": "2026-09-09T21:12:51.5533045Z",
-    "LastLoginAt": "2026-09-09T21:12:52.1185739Z"
+    "CreatedAtUtc": "2026-09-09T21:12:51.5533045",
+    "LastLoginAt": "2026-09-09T21:12:52.1185739"
   },
   {
     "Id": 182,

@@ -419,12 +419,56 @@ namespace CryptoSense.Application.Services
             {
                 existingSignal.CurrentPrice = calculationRefPrice;
                 _recentCandleSignals.TryAdd(candleKey, existingSignal);
+
+                if (isLiveScan)
+                {
+                    return new FuturesSignal
+                    {
+                        Symbol = symbol,
+                        Timeframe = timeframe,
+                        Direction = existingSignal.Direction,
+                        SignalType = "GÖZLƏMƏ (ŞAM İŞLƏNİB) ⚪",
+                        Status = existingSignal.Status,
+                        OutcomeStatus = existingSignal.OutcomeStatus,
+                        CurrentPrice = calculationRefPrice,
+                        EntryPrice = existingSignal.EntryPrice,
+                        ConfluenceScore = existingSignal.ConfluenceScore,
+                        Confidence = 50,
+                        SourceCandleOpenTimeUtc = sourceCandleTime,
+                        GeneratedAt = existingSignal.GeneratedAt,
+                        ExpiryTimeUtc = existingSignal.ExpiryTimeUtc,
+                        TimestampFormatted = existingSignal.TimestampFormatted,
+                        AnalysisReasons = new List<string> { $"Bu şam ({sourceCandleTime:dd.MM.yyyy HH:mm}) üzrə artıq siqnal formalaşdırılıb və izləmədədir." }
+                    };
+                }
+
                 return existingSignal;
             }
 
             if (_recentCandleSignals.TryGetValue(candleKey, out var cachedSig))
             {
                 cachedSig.CurrentPrice = calculationRefPrice;
+                if (isLiveScan)
+                {
+                    return new FuturesSignal
+                    {
+                        Symbol = symbol,
+                        Timeframe = timeframe,
+                        Direction = cachedSig.Direction,
+                        SignalType = "GÖZLƏMƏ (ŞAM İŞLƏNİB) ⚪",
+                        Status = cachedSig.Status,
+                        OutcomeStatus = cachedSig.OutcomeStatus,
+                        CurrentPrice = calculationRefPrice,
+                        EntryPrice = cachedSig.EntryPrice,
+                        ConfluenceScore = cachedSig.ConfluenceScore,
+                        Confidence = 50,
+                        SourceCandleOpenTimeUtc = sourceCandleTime,
+                        GeneratedAt = cachedSig.GeneratedAt,
+                        ExpiryTimeUtc = cachedSig.ExpiryTimeUtc,
+                        TimestampFormatted = cachedSig.TimestampFormatted,
+                        AnalysisReasons = new List<string> { $"Bu şam ({sourceCandleTime:dd.MM.yyyy HH:mm}) artıq keşdə mövcuddur." }
+                    };
+                }
                 return cachedSig;
             }
 

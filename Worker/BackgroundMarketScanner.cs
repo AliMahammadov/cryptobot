@@ -98,7 +98,7 @@ namespace CryptoSense.Worker
                 try
                 {
                     var db = initScope.ServiceProvider.GetRequiredService<AppDbContext>();
-                    var maxNum = db.Signals.Any() ? db.Signals.Max(s => s.Number) : 0;
+                    var maxNum = db.Signals.Any() ? db.Signals.Max(s => s.SignalNumber) : 0;
                     lock (_sendLock)
                     {
                         _nextSignalNumber = maxNum;
@@ -1342,10 +1342,20 @@ namespace CryptoSense.Worker
                                         break;
                                     }
 
-                                    // Eyni Symbol + Side + Timeframe = həmin 1h/4h şamda BİR siqnal
-                                    var alertKey = $"{signal.Symbol}_{signal.Direction}_{signal.Timeframe}_{signal.SourceCandleOpenTimeUtc:yyyyMMddHHmmss}";
+                                    // Eyni Symbol + Timeframe + Candle = BİR siqnal
+                                    var alertKey = $"{signal.Symbol}_{signal.Timeframe}_{signal.SourceCandleOpenTimeUtc:yyyyMMddHHmmss}";
                                     if (_lastAlertSent.ContainsKey(alertKey) || signal.SignalAlertSent)
                                     {
+                                        break;
+                                    }
+
+                                    // Check database explicitly for existing candle signal that was already delivered
+                                    var existingCandle = await uow.Signals.GetExistingCandleSignalAsync(signal.Symbol, signal.Timeframe, signal.SourceCandleOpenTimeUtc);
+                                    if (existingCandle != null && (existingCandle.SignalAlertSent || existingCandle.Id > 0))
+                                    {
+                                        _lastAlertSent[alertKey] = DateTime.UtcNow;
+                                        _lastSymbolAlertTime[signal.Symbol] = DateTime.UtcNow;
+                                        _coinActiveLocks.TryAdd(sym, 1);
                                         break;
                                     }
 
@@ -1369,15 +1379,26 @@ namespace CryptoSense.Worker
                                         await uow.SaveChangesAsync(ct);
                                     }
 
-                                    var ok = await _telegramService.SendSignalAlertAsync(signal);
+                                    bool ok = false;
+                                    try
+                                    {
+                                        ok = await _telegramService.SendSignalAlertAsync(signal);
+                                    }
+                                    catch (Exception ex)
+                                    {
+                                        Console.WriteLine($"[MarketScanner] SendSignalAlert error for {signal.Symbol}: {ex.Message}");
+                                    }
+
+                                    // Always lock this candle so it cannot be retried/spammed in subsequent cycles
+                                    _lastAlertSent[alertKey] = DateTime.UtcNow;
+                                    _lastSymbolAlertTime[signal.Symbol] = DateTime.UtcNow;
+
                                     if (ok)
                                     {
                                         lock (_sendLock)
                                         {
-                                            _nextSignalNumber = n;
+                                            _nextSignalNumber = Math.Max(_nextSignalNumber, n);
                                         }
-                                        _lastAlertSent[alertKey] = DateTime.UtcNow;
-                                        _lastSymbolAlertTime[signal.Symbol] = DateTime.UtcNow;
                                         _coinActiveLocks.TryAdd(sym, 1);
                                         break;
                                     }
