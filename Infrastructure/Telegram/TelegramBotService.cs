@@ -37,6 +37,8 @@ namespace CryptoSense.Infrastructure.Telegram
         private static readonly ConcurrentDictionary<string, bool> _loggedOutChats = new();
         private static readonly ConcurrentDictionary<string, string> _authenticatedSessions = new();
         private static readonly ConcurrentDictionary<string, bool> _testModeChats = new();
+        private static readonly SemaphoreSlim _sendNumberLock = new(1, 1);
+        private static readonly ConcurrentDictionary<string, DateTime> _lastPortfolioSummarySent = new();
         private static readonly string DataDirectory = !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("RAILWAY_VOLUME_MOUNT_PATH")) && Directory.Exists(Environment.GetEnvironmentVariable("RAILWAY_VOLUME_MOUNT_PATH"))
             ? Environment.GetEnvironmentVariable("RAILWAY_VOLUME_MOUNT_PATH")!
             : (Directory.Exists("/app/data") ? "/app/data" : Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "data"));
@@ -591,11 +593,15 @@ namespace CryptoSense.Infrastructure.Telegram
 
         public async Task<bool> SendSignalAlertAsync(FuturesSignal signal, string? specificChatId = null)
         {
-            using var scope = _serviceProvider.CreateScope();
-            var uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
-
             // Strict Timeframe check: Only 1h, 4h
             if (signal.Timeframe == "15m") return false;
+
+            // Strict DataAge check: <= 1000ms
+            if (signal.DataAgeMs > 1000)
+            {
+                Console.WriteLine($"[TelegramBotService] DataAge gate blocked: {signal.Symbol} DataAge={signal.DataAgeMs}ms > 1000ms");
+                return false;
+            }
 
             decimal tp1DistCheck = Math.Abs(signal.TakeProfit1 - signal.EntryPrice);
             decimal slDistCheck = Math.Abs(signal.StopLoss - signal.EntryPrice);
@@ -606,184 +612,212 @@ namespace CryptoSense.Infrastructure.Telegram
                 return false;
             }
 
-            if (!string.IsNullOrEmpty(specificChatId))
+            await _sendNumberLock.WaitAsync();
+            try
             {
-                var deliveredChats = await uow.Signals.GetDeliveredChatIdsAsync(signal.Id);
-                if (deliveredChats.Contains(specificChatId))
+                using var scope = _serviceProvider.CreateScope();
+                var uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
+
+                // Nömrə: Telegram true-dan SONRA, bir lock, bir sıra (#1,#2,#3…). #6-dan #68-ə tullanma = fail.
+                int nextSequentialNum = await uow.Signals.GetNextSequentialSignalNumberAsync();
+
+                if (!string.IsNullOrEmpty(specificChatId))
                 {
-                    return false;
+                    var deliveredChats = await uow.Signals.GetDeliveredChatIdsAsync(signal.Id);
+                    if (deliveredChats.Contains(specificChatId))
+                    {
+                        return false;
+                    }
+
+                    var settings = GetSettings(specificChatId);
+                    var userSigNum = nextSequentialNum;
+                    signal.SignalNumber = userSigNum;
+                    _signalUserNumberMap[$"{signal.Id}_{specificChatId}"] = userSigNum;
+                    var msg = TelegramMessageFormatter.FormatSignalAlert(signal, userSigNum);
+                    bool sent = await SendMessageAsync(msg, specificChatId);
+                    if (sent)
+                    {
+                        try
+                        {
+                            settings.AlertCounter = Math.Max(settings.AlertCounter, userSigNum);
+                            settings.LastSignalSentUtc = DateTime.UtcNow;
+                            settings.LastHeartbeatSentUtc = DateTime.UtcNow;
+                            SaveSettings();
+                            await uow.Signals.RecordDeliveryAsync(signal.Id, specificChatId, userSigNum);
+                            signal.SignalAlertSent = true;
+                            signal.SignalNumber = userSigNum;
+                            var dbSig = await uow.Signals.GetByIdAsync(signal.Id);
+                            if (dbSig != null)
+                            {
+                                dbSig.SignalAlertSent = true;
+                                dbSig.SignalNumber = userSigNum;
+                                await uow.Signals.UpdateAsync(dbSig);
+                                await uow.SaveChangesAsync();
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            Console.WriteLine($"[TelegramBotService] RecordDelivery specific error: {ex.Message}");
+                        }
+                    }
+                    else
+                    {
+                        signal.SignalNumber = 0;
+                    }
+                    return sent;
                 }
 
-                var settings = GetSettings(specificChatId);
-                var userSigNum = signal.SignalNumber > 0 ? signal.SignalNumber : 1;
-                _signalUserNumberMap[$"{signal.Id}_{specificChatId}"] = userSigNum;
-                var msg = TelegramMessageFormatter.FormatSignalAlert(signal, userSigNum);
-                bool sent = await SendMessageAsync(msg, specificChatId);
-                if (sent)
+                var userManager = scope.ServiceProvider.GetRequiredService<IUserManagerService>();
+                var activeUsers = await userManager.GetAllUsersAsync();
+
+                var targetChatIds = new HashSet<string>();
+                foreach (var user in activeUsers)
                 {
+                    if (!string.IsNullOrEmpty(user.TelegramChatId) && user.IsActive)
+                    {
+                        targetChatIds.Add(user.TelegramChatId);
+                    }
+                }
+                foreach (var kvp in UserPreferences)
+                {
+                    if (kvp.Value.IsActive && !string.IsNullOrEmpty(kvp.Key))
+                    {
+                        targetChatIds.Add(kvp.Key);
+                    }
+                }
+
+                bool anyDelivered = false;
+
+                foreach (var chatId in targetChatIds)
+                {
+                    var settings = GetSettings(chatId);
+                    if (!settings.IsActive) continue;
+
+                    // Strict Timeframe check: Only 1h, 4h
+                    if (settings.Timeframe != "Hamısı" && settings.Timeframe != "Hamisi" && settings.Timeframe != signal.Timeframe)
+                    {
+                        continue;
+                    }
+
+                    // Strict Chronological check: never send a signal generated before the user selected timeframe / resumed
+                    if (signal.GeneratedAt < settings.LastResumeTime.AddSeconds(-15))
+                    {
+                        continue;
+                    }
+
+                    // Strict Candle Freshness check: never deliver a signal whose closed candle is older than tolerance
+                    var candleDuration = signal.Timeframe switch
+                    {
+                        "4h" => TimeSpan.FromHours(4),
+                        _ => TimeSpan.FromHours(1)
+                    };
+                    var maxTolerance = signal.Timeframe switch
+                    {
+                        "4h" => TimeSpan.FromMinutes(30),
+                        _ => TimeSpan.FromMinutes(15)
+                    };
+                    var candleCloseUtc = signal.SourceCandleOpenTimeUtc + candleDuration;
+                    if (DateTime.UtcNow - candleCloseUtc > maxTolerance)
+                    {
+                        continue;
+                    }
+
+                    // Strict R:R Gate: R:R = (TP1 məsafəsi) / (SL məsafəsi). R:R < 1.30 isə send=NO
+                    decimal tp1Dist = Math.Abs(signal.TakeProfit1 - signal.EntryPrice);
+                    decimal slDist = Math.Abs(signal.StopLoss - signal.EntryPrice);
+                    decimal rr = slDist > 0 ? (tp1Dist / slDist) : 0m;
+                    if (rr < 1.30m)
+                    {
+                        continue;
+                    }
+
+                    // Strict User Coin Filter: User only receives signals if they have explicitly selected coins.
+                    if (settings.Coins.Count == 0 || !settings.Coins.Contains(signal.Symbol)) continue;
+
+                    // Fresh Entry Filter: If price drifted > 0.35% away from entry towards TP1 or StopLoss, don't send stale setup
+                    if (signal.CurrentPrice > 0 && signal.EntryPrice > 0)
+                    {
+                        bool isLong = signal.Direction == SignalDirection.Buy || signal.SignalType.Contains("LONG");
+                        if (isLong && signal.TakeProfit1 > signal.EntryPrice)
+                        {
+                            decimal maxAllowed = signal.EntryHigh > 0 ? signal.EntryHigh * 1.0035m : signal.EntryPrice * 1.0035m;
+                            if (signal.CurrentPrice > maxAllowed) continue;
+                        }
+                        else if (!isLong && signal.TakeProfit1 < signal.EntryPrice)
+                        {
+                            decimal minAllowed = signal.EntryLow > 0 ? signal.EntryLow * 0.9965m : signal.EntryPrice * 0.9965m;
+                            if (signal.CurrentPrice < minAllowed) continue;
+                        }
+                    }
+
+                    // Strict Delivery Dedup: Never deliver the same signal twice to the same user
+                    var deliveredChats = await uow.Signals.GetDeliveredChatIdsAsync(signal.Id);
+                    if (deliveredChats.Contains(chatId))
+                    {
+                        continue;
+                    }
+
+                    // Limit checks: Max 10 signals per day, Max 5 open positions
+                    var todayCount = await uow.Signals.GetUserTodaySignalsCountAsync(chatId);
+                    if (todayCount >= 10) continue;
+
+                    var openCount = await uow.Signals.GetUserOpenSignalsCountAsync(chatId);
+                    if (openCount >= 5) continue;
+
+                    var userSigNum = nextSequentialNum;
+                    signal.SignalNumber = userSigNum;
+                    _signalUserNumberMap[$"{signal.Id}_{chatId}"] = userSigNum;
+                    var msg = TelegramMessageFormatter.FormatSignalAlert(signal, userSigNum);
+                    bool sent = await SendMessageAsync(msg, chatId);
+                    if (sent)
+                    {
+                        anyDelivered = true;
+                        try
+                        {
+                            settings.AlertCounter = Math.Max(settings.AlertCounter, userSigNum);
+                            settings.LastSignalSentUtc = DateTime.UtcNow;
+                            settings.LastHeartbeatSentUtc = DateTime.UtcNow;
+                            SaveSettings();
+                            await uow.Signals.RecordDeliveryAsync(signal.Id, chatId, userSigNum);
+                        }
+                        catch (Exception ex)
+                        {
+                            Console.WriteLine($"[TelegramBotService] RecordDelivery error: {ex.Message}");
+                        }
+                    }
+                }
+
+                if (anyDelivered)
+                {
+                    signal.SignalAlertSent = true;
+                    signal.SignalNumber = nextSequentialNum;
                     try
                     {
-                        settings.AlertCounter = Math.Max(settings.AlertCounter, userSigNum);
-                        settings.LastSignalSentUtc = DateTime.UtcNow;
-                        settings.LastHeartbeatSentUtc = DateTime.UtcNow;
-                        SaveSettings();
-                        await uow.Signals.RecordDeliveryAsync(signal.Id, specificChatId, userSigNum);
-                        signal.SignalAlertSent = true;
                         var dbSig = await uow.Signals.GetByIdAsync(signal.Id);
                         if (dbSig != null)
                         {
                             dbSig.SignalAlertSent = true;
+                            dbSig.SignalNumber = nextSequentialNum;
                             await uow.Signals.UpdateAsync(dbSig);
                             await uow.SaveChangesAsync();
                         }
                     }
                     catch (Exception ex)
                     {
-                        Console.WriteLine($"[TelegramBotService] RecordDelivery specific error: {ex.Message}");
+                        Console.WriteLine($"[TelegramBotService] Error updating signal alert sent status: {ex.Message}");
                     }
                 }
-                return sent;
+                else
+                {
+                    signal.SignalNumber = 0;
+                }
+
+                return anyDelivered;
             }
-
-            var userManager = scope.ServiceProvider.GetRequiredService<IUserManagerService>();
-            var activeUsers = await userManager.GetAllUsersAsync();
-
-            var targetChatIds = new HashSet<string>();
-            foreach (var user in activeUsers)
+            finally
             {
-                if (!string.IsNullOrEmpty(user.TelegramChatId) && user.IsActive)
-                {
-                    targetChatIds.Add(user.TelegramChatId);
-                }
+                _sendNumberLock.Release();
             }
-            foreach (var kvp in UserPreferences)
-            {
-                if (kvp.Value.IsActive && !string.IsNullOrEmpty(kvp.Key))
-                {
-                    targetChatIds.Add(kvp.Key);
-                }
-            }
-
-            bool anyDelivered = false;
-
-            foreach (var chatId in targetChatIds)
-            {
-                var settings = GetSettings(chatId);
-                if (!settings.IsActive) continue;
-
-                // Strict Timeframe check: Only 1h, 4h
-                if (settings.Timeframe != "Hamısı" && settings.Timeframe != "Hamisi" && settings.Timeframe != signal.Timeframe)
-                {
-                    continue;
-                }
-
-                // Strict Chronological check: never send a signal generated before the user selected timeframe / resumed
-                if (signal.GeneratedAt < settings.LastResumeTime.AddSeconds(-15))
-                {
-                    continue;
-                }
-
-                // Strict Candle Freshness check: never deliver a signal whose closed candle is older than tolerance
-                var candleDuration = signal.Timeframe switch
-                {
-                    "4h" => TimeSpan.FromHours(4),
-                    _ => TimeSpan.FromHours(1)
-                };
-                var maxTolerance = signal.Timeframe switch
-                {
-                    "4h" => TimeSpan.FromMinutes(30),
-                    _ => TimeSpan.FromMinutes(15)
-                };
-                var candleCloseUtc = signal.SourceCandleOpenTimeUtc + candleDuration;
-                if (DateTime.UtcNow - candleCloseUtc > maxTolerance)
-                {
-                    continue;
-                }
-
-                // Strict R:R Gate: R:R = (TP1 məsafəsi) / (SL məsafəsi). R:R < 1.30 isə send=NO
-                decimal tp1Dist = Math.Abs(signal.TakeProfit1 - signal.EntryPrice);
-                decimal slDist = Math.Abs(signal.StopLoss - signal.EntryPrice);
-                decimal rr = slDist > 0 ? (tp1Dist / slDist) : 0m;
-                if (rr < 1.30m)
-                {
-                    continue;
-                }
-
-                // Strict User Coin Filter: User only receives signals if they have explicitly selected coins.
-                if (settings.Coins.Count == 0 || !settings.Coins.Contains(signal.Symbol)) continue;
-
-                // Fresh Entry Filter: If price drifted > 0.35% away from entry towards TP1 or StopLoss, don't send stale setup
-                if (signal.CurrentPrice > 0 && signal.EntryPrice > 0)
-                {
-                    bool isLong = signal.Direction == SignalDirection.Buy || signal.SignalType.Contains("LONG");
-                    if (isLong && signal.TakeProfit1 > signal.EntryPrice)
-                    {
-                        decimal maxAllowed = signal.EntryHigh > 0 ? signal.EntryHigh * 1.0035m : signal.EntryPrice * 1.0035m;
-                        if (signal.CurrentPrice > maxAllowed) continue;
-                    }
-                    else if (!isLong && signal.TakeProfit1 < signal.EntryPrice)
-                    {
-                        decimal minAllowed = signal.EntryLow > 0 ? signal.EntryLow * 0.9965m : signal.EntryPrice * 0.9965m;
-                        if (signal.CurrentPrice < minAllowed) continue;
-                    }
-                }
-
-                // Strict Delivery Dedup: Never deliver the same signal twice to the same user
-                var deliveredChats = await uow.Signals.GetDeliveredChatIdsAsync(signal.Id);
-                if (deliveredChats.Contains(chatId))
-                {
-                    continue;
-                }
-
-                // Limit checks: Max 10 signals per day, Max 5 open positions
-                var todayCount = await uow.Signals.GetUserTodaySignalsCountAsync(chatId);
-                if (todayCount >= 10) continue;
-
-                var openCount = await uow.Signals.GetUserOpenSignalsCountAsync(chatId);
-                if (openCount >= 5) continue;
-
-                var userSigNum = signal.SignalNumber > 0 ? signal.SignalNumber : 1;
-                _signalUserNumberMap[$"{signal.Id}_{chatId}"] = userSigNum;
-                var msg = TelegramMessageFormatter.FormatSignalAlert(signal, userSigNum);
-                bool sent = await SendMessageAsync(msg, chatId);
-                if (sent)
-                {
-                    anyDelivered = true;
-                    try
-                    {
-                        settings.AlertCounter = Math.Max(settings.AlertCounter, userSigNum);
-                        settings.LastSignalSentUtc = DateTime.UtcNow;
-                        settings.LastHeartbeatSentUtc = DateTime.UtcNow;
-                        SaveSettings();
-                        await uow.Signals.RecordDeliveryAsync(signal.Id, chatId, userSigNum);
-                    }
-                    catch (Exception ex)
-                    {
-                        Console.WriteLine($"[TelegramBotService] RecordDelivery error: {ex.Message}");
-                    }
-                }
-            }
-
-            if (anyDelivered)
-            {
-                signal.SignalAlertSent = true;
-                try
-                {
-                    var dbSig = await uow.Signals.GetByIdAsync(signal.Id);
-                    if (dbSig != null)
-                    {
-                        dbSig.SignalAlertSent = true;
-                        await uow.Signals.UpdateAsync(dbSig);
-                        await uow.SaveChangesAsync();
-                    }
-                }
-                catch (Exception ex)
-                {
-                    Console.WriteLine($"[TelegramBotService] Error updating signal alert sent status: {ex.Message}");
-                }
-            }
-
-            return anyDelivered;
         }
 
         public async Task SendOutcomeAlertAsync(FuturesSignal signal, string outcomeType, decimal hitPrice, decimal profitPct)
@@ -836,6 +870,9 @@ namespace CryptoSense.Infrastructure.Telegram
 
                 var msg = TelegramMessageFormatter.FormatOutcomeAlert(signal, userSigNum, outcomeType, hitPrice, profitPct);
                 await SendMessageAsync(msg, chatId);
+                settings.LastSignalSentUtc = DateTime.UtcNow;
+                settings.LastHeartbeatSentUtc = DateTime.UtcNow;
+                SaveSettings();
             }
         }
 
@@ -986,9 +1023,19 @@ namespace CryptoSense.Infrastructure.Telegram
             }
         }
 
-        private async Task ScanUserCoinsInstantlyAsync(UserSettings userSettings, string chatId, string timeframe)
+        private async Task ScanUserCoinsInstantlyAsync(UserSettings userSettings, string chatId, string timeframe, bool isManualButton = false)
         {
             if (userSettings.Coins.Count == 0 || string.IsNullOrWhiteSpace(timeframe) || timeframe == "Təyin olunmayıb" || !userSettings.IsActive) return;
+
+            if (!isManualButton && _lastPortfolioSummarySent.TryGetValue(chatId, out var lastSent))
+            {
+                if ((DateTime.UtcNow - lastSent).TotalMinutes < 60)
+                {
+                    return; // Throttle: max 1 per 60 mins unless manual button
+                }
+            }
+            _lastPortfolioSummarySent[chatId] = DateTime.UtcNow;
+
             using var scope = _serviceProvider.CreateScope();
             var uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
             var signalEngine = scope.ServiceProvider.GetRequiredService<ISignalEngine>();
@@ -1015,9 +1062,49 @@ namespace CryptoSense.Infrastructure.Telegram
             {
                 var allTickers = await marketData.GetTopFuturesTickersAsync(250);
                 var coinSet = new HashSet<string>(userSettings.Coins, StringComparer.OrdinalIgnoreCase);
-                matchedTickers = allTickers.Where(t => coinSet.Contains(t.Symbol) || coinSet.Contains(t.Symbol.Replace("1000", ""))).ToList();
+                matchedTickers = allTickers.Where(t => coinSet.Contains(t.Symbol) || coinSet.Contains(t.Symbol.Replace("1000", "")) || coinSet.Contains("1000" + t.Symbol)).ToList();
             }
             catch { }
+
+            // Ensure all tracked coins are present (e.g. TONUSDT if not in top 250 futures)
+            foreach (var coin in userSettings.Coins)
+            {
+                bool exists = matchedTickers.Any(t => t.Symbol.Equals(coin, StringComparison.OrdinalIgnoreCase)
+                                                   || t.Symbol.Equals(coin.Replace("1000", ""), StringComparison.OrdinalIgnoreCase)
+                                                   || ("1000" + t.Symbol).Equals(coin, StringComparison.OrdinalIgnoreCase));
+                if (!exists)
+                {
+                    try
+                    {
+                        var singleTicker = await marketData.Get24hTickerAsync(coin);
+                        if (singleTicker != null && singleTicker.Price > 0)
+                        {
+                            matchedTickers.Add(singleTicker);
+                        }
+                        else
+                        {
+                            var altSym = coin.Replace("1000", "");
+                            singleTicker = await marketData.Get24hTickerAsync(altSym);
+                            if (singleTicker != null && singleTicker.Price > 0)
+                            {
+                                matchedTickers.Add(singleTicker);
+                            }
+                        }
+                    }
+                    catch { }
+                }
+            }
+
+            // 3. Unify BTC price: ensure BTC in matchedTickers matches btcCompass exactly
+            if (btcCompass != null && btcCompass.Price > 0)
+            {
+                var btcTicker = matchedTickers.FirstOrDefault(t => t.Symbol.Equals("BTCUSDT", StringComparison.OrdinalIgnoreCase));
+                if (btcTicker != null)
+                {
+                    btcTicker.Price = btcCompass.Price;
+                    btcTicker.PriceChangePercent = btcCompass.Change24h;
+                }
+            }
 
             var sb = new StringBuilder();
             sb.AppendLine($"📊 <b>Portfel və Bazar Vəziyyəti Xülasəsi 🟢</b>\n");
@@ -1338,6 +1425,14 @@ namespace CryptoSense.Infrastructure.Telegram
             }
             else if (data == "cb_toggle")
             {
+                if (!userSettings.IsActive && userSettings.Coins.Count == 0)
+                {
+                    await SendMessageAsync(
+                        "⛔ Ticarət başlamadı.\nSəbəb: heç bir coin seçilməyib.\nƏvvəl ⚙️ Coin Seçimi ilə ən azı 1 coin seçin.",
+                        chatId,
+                        TelegramKeyboards.BuildCoinSelectionKeyboard());
+                    return;
+                }
                 userSettings.IsActive = !userSettings.IsActive;
                 SaveSettings();
                 var activeCount = await unitOfWork.Signals.GetActiveSignalsCountAsync();
@@ -1535,16 +1630,11 @@ namespace CryptoSense.Infrastructure.Telegram
             }
             else if (data == "cb_stats")
             {
-                if (userSettings.Coins.Count == 0 || string.IsNullOrWhiteSpace(userSettings.Timeframe) || userSettings.Timeframe == "Təyin olunmayıb" || !userSettings.IsActive)
-                {
-                    var emptyStats = new PerformanceStats();
-                    var emptyMsg = TelegramMessageFormatter.FormatPerformanceStats(emptyStats, "Təyin olunmayıb");
-                    await EditMessageTextAsync(chatId, messageId, emptyMsg, TelegramKeyboards.BuildBackToTerminalKeyboard());
-                    return;
-                }
-
-                var stats = await signalEngine.GetUserPerformanceStatsAsync(chatId, userSettings.Timeframe, userSettings.Coins);
-                var statsMsg = TelegramMessageFormatter.FormatPerformanceStats(stats, userSettings.Timeframe);
+                var stats = (isCallerAdmin || chatId == SuperAdminChatId)
+                    ? await unitOfWork.Signals.GetPerformanceStatsAsync(userSettings.Timeframe)
+                    : await signalEngine.GetUserPerformanceStatsAsync(chatId, userSettings.Timeframe, userSettings.Coins);
+                var tfLabel = (string.IsNullOrWhiteSpace(userSettings.Timeframe) || userSettings.Timeframe == "Təyin olunmayıb" || userSettings.Timeframe == "Hamısı" || userSettings.Timeframe == "Hamisi") ? "1h, 4h" : userSettings.Timeframe;
+                var statsMsg = TelegramMessageFormatter.FormatPerformanceStats(stats, tfLabel);
                 await EditMessageTextAsync(chatId, messageId, statsMsg, TelegramKeyboards.BuildBackToTerminalKeyboard());
             }
             else if (data == "cb_status")
@@ -2995,16 +3085,11 @@ namespace CryptoSense.Infrastructure.Telegram
             }
             else if (text.Contains("Statistika") || text == "/stats")
             {
-                if (userSettings.Coins.Count == 0 || string.IsNullOrWhiteSpace(userSettings.Timeframe) || userSettings.Timeframe == "Təyin olunmayıb" || !userSettings.IsActive)
-                {
-                    var emptyStats = new PerformanceStats();
-                    var emptyMsg = TelegramMessageFormatter.FormatPerformanceStats(emptyStats, "Təyin olunmayıb");
-                    await SendMessageAsync(emptyMsg, chatId, TelegramKeyboards.BuildUserKeyboard(userSettings, isAdmin));
-                    return;
-                }
-
-                var stats = await signalEngine.GetUserPerformanceStatsAsync(chatId, userSettings.Timeframe, userSettings.Coins);
-                var tfLabel = (userSettings.Timeframe == "Hamısı" || userSettings.Timeframe == "Hamisi") ? "1h, 4h" : userSettings.Timeframe;
+                var unitOfWork = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
+                var stats = (isAdmin || chatId == SuperAdminChatId)
+                    ? await unitOfWork.Signals.GetPerformanceStatsAsync(userSettings.Timeframe)
+                    : await signalEngine.GetUserPerformanceStatsAsync(chatId, userSettings.Timeframe, userSettings.Coins);
+                var tfLabel = (string.IsNullOrWhiteSpace(userSettings.Timeframe) || userSettings.Timeframe == "Təyin olunmayıb" || userSettings.Timeframe == "Hamısı" || userSettings.Timeframe == "Hamisi") ? "1h, 4h" : userSettings.Timeframe;
                 var msg = TelegramMessageFormatter.FormatPerformanceStats(stats, tfLabel);
                 await SendMessageAsync(msg, chatId, TelegramKeyboards.BuildUserKeyboard(userSettings, isAdmin));
             }

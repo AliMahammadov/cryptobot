@@ -28,8 +28,8 @@ namespace CryptoSense.Infrastructure.Persistence
 
             modelBuilder.Entity<FuturesSignal>(entity =>
             {
-                // Unique constraint for deduplication on symbol, timeframe, and candle open time
-                entity.HasIndex(s => new { s.Symbol, s.Timeframe, s.SourceCandleOpenTimeUtc }).IsUnique();
+                // Unique constraint for deduplication on symbol, direction, timeframe, and candle open time
+                entity.HasIndex(s => new { s.Symbol, s.Direction, s.Timeframe, s.SourceCandleOpenTimeUtc }).IsUnique();
                 entity.HasIndex(s => s.SignalNumber);
                 entity.HasIndex(s => s.Status);
                 entity.HasIndex(s => s.GeneratedAt);

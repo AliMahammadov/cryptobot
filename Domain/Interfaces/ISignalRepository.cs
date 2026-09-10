@@ -27,6 +27,8 @@ namespace CryptoSense.Domain.Interfaces
         Task ClearUserHistoryAsync(string chatId);
         Task<List<CryptoSense.Application.DTOs.CoinPerformanceBreakdownDto>> GetCoinPerformanceBreakdownAsync(List<string>? monitoredCoins = null);
         Task<bool> HasActiveSignalForSymbolAsync(string symbol);
+        Task<FuturesSignal?> GetLastClosedSignalForSymbolAsync(string symbol);
+        Task<int> GetNextSequentialSignalNumberAsync();
         Task<int> GetActiveSignalsCountAsync();
         Task ClearAllSignalsAsync();
     }

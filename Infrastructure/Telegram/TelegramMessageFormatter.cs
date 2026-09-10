@@ -78,7 +78,7 @@ namespace CryptoSense.Infrastructure.Telegram
             if (isNeutral)
             {
                 sb.AppendLine($"🎯 <b>#{userSigNum} NƏTİCƏ HESABATI (NEYTRAL ⚪)</b>");
-                sb.AppendLine($"📌 <b>#{userSigNum} nömrəli əməliyyat üzrə: Breakeven (+0.12% bufer ilə Qorundu - NEYTRAL) ⚪</b>");
+                sb.AppendLine($"📌 <b>#{userSigNum} nömrəli əməliyyat üzrə: Breakeven (Xalis {(netPnl >= 0 ? "+" : "")}{netPnl.ToString("F2", CultureInfo.InvariantCulture)}% - NEYTRAL) ⚪</b>");
             }
             else if (outcomeType.Contains("Stop Loss") || outcomeType.Contains("SL") || !isWin)
             {
@@ -338,18 +338,19 @@ namespace CryptoSense.Infrastructure.Telegram
             }
 
             sb.AppendLine("-----------------------------------");
-            sb.AppendLine($"📌 <b>Ümumi Analizlər:</b> {stats.TotalSignals} ədəd");
+            sb.AppendLine($"📌 <b>Ümumi Əməliyyatlar:</b> {stats.TotalSignals} ədəd");
             sb.AppendLine($"🟡 <b>Açıq İzlənən:</b> {stats.OpenSignals} ədəd");
-            sb.AppendLine($"✅ <b>Uğurlu (Qazanc / Hədəfə Çatan):</b> {stats.SuccessSignals} ədəd");
-            sb.AppendLine($"❌ <b>Uğursuz:</b> {stats.FailedSignals} ədəd");
+            sb.AppendLine($"🎯 <b>TP (Tam / Qismən Qazanc):</b> {stats.SuccessSignals} ədəd");
+            sb.AppendLine($"⛔ <b>SL (Uğursuz):</b> {stats.FailedSignals} ədəd");
+            sb.AppendLine($"⚪ <b>NEYTRAL / Breakeven:</b> {stats.BreakevenHitsCount} ədəd");
             sb.AppendLine("-----------------------------------");
             sb.AppendLine($"🎯 <b>Real Qələbə Faizi (Win Rate):</b> <b>{stats.WinRatePercent.ToString("F1", CultureInfo.InvariantCulture)}%</b>");
-            sb.AppendLine($"📈 <b>Xalis Nəticə (PnL):</b> <b>{(stats.TotalNetProfitPercent >= 0 ? "+" : "")}{stats.TotalNetProfitPercent.ToString("F2", CultureInfo.InvariantCulture)}%</b>");
+            sb.AppendLine($"💰 <b>Xalis Nəticə (Net PnL):</b> <b>{(stats.TotalNetProfitPercent >= 0 ? "+" : "")}{stats.TotalNetProfitPercent.ToString("F2", CultureInfo.InvariantCulture)}%</b>");
             sb.AppendLine($"📊 <b>Orta Əməliyyat Gəliri:</b> {(stats.AvgProfitPerTradePercent >= 0 ? "+" : "")}{stats.AvgProfitPerTradePercent.ToString("F2", CultureInfo.InvariantCulture)}%");
             sb.AppendLine($"💎 <b>Profit Factor:</b> <b>{stats.ProfitFactor.ToString("F2", CultureInfo.InvariantCulture)}</b> | <b>Expectancy:</b> <b>{stats.ExpectancyR.ToString("F2", CultureInfo.InvariantCulture)}R</b>");
             sb.AppendLine($"📉 <b>Maksimum Drawdown:</b> -{stats.MaxDrawdownPercent.ToString("F2", CultureInfo.InvariantCulture)}%");
             sb.AppendLine("-----------------------------------");
-            sb.AppendLine($"🎯 <b>Hədəf Bölgüsü:</b> TP3: {stats.Tp3HitsCount} ({stats.Tp3HitRatePercent}%) | Partial/Breakeven: {stats.PartialHitsCount + stats.BreakevenHitsCount} | Vaxt Bitdi: {stats.TimeExpiredCount}");
+            sb.AppendLine($"🎯 <b>Hədəf Bölgüsü:</b> TP3: {stats.Tp3HitsCount} ({stats.Tp3HitRatePercent}%) | TP1/TP2: {stats.PartialHitsCount} | BE (Neytral): {stats.BreakevenHitsCount} | Vaxt Bitdi: {stats.TimeExpiredCount}");
             sb.AppendLine("-----------------------------------");
             return sb.ToString();
         }
