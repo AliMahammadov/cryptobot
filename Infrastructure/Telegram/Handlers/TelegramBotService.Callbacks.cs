@@ -192,83 +192,51 @@ namespace CryptoSense.Infrastructure.Telegram
             }
             else if (data == "cb_comb_tf_1h" || data == "cb_comb_tf_4h" || data == "cb_comb_tf_all")
             {
-                userSettings.PortfolioMode = "Combined";
-                var combSet = new HashSet<string>(Default40Coins);
-                foreach (var c in userSettings.CustomCoins) combSet.Add(c);
-                userSettings.Coins = combSet.ToList();
-                userSettings.Timeframe = data == "cb_comb_tf_1h" ? "1h" : (data == "cb_comb_tf_4h" ? "4h" : "Hamısı");
-                userSettings.IsActive = true;
-                userSettings.LastResumeTime = DateTime.UtcNow;
-                SaveSettings();
-
-                var cleanList = string.Join(", ", userSettings.Coins.Select(c => c.Replace("USDT", "")));
-                var msg = $"✅ <b>40 Standart + Fərdi Kombinə Portfeli Aktivləşdirildi! 🟢</b>\n\n" +
-                          $"⏱ <b>Zaman Rejimi:</b> <code>{userSettings.Timeframe}</code>\n" +
-                          $"🪙 <b>İzlənən Coinlər ({userSettings.Coins.Count} ədəd):</b>\n<code>{cleanList}</code>\n\n" +
-                          $"🚀 Skaner aktivdir. Yalnız 1h və 4h şam bağlanışında A+ konfluens siqnalları göndəriləcək.";
-                await EditMessageTextAsync(chatId, messageId, msg, TelegramKeyboards.BuildBackToTerminalKeyboard());
-                _ = BuildAndSendPortfolioSummaryAsync(chatId, userSettings, forceRefresh: true);
-                if (_testModeChats.ContainsKey(chatId))
+                var targetTf = data == "cb_comb_tf_1h" ? "1h" : (data == "cb_comb_tf_4h" ? "4h" : "Hamısı");
+                if (IsModeAndTimeframeAlreadyActive(userSettings, "Combined", targetTf))
                 {
-                    _ = SendMockTestSignalAsync(chatId, userSettings, userSettings.Timeframe);
+                    await ShowAlreadyActiveAlertAsync(chatId, messageId, "Combined", targetTf);
+                    return;
                 }
+                await ActivatePortfolioAndTimeframeAsync(chatId, messageId, userSettings, "Combined", targetTf);
             }
             else if (data == "cb_std_tf_1h" || data == "cb_std_tf_4h" || data == "cb_std_tf_all")
             {
-                userSettings.PortfolioMode = "Standard40";
-                userSettings.Coins = new List<string>(Default40Coins);
-                userSettings.Timeframe = data == "cb_std_tf_1h" ? "1h" : (data == "cb_std_tf_4h" ? "4h" : "Hamısı");
-                userSettings.IsActive = true;
-                userSettings.LastResumeTime = DateTime.UtcNow;
-                SaveSettings();
-                var cleanList = string.Join(", ", Default40Coins.Select(c => c.Replace("USDT", "")));
-                var msg = $"✅ <b>Standart 40 Coin Portfeli Aktivləşdirildi! 🟢</b>\n\n" +
-                          $"⏱ <b>Zaman Rejimi:</b> <code>{userSettings.Timeframe}</code>\n" +
-                          $"🪙 <b>İzlənən Coinlər:</b> 40/40 İnstitusional coin\n\n" +
-                          $"🚀 Skaner aktivdir. Yalnız 1h və 4h şam bağlanışında A+ konfluens siqnalları göndəriləcək.";
-                await EditMessageTextAsync(chatId, messageId, msg, TelegramKeyboards.BuildBackToTerminalKeyboard());
-                _ = BuildAndSendPortfolioSummaryAsync(chatId, userSettings, forceRefresh: true);
-                if (_testModeChats.ContainsKey(chatId))
+                var targetTf = data == "cb_std_tf_1h" ? "1h" : (data == "cb_std_tf_4h" ? "4h" : "Hamısı");
+                if (IsModeAndTimeframeAlreadyActive(userSettings, "Standard40", targetTf))
                 {
-                    _ = SendMockTestSignalAsync(chatId, userSettings, userSettings.Timeframe);
+                    await ShowAlreadyActiveAlertAsync(chatId, messageId, "Standard40", targetTf);
+                    return;
                 }
+                await ActivatePortfolioAndTimeframeAsync(chatId, messageId, userSettings, "Standard40", targetTf);
             }
             else if (data == "cb_cust_tf_1h" || data == "cb_cust_tf_4h" || data == "cb_cust_tf_all")
             {
-                if (userSettings.PortfolioMode == "Custom" && userSettings.CustomCoins.Count == 0)
+                var targetMode = userSettings.PortfolioMode == "Combined" ? "Combined" : "Custom";
+                if (targetMode == "Custom" && userSettings.CustomCoins.Count == 0)
                 {
                     var warnMsg = "⚠️ <b>Fərdi portfeliniz boşdur!</b>\n\n" +
                                   "Zaman təyin etməzdən əvvəl <b>➕ Coin Əlavə Et</b> düyməsinə klikləyərək ən azı 1 coin əlavə edin.";
                     await EditMessageTextAsync(chatId, messageId, warnMsg, TelegramKeyboards.BuildCustomCoinsKeyboard(userSettings));
                     return;
                 }
-                if (userSettings.PortfolioMode == "Combined")
-                {
-                    var combSet = new HashSet<string>(Default40Coins);
-                    foreach (var c in userSettings.CustomCoins) combSet.Add(c);
-                    userSettings.Coins = combSet.ToList();
-                }
-                else
-                {
-                    userSettings.PortfolioMode = "Custom";
-                    userSettings.Coins = new List<string>(userSettings.CustomCoins);
-                }
-                userSettings.Timeframe = data == "cb_cust_tf_1h" ? "1h" : (data == "cb_cust_tf_4h" ? "4h" : "Hamısı");
-                userSettings.IsActive = true;
-                userSettings.LastResumeTime = DateTime.UtcNow;
-                SaveSettings();
 
-                var portName = userSettings.PortfolioMode == "Combined" ? "🔥 40 + Fərdi Coin (Kombinə)" : "⭐ Fərdi Coinlər";
-                var cleanList = string.Join(", ", userSettings.Coins.Select(c => c.Replace("USDT", "")));
-                var msg = $"✅ <b>{portName} Portfeli Aktivləşdirildi! 🟢</b>\n\n" +
-                          $"⏱ <b>Zaman Rejimi:</b> <code>{userSettings.Timeframe}</code>\n" +
-                          $"🪙 <b>İzlənən Coinlər ({userSettings.Coins.Count} ədəd):</b>\n<code>{cleanList}</code>\n\n" +
-                          $"🚀 Skaner aktivdir. Yalnız 1h və 4h şam bağlanışında A+ konfluens siqnalları göndəriləcək.";
-                await EditMessageTextAsync(chatId, messageId, msg, TelegramKeyboards.BuildBackToTerminalKeyboard());
-                _ = BuildAndSendPortfolioSummaryAsync(chatId, userSettings, forceRefresh: true);
-                if (_testModeChats.ContainsKey(chatId))
+                var targetTf = data == "cb_cust_tf_1h" ? "1h" : (data == "cb_cust_tf_4h" ? "4h" : "Hamısı");
+                if (IsModeAndTimeframeAlreadyActive(userSettings, targetMode, targetTf))
                 {
-                    _ = SendMockTestSignalAsync(chatId, userSettings, userSettings.Timeframe);
+                    await ShowAlreadyActiveAlertAsync(chatId, messageId, targetMode, targetTf);
+                    return;
+                }
+                await ActivatePortfolioAndTimeframeAsync(chatId, messageId, userSettings, targetMode, targetTf);
+            }
+            else if (data == "cb_refresh_portfolio" || data == "cb_show_portfolio")
+            {
+                var summary = await BuildPortfolioSummaryAsync(chatId, userSettings, forceRefresh: true);
+                if (!string.IsNullOrWhiteSpace(summary))
+                {
+                    await EditMessageTextAsync(chatId, messageId, summary, TelegramKeyboards.BuildPortfolioSummaryKeyboard());
+                    userSettings.LastPortfolioSummaryMessageId = messageId;
+                    SaveSettings();
                 }
             }
             else if (data == "cb_custom_add" || data == "cb_coin_add")
@@ -481,6 +449,115 @@ namespace CryptoSense.Infrastructure.Telegram
                 userSettings.LastAdminMessageId = null;
                 SaveSettings();
                 await DeleteMessageAsync(chatId, messageId);
+            }
+        }
+
+        private bool IsModeAndTimeframeAlreadyActive(UserSettings settings, string targetMode, string targetTf)
+        {
+            if (!settings.IsActive) return false;
+            if (!string.Equals(settings.PortfolioMode, targetMode, StringComparison.OrdinalIgnoreCase)) return false;
+
+            bool currentIsAll = string.Equals(settings.Timeframe, "Hamısı", StringComparison.OrdinalIgnoreCase)
+                             || string.Equals(settings.Timeframe, "Hamisi", StringComparison.OrdinalIgnoreCase)
+                             || string.Equals(settings.Timeframe, "1h, 4h", StringComparison.OrdinalIgnoreCase);
+            bool targetIsAll = string.Equals(targetTf, "Hamısı", StringComparison.OrdinalIgnoreCase)
+                            || string.Equals(targetTf, "Hamisi", StringComparison.OrdinalIgnoreCase)
+                            || string.Equals(targetTf, "1h, 4h", StringComparison.OrdinalIgnoreCase);
+
+            if (currentIsAll && targetIsAll) return true;
+
+            return string.Equals(settings.Timeframe, targetTf, StringComparison.OrdinalIgnoreCase);
+        }
+
+        private async Task ShowAlreadyActiveAlertAsync(string chatId, long messageId, string targetMode, string targetTf)
+        {
+            var modeName = targetMode switch
+            {
+                "Standard40" => "🪙 Standart 40 Coin",
+                "Custom" => "⭐ Fərdi Coinlər",
+                "Combined" => "🔥 40 + Fərdi Coin (Kombinə)",
+                _ => targetMode
+            };
+            var tfDisplay = (targetTf == "Hamısı" || targetTf == "Hamisi") ? "1h + 4h (Hər İkisi)" : targetTf;
+
+            var alertMsg = "⚠️ <b>Bu Rejim və Zaman Kəsiyi Artıq Seçilib!</b>\n\n" +
+                           $"📌 <b>Aktiv Rejim:</b> {modeName}\n" +
+                           $"⏱ <b>Aktiv Zaman Kəsiyi:</b> <code>{tfDisplay}</code>\n" +
+                           $"🟢 <b>Cari Vəziyyət:</b> Skaner artıq bu rejim və zaman parametrləri ilə aktiv işləyir.\n\n" +
+                           "🚫 <i>Eyni əmr təkrar icra edilə bilməz.</i>\n" +
+                           "💡 <b>Qeyd:</b> Yalnız portfeli sıfırladıqdan (🧹 <b>Sıfırla</b>) və ya fərqli zaman kəsiyi/rejim seçdikdən sonra yenidən başlamaq olar.";
+
+            await EditMessageTextAsync(chatId, messageId, alertMsg, TelegramKeyboards.BuildAlreadyActiveKeyboard());
+        }
+
+        private async Task ActivatePortfolioAndTimeframeAsync(string chatId, long messageId, UserSettings userSettings, string targetMode, string targetTf)
+        {
+            if (targetMode == "Custom" && userSettings.CustomCoins.Count == 0)
+            {
+                var warnMsg = "⚠️ <b>Fərdi portfeliniz boşdur!</b>\n\n" +
+                              "Zaman təyin etməzdən əvvəl <b>➕ Coin Əlavə Et</b> düyməsinə klikləyərək ən azı 1 coin əlavə edin.";
+                await EditMessageTextAsync(chatId, messageId, warnMsg, TelegramKeyboards.BuildCustomCoinsKeyboard(userSettings));
+                return;
+            }
+
+            userSettings.PortfolioMode = targetMode;
+            if (targetMode == "Standard40")
+            {
+                userSettings.Coins = new List<string>(Default40Coins);
+            }
+            else if (targetMode == "Custom")
+            {
+                userSettings.Coins = new List<string>(userSettings.CustomCoins);
+            }
+            else if (targetMode == "Combined")
+            {
+                var combSet = new HashSet<string>(Default40Coins);
+                foreach (var c in userSettings.CustomCoins) combSet.Add(c);
+                userSettings.Coins = combSet.ToList();
+            }
+
+            userSettings.Timeframe = targetTf;
+            userSettings.IsActive = true;
+            userSettings.LastResumeTime = DateTime.UtcNow;
+            SaveSettings();
+
+            var modeName = targetMode switch
+            {
+                "Standard40" => "🪙 Standart 40 Coin",
+                "Custom" => "⭐ Fərdi Coinlər",
+                "Combined" => "🔥 40 + Fərdi Coin (Kombinə)",
+                _ => targetMode
+            };
+            var tfDisplay = (targetTf == "Hamısı" || targetTf == "Hamisi") ? "1h, 4h" : targetTf;
+
+            // 1. Immediate loading feedback on screen
+            var loadingMsg = $"⏳ <b>{modeName} Aktivləşdirilir... 🟢</b>\n\n" +
+                             $"⏱ <b>Zaman Rejimi:</b> <code>{tfDisplay}</code>\n" +
+                             $"🪙 <b>İzlənən Coin Sayı:</b> <b>{userSettings.Coins.Count} ədəd</b>\n\n" +
+                             $"<i>Binance USD-M fyuçers bazarı üzrə ən son canlı qiymətlər və bazar vəziyyəti yüklənir...</i>";
+            await EditMessageTextAsync(chatId, messageId, loadingMsg);
+
+            // 2. Fetch fresh live prices and market overview directly from Binance
+            var summary = await BuildPortfolioSummaryAsync(chatId, userSettings, forceRefresh: true);
+            if (string.IsNullOrWhiteSpace(summary))
+            {
+                var fallbackMsg = $"✅ <b>{modeName} Aktivləşdirildi! 🟢</b>\n\n" +
+                                  $"⏱ <b>Zaman Rejimi:</b> <code>{tfDisplay}</code>\n" +
+                                  $"🪙 <b>İzlənən Coinlər ({userSettings.Coins.Count} ədəd):</b> Bütün aktivlər 24/7 skaner tərəfindən izlənir.\n\n" +
+                                  $"🚀 Skaner aktivdir. Yalnız 1h və 4h şam bağlanışında A+ konfluens siqnalları göndəriləcək.";
+                await EditMessageTextAsync(chatId, messageId, fallbackMsg, TelegramKeyboards.BuildPortfolioSummaryKeyboard());
+            }
+            else
+            {
+                await EditMessageTextAsync(chatId, messageId, summary, TelegramKeyboards.BuildPortfolioSummaryKeyboard());
+            }
+
+            userSettings.LastPortfolioSummaryMessageId = messageId;
+            SaveSettings();
+
+            if (_testModeChats.ContainsKey(chatId))
+            {
+                _ = SendMockTestSignalAsync(chatId, userSettings, userSettings.Timeframe);
             }
         }
     }

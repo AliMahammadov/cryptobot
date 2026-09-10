@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Net.Http;
@@ -135,7 +135,7 @@ namespace CryptoSense.Infrastructure.MarketData
         {
             lock (_top80Lock)
             {
-                if (_cachedTop80.Count > 0 && (DateTime.UtcNow - _lastTop80Fetch).TotalMinutes < 10)
+                if (_cachedTop80.Count > 0 && (DateTime.UtcNow - _lastTop80Fetch).TotalSeconds < 15)
                 {
                     return _cachedTop80.Take(topCount).ToList();
                 }

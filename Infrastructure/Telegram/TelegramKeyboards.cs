@@ -77,6 +77,36 @@ namespace CryptoSense.Infrastructure.Telegram
             };
         }
 
+        public static object BuildPortfolioSummaryKeyboard()
+        {
+            return new
+            {
+                inline_keyboard = new[]
+                {
+                    new[]
+                    {
+                        new { text = "🔄 Yenilə", callback_data = "cb_refresh_portfolio" },
+                        new { text = "⬅️ Terminala Qayıt", callback_data = "cb_menu" }
+                    }
+                }
+            };
+        }
+
+        public static object BuildAlreadyActiveKeyboard()
+        {
+            return new
+            {
+                inline_keyboard = new[]
+                {
+                    new[]
+                    {
+                        new { text = "📊 Portfelin Canlı Qiymətləri", callback_data = "cb_show_portfolio" },
+                        new { text = "⬅️ Əsas Terminal", callback_data = "cb_menu" }
+                    }
+                }
+            };
+        }
+
         public static object BuildStandard40TimeframeKeyboard()
         {
             return new

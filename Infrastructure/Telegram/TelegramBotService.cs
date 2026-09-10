@@ -11,6 +11,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using CryptoSense.Application.DTOs;
 using CryptoSense.Application.Interfaces;
+using CryptoSense.Application.Services;
 using CryptoSense.Domain.Entities;
 using CryptoSense.Domain.Enums;
 using CryptoSense.Domain.Interfaces;
@@ -1149,34 +1150,69 @@ namespace CryptoSense.Infrastructure.Telegram
                 var coinSet = new HashSet<string>(userSettings.Coins, StringComparer.OrdinalIgnoreCase);
                 matchedTickers = allTickers.Where(t => coinSet.Contains(t.Symbol) || coinSet.Contains(t.Symbol.Replace("1000", "")) || coinSet.Contains("1000" + t.Symbol)).ToList();
             }
-            catch { }
-
-            // Ensure all tracked coins are present (e.g. TONUSDT if not in top 250 futures)
-            foreach (var coin in userSettings.Coins)
+            catch (Exception ex)
             {
-                bool exists = matchedTickers.Any(t => t.Symbol.Equals(coin, StringComparison.OrdinalIgnoreCase)
-                                                   || t.Symbol.Equals(coin.Replace("1000", ""), StringComparison.OrdinalIgnoreCase)
-                                                   || ("1000" + t.Symbol).Equals(coin, StringComparison.OrdinalIgnoreCase));
-                if (!exists)
+                Console.WriteLine($"[BuildPortfolioSummary] Top futures tickers error: {ex.Message}");
+            }
+
+            // Ensure all tracked coins are present (parallel fetch via Task.WhenAll for fast sub-second load)
+            var missingCoins = userSettings.Coins
+                .Where(coin => !matchedTickers.Any(t => t.Symbol.Equals(coin, StringComparison.OrdinalIgnoreCase)
+                                                     || t.Symbol.Equals(coin.Replace("1000", ""), StringComparison.OrdinalIgnoreCase)
+                                                     || ("1000" + t.Symbol).Equals(coin, StringComparison.OrdinalIgnoreCase)))
+                .ToList();
+
+            if (missingCoins.Count > 0)
+            {
+                var fetchTasks = missingCoins.Select(async coin =>
                 {
                     try
                     {
                         var singleTicker = await marketData.Get24hTickerAsync(coin);
-                        if (singleTicker != null && singleTicker.Price > 0)
-                        {
-                            matchedTickers.Add(singleTicker);
-                        }
-                        else
-                        {
-                            var altSym = coin.Replace("1000", "");
-                            singleTicker = await marketData.Get24hTickerAsync(altSym);
-                            if (singleTicker != null && singleTicker.Price > 0)
-                            {
-                                matchedTickers.Add(singleTicker);
-                            }
-                        }
+                        if (singleTicker != null && singleTicker.Price > 0) return singleTicker;
+
+                        var altSym = coin.Replace("1000", "");
+                        singleTicker = await marketData.Get24hTickerAsync(altSym);
+                        if (singleTicker != null && singleTicker.Price > 0) return singleTicker;
                     }
                     catch { }
+                    return null;
+                });
+
+                var results = await Task.WhenAll(fetchTasks);
+                foreach (var r in results)
+                {
+                    if (r != null) matchedTickers.Add(r);
+                }
+            }
+
+            // Fallback from LivePriceCache if any coin is still missing, and update real-time tick prices
+            var liveCache = scope.ServiceProvider.GetService<LivePriceCache>();
+            if (liveCache != null)
+            {
+                foreach (var t in matchedTickers)
+                {
+                    var snap = liveCache.GetSnapshot(t.Symbol) ?? liveCache.GetSnapshot(t.Symbol.Replace("1000", "")) ?? liveCache.GetSnapshot("1000" + t.Symbol);
+                    if (snap != null && snap.Last > 0)
+                    {
+                        t.Price = snap.Last;
+                    }
+                }
+
+                foreach (var coin in userSettings.Coins)
+                {
+                    if (!matchedTickers.Any(t => t.Symbol.Equals(coin, StringComparison.OrdinalIgnoreCase)
+                                              || t.Symbol.Equals(coin.Replace("1000", ""), StringComparison.OrdinalIgnoreCase)
+                                              || ("1000" + t.Symbol).Equals(coin, StringComparison.OrdinalIgnoreCase)))
+                    {
+                        var snap = liveCache.GetSnapshot(coin) ?? liveCache.GetSnapshot(coin.Replace("1000", ""));
+                        matchedTickers.Add(new CoinTicker
+                        {
+                            Symbol = coin,
+                            Price = (snap != null && snap.Last > 0) ? snap.Last : 0m,
+                            PriceChangePercent = 0m
+                        });
+                    }
                 }
             }
 
@@ -1191,10 +1227,19 @@ namespace CryptoSense.Infrastructure.Telegram
                 }
             }
 
+            var modeLabel = userSettings.PortfolioMode switch
+            {
+                "Standard40" => "🪙 Standart 40 Coin",
+                "Custom" => "⭐ Fərdi Coinlər",
+                "Combined" => "🔥 40 + Fərdi Coin (Kombinə)",
+                _ => "🪙 Standart 40 Coin"
+            };
+
             var sb = new StringBuilder();
-            sb.AppendLine($"📊 <b>Portfel və Bazar Vəziyyəti Xülasəsi 🟢</b>\n");
-            sb.AppendLine($"⏱ <b>Aktiv Zaman:</b> <code>{tfDisplay}</code>");
-            sb.AppendLine($"🪙 <b>İzlənən Portfel:</b> <b>{userSettings.Coins.Count} ədəd coin</b>\n");
+            sb.AppendLine($"📊 <b>{modeLabel} — Canlı Bazar Xülasəsi 🟢</b>\n");
+            sb.AppendLine($"⏱ <b>Aktiv Zaman Kəsiyi:</b> <code>{tfDisplay}</code>");
+            sb.AppendLine($"🪙 <b>İzlənən Portfel:</b> <b>{userSettings.Coins.Count} ədəd coin</b>");
+            sb.AppendLine($"🕒 <b>Məlumat Vaxtı:</b> <code>{Domain.Common.TimeHelper.FormatAz(DateTime.UtcNow)}</code> (Bakı)\n");
 
             // BTC Market Regime & Benchmark
             if (btcCompass != null && btcCompass.Price > 0)
@@ -1202,7 +1247,7 @@ namespace CryptoSense.Infrastructure.Telegram
                 var btcSign = btcCompass.Change24h >= 0 ? "+" : "";
                 var btcIcon = btcCompass.Change24h >= 0 ? "🟢" : "🔴";
                 sb.AppendLine($"🧭 <b>Bitcoin Kompası (BTC/USDT):</b>");
-                sb.AppendLine($"• <b>Qiymət:</b> ${btcCompass.Price.ToString("N0", CultureInfo.InvariantCulture)} ({btcSign}{btcCompass.Change24h.ToString("F2", CultureInfo.InvariantCulture)}% {btcIcon})");
+                sb.AppendLine($"• <b>Qiymət:</b> ${btcCompass.Price.ToString("N2", CultureInfo.InvariantCulture)} ({btcSign}{btcCompass.Change24h.ToString("F2", CultureInfo.InvariantCulture)}% {btcIcon})");
                 sb.AppendLine($"• <b>Bazar Rejimi:</b> {btcCompass.Trend}");
                 sb.AppendLine();
             }
@@ -1229,7 +1274,7 @@ namespace CryptoSense.Infrastructure.Telegram
                 }
                 sb.AppendLine();
 
-                sb.AppendLine($"📋 <b>Portfeldəki Bütün Coinlərin Canlı Qiyməti və 24s Dəyişimi:</b>");
+                sb.AppendLine($"📋 <b>Portfeldəki Bütün Coinlərin Canlı Qiyməti və 24s Dəyişimi ({matchedTickers.Count}/{userSettings.Coins.Count}):</b>");
                 var sorted = matchedTickers.OrderByDescending(t => t.PriceChangePercent).ToList();
                 var chunkList = new List<string>();
                 foreach (var t in sorted)
@@ -1237,7 +1282,13 @@ namespace CryptoSense.Infrastructure.Telegram
                     var cName = t.Symbol.Replace("USDT", "");
                     var pSign = t.PriceChangePercent >= 0 ? "+" : "";
                     var pIcon = t.PriceChangePercent >= 0 ? "🟢" : "🔴";
-                    var priceFormatted = t.Price >= 1000 ? t.Price.ToString("N0", CultureInfo.InvariantCulture) : (t.Price >= 1 ? t.Price.ToString("F2", CultureInfo.InvariantCulture) : t.Price.ToString("F4", CultureInfo.InvariantCulture));
+                    var priceFormatted = t.Price >= 1000 
+                        ? t.Price.ToString("N2", CultureInfo.InvariantCulture) 
+                        : (t.Price >= 1 
+                            ? t.Price.ToString("F2", CultureInfo.InvariantCulture) 
+                            : (t.Price >= 0.001m 
+                                ? t.Price.ToString("F4", CultureInfo.InvariantCulture) 
+                                : t.Price.ToString("F6", CultureInfo.InvariantCulture)));
                     chunkList.Add($"{cName}: ${priceFormatted} ({pSign}{t.PriceChangePercent.ToString("F2", CultureInfo.InvariantCulture)}% {pIcon})");
                 }
                 for (int i = 0; i < chunkList.Count; i += 2)
@@ -1285,13 +1336,14 @@ namespace CryptoSense.Infrastructure.Telegram
                 var summary = await BuildPortfolioSummaryAsync(chatId, userSettings, forceRefresh);
                 if (string.IsNullOrWhiteSpace(summary)) return;
 
+                var kb = TelegramKeyboards.BuildPortfolioSummaryKeyboard();
                 if (userSettings.LastPortfolioSummaryMessageId.HasValue)
                 {
-                    var edited = await EditMessageTextAsync(chatId, userSettings.LastPortfolioSummaryMessageId.Value, summary);
+                    var edited = await EditMessageTextAsync(chatId, userSettings.LastPortfolioSummaryMessageId.Value, summary, kb);
                     if (edited) return;
                 }
 
-                var newMsgId = await SendMessageReturnIdAsync(summary, chatId);
+                var newMsgId = await SendMessageReturnIdAsync(summary, chatId, kb);
                 if (newMsgId.HasValue)
                 {
                     userSettings.LastPortfolioSummaryMessageId = newMsgId;
