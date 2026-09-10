@@ -1183,10 +1183,20 @@ namespace CryptoSense.Worker
                                         break;
                                     }
 
-                                    // BƏND 5: 1 şam boşluq (cooldown)
+                                    // BƏND 5: 1 şam boşluq (cooldown) və bağlandıqdan sonra 6 saat eyni istiqamətə yenidən 1h YOX
                                     var lastClosedSig = await uow.Signals.GetLastClosedSignalForSymbolAsync(sym);
                                     if (lastClosedSig?.ClosedAt != null)
                                     {
+                                        // BƏND 5: Bağlandıqdan sonra 6 saat eyni istiqamətə yenidən 1h YOX
+                                        if (signal.Timeframe == "1h" && lastClosedSig.Direction == signal.Direction)
+                                        {
+                                            if (DateTime.UtcNow - lastClosedSig.ClosedAt.Value < TimeSpan.FromHours(6))
+                                            {
+                                                Console.WriteLine($"[MarketScanner] 6-hour same direction cooldown active for {sym} ({signal.Direction}). Skipping.");
+                                                break;
+                                            }
+                                        }
+
                                         var candleCooldown = signal.Timeframe == "4h" ? TimeSpan.FromHours(4) : TimeSpan.FromHours(1);
                                         if (DateTime.UtcNow - lastClosedSig.ClosedAt.Value < candleCooldown)
                                         {
@@ -1195,7 +1205,7 @@ namespace CryptoSense.Worker
                                         }
                                     }
 
-                                    // BƏND 5: 05:00–07:00 +4 pəncərəsində 1h: nazik kitab, bu pəncərədə 2-dən çox 1h kart yox
+                                    // BƏND 5: 05:00–07:00 +4 pəncərəsində 1h: nazik kitab, maks 1 ədəd 1h kart (spam pəncərəsi)
                                     var aztNowHour = DateTime.UtcNow.AddHours(4).Hour;
                                     if (signal.Timeframe == "1h" && aztNowHour >= 5 && aztNowHour < 7)
                                     {
@@ -1203,9 +1213,9 @@ namespace CryptoSense.Worker
                                         var morningDispatches = _hourlyDispatches.GetOrAdd(morningKey, _ => new List<(string Symbol, SignalDirection Direction)>());
                                         lock (morningDispatches)
                                         {
-                                            if (morningDispatches.Count >= 2)
+                                            if (morningDispatches.Count >= 1)
                                             {
-                                                Console.WriteLine($"[MarketScanner] Thin book 05:00-07:00 +4 limit reached (max 2 1h signals). Skipping {signal.Symbol}.");
+                                                Console.WriteLine($"[MarketScanner] Thin book 05:00-07:00 +4 limit reached (max 1 1h signal). Skipping {signal.Symbol}.");
                                                 break;
                                             }
                                         }

@@ -1090,7 +1090,8 @@ namespace CryptoSense.Infrastructure.Telegram
         {
             if (userSettings.Coins.Count == 0)
             {
-                userSettings.Coins = new List<string>(Default40Coins);
+                // BƏND 7: 0 coin → ticarət blok, 40 avtomatik Açma
+                return "⚠️ <b>Portfel boşdur (0 coin seçilib).</b>\n\n⛔ Ticarət siqnalları bloklanıb. Siqnal almaq üçün menyudan coinləri seçin.";
             }
 
             // 45-second cache to prevent hammering Binance API upon rapid clicks

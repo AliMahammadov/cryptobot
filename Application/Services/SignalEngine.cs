@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
@@ -228,6 +228,45 @@ namespace CryptoSense.Application.Services
             {
                 Console.WriteLine($"[SignalEngine] 4h SL too wide ({slPct:F2}% > 4.00%). Trade skipped.");
                 return fail with { SkipReason = $"SKIP_SL_TOO_WIDE (4h SL {slPct:F2}% > 4.00%)" };
+            }
+
+            // BƏND 5: CHASE QADAĞA: son 3×1h şamda qiymət artıq TP istiqamətində ≥1.2% getmişsə 1h kart AçMA (XRP 03:00, AVAX/SOL 05:00).
+            // BOUNCE MODELİ SAXLA (#78): dump olub, 1h pullback, sonra şam bağlananda short — bu KEÇİR.
+            if (timeframe == "1h" && closedKlines.Count >= 4)
+            {
+                var c3 = closedKlines[^4];
+                var c2 = closedKlines[^3];
+                var c1 = closedKlines[^2];
+                var c0 = closedKlines[^1];
+
+                if (direction == SignalDirection.Sell) // SHORT
+                {
+                    decimal dropPct = c3.Open > 0 ? ((c3.Open - c0.Close) / c3.Open) * 100m : 0m;
+                    if (dropPct >= 1.20m)
+                    {
+                        // Bounce/pullback model (#78): dump olub, pullback baş verib və c0 rejection şamı kimi bağlanıb
+                        bool isBounceShort = (c1.Close > c1.Open || (c0.High > c1.Close && c0.Close < c0.Open && c1.Close > c2.Low));
+                        if (!isBounceShort)
+                        {
+                            Console.WriteLine($"[SignalEngine] Chase Short blocked: 3h drop {dropPct:F2}% >= 1.20% with no bounce.");
+                            return fail with { SkipReason = $"SKIP_CHASE_SHORT (Son 3h-də {dropPct:F2}% enib, bounce yoxdur)" };
+                        }
+                    }
+                }
+                else if (direction == SignalDirection.Buy) // LONG
+                {
+                    decimal risePct = c3.Open > 0 ? ((c0.Close - c3.Open) / c3.Open) * 100m : 0m;
+                    if (risePct >= 1.20m)
+                    {
+                        // Dip/pullback model: pump olub, dip/pullback baş verib və c0 rejection/bounce şamı kimi bağlanıb
+                        bool isDipLong = (c1.Close < c1.Open || (c0.Low < c1.Close && c0.Close > c0.Open && c1.Close < c2.High));
+                        if (!isDipLong)
+                        {
+                            Console.WriteLine($"[SignalEngine] Chase Long blocked: 3h rise {risePct:F2}% >= 1.20% with no dip.");
+                            return fail with { SkipReason = $"SKIP_CHASE_LONG (Son 3h-də {risePct:F2}% artıb, dip yoxdur)" };
+                        }
+                    }
+                }
             }
 
             // BƏND 3 — TP = 1R PARTİAL + STRUKTUR
@@ -654,6 +693,9 @@ namespace CryptoSense.Application.Services
 
             bool btcConfirmsLong = true;
             bool btcConfirmsShort = true;
+            bool ethConfirmsLong = true;
+            bool ethConfirmsShort = true;
+
             if (isAltcoin)
             {
                 bool isHighCorr = altBtcCorr > 0.7m;
@@ -678,6 +720,31 @@ namespace CryptoSense.Application.Services
                         reasons.Add("BTC 1h Bearish, corr>0.7 və alt RS mənfi: Altcoin LONG yalnız struktur breakout olduqda açıla bilər (Mean-reversion LONG bloklandı)");
                     }
                 }
+
+                // BƏND 5 Korrelyasiya: BTC və ETH eyni 1h-də siqnal istiqamətini təsdiqləmirsə alt SHORT/LONG AçMA (ADA #72 tipi).
+                try
+                {
+                    var ethKlines1h = await _marketData.GetKlinesAsync("ETHUSDT", "1h", 10);
+                    var closedEth1h = ethKlines1h.Count >= 2 ? ethKlines1h.Take(ethKlines1h.Count - 1).ToList() : ethKlines1h;
+                    if (closedEth1h.Count > 0)
+                    {
+                        var lastEth = closedEth1h.Last();
+                        bool isEthBullish = lastEth.Close > lastEth.Open;
+                        bool isEthBearish = lastEth.Close < lastEth.Open;
+
+                        if (isEthBullish && !isStructuralBreakdown)
+                        {
+                            ethConfirmsShort = false;
+                            reasons.Add("ETH 1h Bullish: altcoin SHORT üçün ETH təsdiqi yoxdur (ADA #72 filtri)");
+                        }
+                        if (isEthBearish && !isStructuralBreakout)
+                        {
+                            ethConfirmsLong = false;
+                            reasons.Add("ETH 1h Bearish: altcoin LONG üçün ETH təsdiqi yoxdur");
+                        }
+                    }
+                }
+                catch (Exception _ex) { Console.WriteLine($"[SignalEngine] Swallowed ETH exception: {_ex.Message}"); }
             }
 
             // Market Regime & Chop Filter (Minimum ADX required for ANY timeframe to avoid dying in sideways chop)
@@ -723,7 +790,8 @@ namespace CryptoSense.Application.Services
                 hasValidMarketRegime &&
                 volumeConfirmed &&
                 rsiAllowsLong &&
-                btcConfirmsLong)
+                btcConfirmsLong &&
+                ethConfirmsLong)
             {
                 direction = SignalDirection.Buy;
                 determinedType = breakoutLong ? "GÜCLÜ BREAKOUT LONG 🟢" : (isPullbackZone ? "GÜCLÜ RETEST LONG 🟢" : "GÜCLÜ TREND LONG 🟢");
@@ -739,7 +807,8 @@ namespace CryptoSense.Application.Services
                      hasValidMarketRegime &&
                      volumeConfirmed &&
                      rsiAllowsShort &&
-                     btcConfirmsShort)
+                     btcConfirmsShort &&
+                     ethConfirmsShort)
             {
                 direction = SignalDirection.Sell;
                 determinedType = breakoutShort ? "GÜCLÜ BREAKDOWN SHORT 🔴" : (isPullbackZone ? "GÜCLÜ RETEST SHORT 🔴" : "GÜCLÜ TREND SHORT 🔴");
