@@ -240,8 +240,7 @@ namespace CryptoSense.Infrastructure.Telegram
                 {
                     keyboard = new[]
                     {
-                        new[] { new { text = "🎛 Əsas Terminal" }, new { text = "👑 Admin Paneli" } },
-                        new[] { new { text = "📰 Xəbərlər" } }
+                        new[] { new { text = "🎛 Əsas Terminal" }, new { text = "👑 Admin Paneli" } }
                     },
                     resize_keyboard = true,
                     one_time_keyboard = false
@@ -252,7 +251,7 @@ namespace CryptoSense.Infrastructure.Telegram
             {
                 keyboard = new[]
                 {
-                    new[] { new { text = "🎛 Əsas Terminal" }, new { text = "📰 Xəbərlər" } }
+                    new[] { new { text = "🎛 Əsas Terminal" } }
                 },
                 resize_keyboard = true,
                 one_time_keyboard = false
