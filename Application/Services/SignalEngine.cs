@@ -702,9 +702,9 @@ namespace CryptoSense.Application.Services
                                        (closedCandle.High > 0 && closedCandle.Low > 0 && ((closedCandle.High - closedCandle.Low) / closedCandle.Low) >= 0.075m) ||
                                        (indicators.VolumeSurgeRatio >= 4.0m);
 
-            // Confluence tələbi: Confluence < 78% siqnal YASAQ! (15m, 1h, 4h min 78%, 5m 80%, 1m/3m 90%)
-            decimal minLongScore = (timeframe == "1m" || timeframe == "3m") ? 90m : (timeframe == "5m" ? 80m : 78m);
-            decimal maxShortScore = (timeframe == "1m" || timeframe == "3m") ? 10m : (timeframe == "5m" ? 20m : 22m);
+            // Confluence tələbi: Confluence < 75% siqnal YASAQ! (BƏND: signal.Confidence >= 75)
+            decimal minLongScore = (timeframe == "1m" || timeframe == "3m") ? 90m : (timeframe == "5m" ? 80m : 75m);
+            decimal maxShortScore = (timeframe == "1m" || timeframe == "3m") ? 10m : (timeframe == "5m" ? 20m : 25m);
 
             if (isExtremeVolatility)
             {
@@ -781,12 +781,12 @@ namespace CryptoSense.Application.Services
                 ? Math.Round(100m - indicators.ConfluenceScore, 1) 
                 : Math.Round(indicators.ConfluenceScore, 1);
 
-            // Confluence < 78% siqnal YASAQ
-            if (directionalConfluence < 78.0m)
+            // Confluence < 75% siqnal YASAQ (scanner-də 75% yoxlanır, burada eyni həddi saxlayırıq)
+            if (directionalConfluence < 75.0m)
             {
                 determinedType = "GÖZLƏMƏ ⚪";
                 confidence = 50;
-                reasons.Add($"Confluence Filtri: {directionalConfluence:F1}% < 78.0% (Siqnal üçün minimal 78% tələbi ödənmir)");
+                reasons.Add($"Confluence Filtri: {directionalConfluence:F1}% < 75.0% (Siqnal üçün minimal 75% tələbi ödənmir)");
             }
 
             int durationMinutes = timeframe switch
