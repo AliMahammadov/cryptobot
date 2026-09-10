@@ -29,6 +29,8 @@ namespace CryptoSense.Domain.Interfaces
         Task<bool> HasActiveSignalForSymbolAsync(string symbol);
         Task<FuturesSignal?> GetLastClosedSignalForSymbolAsync(string symbol);
         Task<int> GetNextSequentialSignalNumberAsync();
+        Task<int> CommitSignalNumberOnSendSuccessAsync(int signalId);
+        Task ResetClosedSignalsAsync();
         Task<int> GetActiveSignalsCountAsync();
         Task ClearAllSignalsAsync();
     }

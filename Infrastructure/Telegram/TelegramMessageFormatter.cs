@@ -37,16 +37,19 @@ namespace CryptoSense.Infrastructure.Telegram
             decimal slDist = Math.Abs(signal.StopLoss - signal.EntryPrice);
             decimal tp1Pct = signal.EntryPrice > 0 ? (tp1Dist / signal.EntryPrice) * 100m : 0m;
             decimal slPct = signal.EntryPrice > 0 ? (slDist / signal.EntryPrice) * 100m : 0m;
-            decimal rr = slDist > 0 ? (tp1Dist / slDist) : 0m;
+
+            decimal tpBDist = signal.TakeProfit2 > 0 ? Math.Abs(signal.TakeProfit2 - signal.EntryPrice) : 0m;
+            decimal tpBPct = (signal.EntryPrice > 0 && tpBDist > 0) ? (tpBDist / signal.EntryPrice) * 100m : 0m;
+            decimal effectiveRr = slDist > 0 ? ((0.50m * tp1Dist + 0.50m * (tpBDist > 0 ? tpBDist : tp1Dist)) / slDist) : 0m;
 
             sb.AppendLine($"📍 <b>Giriş Zonası:</b> ${signal.EntryLow.ToString(CultureInfo.InvariantCulture)} - ${signal.EntryHigh.ToString(CultureInfo.InvariantCulture)}");
-            sb.AppendLine($"🎯 <b>Hədəf 1 (TP1):</b> ${signal.TakeProfit1.ToString(CultureInfo.InvariantCulture)} (+{tp1Pct.ToString("F2", CultureInfo.InvariantCulture)}%)");
-            if (signal.Timeframe != "1h" && signal.TakeProfit2 > 0 && signal.TakeProfit2 != signal.TakeProfit1)
+            sb.AppendLine($"🎯 <b>Hədəf A (TP_A 1.0R - 50%):</b> ${signal.TakeProfit1.ToString(CultureInfo.InvariantCulture)} (+{tp1Pct.ToString("F2", CultureInfo.InvariantCulture)}%) <i>[50% Bağla + BE Stop]</i>");
+            if (signal.TakeProfit2 > 0 && signal.TakeProfit2 != signal.TakeProfit1)
             {
-                sb.AppendLine($"🎯 <b>Hədəf 2 (TP2):</b> ${signal.TakeProfit2.ToString(CultureInfo.InvariantCulture)}");
+                sb.AppendLine($"🎯 <b>Hədəf B (TP_B - 50%):</b> ${signal.TakeProfit2.ToString(CultureInfo.InvariantCulture)} (+{tpBPct.ToString("F2", CultureInfo.InvariantCulture)}%) <i>[Qalan 50% Struktur]</i>");
             }
             sb.AppendLine($"⛔ <b>Stop Loss (SL):</b> ${signal.StopLoss.ToString(CultureInfo.InvariantCulture)} (-{slPct.ToString("F2", CultureInfo.InvariantCulture)}%)");
-            sb.AppendLine($"⚖️ <b>Risk:Mükafat (R:R):</b> <b>{rr.ToString("F2", CultureInfo.InvariantCulture)}</b>");
+            sb.AppendLine($"⚖️ <b>Risk:Mükafat (R:R):</b> <b>{effectiveRr.ToString("F2", CultureInfo.InvariantCulture)}</b>");
             sb.AppendLine("-----------------------------------");
             return sb.ToString();
         }
@@ -111,40 +114,21 @@ namespace CryptoSense.Infrastructure.Telegram
             sb.AppendLine($"🕒 <b>Siqnal Vaxtı:</b> {signal.TimestampFormatted}");
             sb.AppendLine($"🕒 <b>Yenilənmə Vaxtı:</b> {CryptoSense.Domain.Common.TimeHelper.NowFormatted}");
 
-            if (outcomeType.Contains("TP1") || outcomeType.Contains("Hədəf 1"))
+            if (outcomeType.Contains("TP1") || outcomeType.Contains("TP_A") || outcomeType.Contains("Hədəf 1") || outcomeType.Contains("Hədəf A"))
             {
                 sb.AppendLine();
-                if (signal.IsClosed || signal.TakeProfit2 <= 0 || signal.TakeProfit2 == signal.TakeProfit1)
+                sb.AppendLine("🛡️ <b>PARTİAL CLOSE (50% BAĞLANDI) & BE QORUMA:</b>");
+                sb.AppendLine("• Mövqenin <b>50%-i Hədəf A (TP_A 1.00R) səviyyəsində mənfəətlə bağlandı ✅</b>");
+                sb.AppendLine($"• Stop Loss dərhal <b>GİRİŞƏ (Breakeven: ${signal.EntryPrice.ToString(CultureInfo.InvariantCulture)})</b> çəkildi (Sıfır Risk)!");
+                if (signal.TakeProfit2 > 0 && signal.TakeProfit2 != signal.TakeProfit1)
                 {
-                    sb.AppendLine("🏆 <b>TAM HƏDƏFƏ ÇATILDI:</b> Mövqe maksimum mənfəətlə 100% bağlandı.");
-                }
-                else
-                {
-                    sb.AppendLine("🛡️ <b>PARTİAL CLOSE (50% BAĞLANDI) & RİSK MENECMENT:</b>");
-                    sb.AppendLine("• Mövqenin <b>50%-i TP1 SƏVİYYƏSİNDƏ QAZANCLA BAĞLANDI ✅</b>");
-                    sb.AppendLine($"• Stop Loss dərhal <b>GİRİŞƏ (${signal.EntryPrice.ToString(CultureInfo.InvariantCulture)})</b> çəkildi (Sıfır Risk)!");
-                    sb.AppendLine($"• Qalan <b>50%</b> mövqe ilə <b>Hədəf 2 (TP2: ${signal.TakeProfit2.ToString(CultureInfo.InvariantCulture)})</b> gözlənilir.");
+                    sb.AppendLine($"• Qalan <b>50%</b> mövqe ilə <b>Hədəf B (TP_B: ${signal.TakeProfit2.ToString(CultureInfo.InvariantCulture)})</b> strukturu gözlənilir.");
                 }
             }
-            else if (outcomeType.Contains("TP2") || outcomeType.Contains("Hədəf 2"))
+            else if (outcomeType.Contains("TP2") || outcomeType.Contains("TP_B") || outcomeType.Contains("Hədəf 2") || outcomeType.Contains("Hədəf B") || outcomeType.Contains("TP3") || outcomeType.Contains("Hədəf 3"))
             {
                 sb.AppendLine();
-                if (signal.IsClosed || signal.TakeProfit3 <= 0 || signal.TakeProfit3 == signal.TakeProfit2)
-                {
-                    sb.AppendLine("🏆 <b>TAM HƏDƏFƏ ÇATILDI:</b> Mövqe maksimum mənfəətlə 100% bağlandı.");
-                }
-                else
-                {
-                    sb.AppendLine("🛡️ <b>PARTİAL CLOSE (25% ƏLAVƏ BAĞLANDI) & TRAILING STOP:</b>");
-                    sb.AppendLine("• Qalan mövqenin 50%-i (İlkin mövqenin <b>25%-i</b>) <b>QAZANCLA BAĞLANDI ✅</b>");
-                    sb.AppendLine($"• Stop Loss <b>TP1 (${signal.TakeProfit1.ToString(CultureInfo.InvariantCulture)})</b> səviyyəsinə qaldırıldı (Trailing)!");
-                    sb.AppendLine($"• Qalan son <b>25%</b> mövqe ilə <b>Hədəf 3 (TP3: ${signal.TakeProfit3.ToString(CultureInfo.InvariantCulture)})</b> gözlənilir.");
-                }
-            }
-            else if (outcomeType.Contains("TP3") || outcomeType.Contains("Hədəf 3"))
-            {
-                sb.AppendLine();
-                sb.AppendLine("🏆 <b>TAM HƏDƏFƏ ÇATILDI:</b> Mövqe maksimum mənfəətlə 100% bağlandı.");
+                sb.AppendLine("🏆 <b>TAM HƏDƏFƏ ÇATILDI:</b> Qalan 50% mövqe Hədəf B (TP_B) ilə tam bağlandı.");
             }
             else if (outcomeType.Contains("Breakeven") || outcomeType.Contains("Qorundu") || signal.IsPartial1Closed)
             {

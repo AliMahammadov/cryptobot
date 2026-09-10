@@ -102,6 +102,84 @@ namespace CryptoSense.Infrastructure.Persistence.Repositories
             return Task.CompletedTask;
         }
 
+        public async Task<int> CommitSignalNumberOnSendSuccessAsync(int signalId)
+        {
+            // BƏND 1: Bir INTEGER, bir DB lock (BEGIN IMMEDIATE).
+            // Nömrə YALNIZ sendMessage=true-dan SONRA +1.
+            var conn = _context.Database.GetDbConnection();
+            if (conn.State != System.Data.ConnectionState.Open)
+            {
+                await conn.OpenAsync();
+            }
+
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = "BEGIN IMMEDIATE";
+            try { await cmd.ExecuteNonQueryAsync(); } catch { }
+
+            try
+            {
+                var sig = await _context.Signals.FirstOrDefaultAsync(s => s.Id == signalId);
+                if (sig == null)
+                {
+                    cmd.CommandText = "ROLLBACK";
+                    try { await cmd.ExecuteNonQueryAsync(); } catch { }
+                    return 0;
+                }
+
+                if (sig.SignalAlertSent && sig.SignalNumber > 0)
+                {
+                    cmd.CommandText = "COMMIT";
+                    try { await cmd.ExecuteNonQueryAsync(); } catch { }
+                    return sig.SignalNumber;
+                }
+
+                cmd.CommandText = "SELECT COALESCE(MAX(SignalNumber), 0) FROM Signals WHERE SignalAlertSent = 1 AND SignalNumber > 0 AND NOT Symbol LIKE 'TESTCOIN%'";
+                var res = await cmd.ExecuteScalarAsync();
+                int maxSent = (res != null && res != DBNull.Value) ? Convert.ToInt32(res) : 0;
+                int nextNum = maxSent + 1;
+
+                sig.SignalNumber = nextNum;
+                sig.SignalAlertSent = true;
+                await _context.SaveChangesAsync();
+
+                cmd.CommandText = "COMMIT";
+                try { await cmd.ExecuteNonQueryAsync(); } catch { }
+                return nextNum;
+            }
+            catch (Exception ex)
+            {
+                cmd.CommandText = "ROLLBACK";
+                try { await cmd.ExecuteNonQueryAsync(); } catch { }
+                Console.WriteLine($"[SignalRepository] CommitSignalNumber error: {ex.Message}");
+                throw;
+            }
+        }
+
+        public async Task ResetClosedSignalsAsync()
+        {
+            // BƏND 6: 🧹 Sıfırla (SuperAdmin): statistika + BAĞLI = 0. Açıq mövqeyə toxunma.
+            var closedSignals = await _context.Signals
+                .Where(s => s.IsClosed || s.Status != SignalStatus.Open)
+                .ToListAsync();
+
+            if (closedSignals.Count > 0)
+            {
+                var closedIds = closedSignals.Select(s => s.Id).ToList();
+                var snaps = await _context.SignalIndicatorSnapshots
+                    .Where(s => closedIds.Contains(s.SignalId))
+                    .ToListAsync();
+                _context.SignalIndicatorSnapshots.RemoveRange(snaps);
+
+                var deliveries = await _context.UserSignalDeliveries
+                    .Where(d => closedIds.Contains(d.SignalId))
+                    .ToListAsync();
+                _context.UserSignalDeliveries.RemoveRange(deliveries);
+
+                _context.Signals.RemoveRange(closedSignals);
+                await _context.SaveChangesAsync();
+            }
+        }
+
         public async Task ClearAllSignalsAsync()
         {
             _context.SignalIndicatorSnapshots.RemoveRange(_context.SignalIndicatorSnapshots);
@@ -369,7 +447,7 @@ namespace CryptoSense.Infrastructure.Persistence.Repositories
 
             if (deliveredSignalIds.Count == 0)
             {
-                return new PerformanceStats();
+                return await GetPerformanceStatsAsync(specificTimeframe, userCoins);
             }
 
             var query = _context.Signals

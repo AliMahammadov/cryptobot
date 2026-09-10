@@ -639,21 +639,14 @@ namespace CryptoSense.Infrastructure.Telegram
                     {
                         try
                         {
-                            settings.AlertCounter = Math.Max(settings.AlertCounter, userSigNum);
+                            var committedNum = await uow.Signals.CommitSignalNumberOnSendSuccessAsync(signal.Id);
+                            settings.AlertCounter = Math.Max(settings.AlertCounter, committedNum);
                             settings.LastSignalSentUtc = DateTime.UtcNow;
                             settings.LastHeartbeatSentUtc = DateTime.UtcNow;
                             SaveSettings();
-                            await uow.Signals.RecordDeliveryAsync(signal.Id, specificChatId, userSigNum);
+                            await uow.Signals.RecordDeliveryAsync(signal.Id, specificChatId, committedNum);
                             signal.SignalAlertSent = true;
-                            signal.SignalNumber = userSigNum;
-                            var dbSig = await uow.Signals.GetByIdAsync(signal.Id);
-                            if (dbSig != null)
-                            {
-                                dbSig.SignalAlertSent = true;
-                                dbSig.SignalNumber = userSigNum;
-                                await uow.Signals.UpdateAsync(dbSig);
-                                await uow.SaveChangesAsync();
-                            }
+                            signal.SignalNumber = committedNum;
                         }
                         catch (Exception ex)
                         {
@@ -789,22 +782,15 @@ namespace CryptoSense.Infrastructure.Telegram
 
                 if (anyDelivered)
                 {
-                    signal.SignalAlertSent = true;
-                    signal.SignalNumber = nextSequentialNum;
                     try
                     {
-                        var dbSig = await uow.Signals.GetByIdAsync(signal.Id);
-                        if (dbSig != null)
-                        {
-                            dbSig.SignalAlertSent = true;
-                            dbSig.SignalNumber = nextSequentialNum;
-                            await uow.Signals.UpdateAsync(dbSig);
-                            await uow.SaveChangesAsync();
-                        }
+                        var committedNum = await uow.Signals.CommitSignalNumberOnSendSuccessAsync(signal.Id);
+                        signal.SignalAlertSent = true;
+                        signal.SignalNumber = committedNum;
                     }
                     catch (Exception ex)
                     {
-                        Console.WriteLine($"[TelegramBotService] Error updating signal alert sent status: {ex.Message}");
+                        Console.WriteLine($"[TelegramBotService] Error committing signal number: {ex.Message}");
                     }
                 }
                 else
@@ -1232,10 +1218,8 @@ namespace CryptoSense.Infrastructure.Telegram
                     Status = SignalStatus.Open
                 };
 
-                var userSigNum = settings.AlertCounter + 1;
-                settings.AlertCounter = userSigNum;
-                settings.LastSignalSentUtc = DateTime.UtcNow;
-                SaveSettings();
+                // BƏND 1: Test sayğacı YOX. Nömrə YALNIZ real göndərilmiş siqnala aiddir.
+                var userSigNum = 0;
 
                 var alertMsg = TelegramMessageFormatter.FormatSignalAlert(mockSig, userSigNum);
                 var note = "🧪 <b>[TEST REJİMİ CANLI SİMULYASİYASI]</b>\n" +
@@ -1539,9 +1523,8 @@ namespace CryptoSense.Infrastructure.Telegram
                 var msg = $"✅ <b>40 Standart + Fərdi Kombinə Portfeli Aktivləşdirildi! 🟢</b>\n\n" +
                           $"⏱ <b>Zaman Rejimi:</b> <code>{userSettings.Timeframe}</code>\n" +
                           $"🪙 <b>İzlənən Coinlər ({userSettings.Coins.Count} ədəd):</b>\n<code>{cleanList}</code>\n\n" +
-                          $"🚀 Skaner aktivləşdirildi. Canlı texniki bazar vəziyyəti aşağıda təqdim edilir:";
+                          $"🚀 Skaner aktivdir. Yalnız 1h və 4h şam bağlanışında A+ konfluens siqnalları göndəriləcək.";
                 await EditMessageTextAsync(chatId, messageId, msg, TelegramKeyboards.BuildBackToTerminalKeyboard());
-                await ScanUserCoinsInstantlyAsync(userSettings, chatId, userSettings.Timeframe);
                 if (_testModeChats.ContainsKey(chatId))
                 {
                     _ = SendMockTestSignalAsync(chatId, userSettings, userSettings.Timeframe);
@@ -1559,9 +1542,8 @@ namespace CryptoSense.Infrastructure.Telegram
                 var msg = $"✅ <b>Standart 40 Coin Portfeli Aktivləşdirildi! 🟢</b>\n\n" +
                           $"⏱ <b>Zaman Rejimi:</b> <code>{userSettings.Timeframe}</code>\n" +
                           $"🪙 <b>İzlənən Coinlər:</b> 40/40 İnstitusional coin\n\n" +
-                          $"🚀 Skaner aktivləşdirildi. Canlı texniki bazar vəziyyəti aşağıda təqdim edilir:";
+                          $"🚀 Skaner aktivdir. Yalnız 1h və 4h şam bağlanışında A+ konfluens siqnalları göndəriləcək.";
                 await EditMessageTextAsync(chatId, messageId, msg, TelegramKeyboards.BuildBackToTerminalKeyboard());
-                await ScanUserCoinsInstantlyAsync(userSettings, chatId, userSettings.Timeframe);
                 if (_testModeChats.ContainsKey(chatId))
                 {
                     _ = SendMockTestSignalAsync(chatId, userSettings, userSettings.Timeframe);
@@ -1597,9 +1579,8 @@ namespace CryptoSense.Infrastructure.Telegram
                 var msg = $"✅ <b>{portName} Portfeli Aktivləşdirildi! 🟢</b>\n\n" +
                           $"⏱ <b>Zaman Rejimi:</b> <code>{userSettings.Timeframe}</code>\n" +
                           $"🪙 <b>İzlənən Coinlər ({userSettings.Coins.Count} ədəd):</b>\n<code>{cleanList}</code>\n\n" +
-                          $"🚀 Skaner aktivləşdirildi. Canlı texniki bazar vəziyyəti aşağıda təqdim edilir:";
+                          $"🚀 Skaner aktivdir. Yalnız 1h və 4h şam bağlanışında A+ konfluens siqnalları göndəriləcək.";
                 await EditMessageTextAsync(chatId, messageId, msg, TelegramKeyboards.BuildBackToTerminalKeyboard());
-                await ScanUserCoinsInstantlyAsync(userSettings, chatId, userSettings.Timeframe);
                 if (_testModeChats.ContainsKey(chatId))
                 {
                     _ = SendMockTestSignalAsync(chatId, userSettings, userSettings.Timeframe);
@@ -1666,17 +1647,21 @@ namespace CryptoSense.Infrastructure.Telegram
             }
             else if (data == "cb_reset_confirm")
             {
+                // BƏND 6: 🧹 Sıfırla (SuperAdmin): statistika + BAĞLI = 0. Açıq mövqeyə toxunma.
+                await unitOfWork.Signals.ResetClosedSignalsAsync();
+                await unitOfWork.SaveChangesAsync();
+
                 userSettings.IsActive = false;
                 userSettings.Timeframe = "Təyin olunmayıb";
                 userSettings.AlertCounter = 0;
                 userSettings.LastResumeTime = DateTime.UtcNow;
                 SaveSettings();
 
-                var resetMsg = "🛑 <b>Bütün Bazar Sistemləri və Zaman Aralıqları Sıfırlandı!</b>\n\n" +
+                var resetMsg = "🛑 <b>Bütün Bağlı Əməliyyatlar və Statistika Sıfırlandı!</b>\n\n" +
                                "• Skaner və bildirişlər <b>dayandırıldı (Dayandırılıb 🔴)</b>.\n" +
-                               "• Bütün zaman aralıqları sıfırlandı (<b>Təyin olunmayıb</b>).\n" +
-                               "• Şəxsi siqnal sayğacınız (#0) sıfırlandı.\n" +
-                               $"• <b>Qorunan Portfeliniz:</b> {userSettings.Coins.Count} ədəd coin toxunulmaz qorunub saxlanıldı.\n\n" +
+                               "• Bağlı əməliyyat tarixçəsi və statistika sıfırlandı (#0).\n" +
+                               "• <b>Açıq mövqelər toxunulmaz saxlanıldı.</b>\n" +
+                               $"• <b>Qorunan Portfeliniz:</b> {userSettings.Coins.Count} ədəd coin qorunub saxlanıldı.\n\n" +
                                "<i>Yenidən başlamaq üçün aşağıdakı düymə ilə Terminala qayıdın və portfel/zaman seçin.</i>";
                 await EditMessageTextAsync(chatId, messageId, resetMsg, TelegramKeyboards.BuildBackToTerminalKeyboard());
             }
@@ -2830,7 +2815,6 @@ namespace CryptoSense.Infrastructure.Telegram
                 sb.AppendLine($"<code>{cleanList}</code>");
 
                 await SendMessageAsync(sb.ToString(), chatId, TelegramKeyboards.BuildUserKeyboard(userSettings, isAdmin));
-                await ScanUserCoinsInstantlyAsync(userSettings, chatId, targetTf);
                 return;
             }
 
@@ -2861,7 +2845,6 @@ namespace CryptoSense.Infrastructure.Telegram
                                $"🪙 <b>İzlənən:</b> {userSettings.Coins.Count} coin\n" +
                                $"<code>{cleanList}</code>";
                 await SendMessageAsync(startMsg, chatId, TelegramKeyboards.BuildUserKeyboard(userSettings, isAdmin));
-                await ScanUserCoinsInstantlyAsync(userSettings, chatId, "Hamısı");
                 return;
             }
             else if (text == "⏱ 15 Dəqiqə (15m)" || text == "15m")
@@ -2884,7 +2867,6 @@ namespace CryptoSense.Infrastructure.Telegram
                                $"🪙 <b>İzlənən:</b> {userSettings.Coins.Count} coin\n" +
                                $"<code>{cleanList}</code>";
                 await SendMessageAsync(startMsg, chatId, TelegramKeyboards.BuildUserKeyboard(userSettings, isAdmin));
-                await ScanUserCoinsInstantlyAsync(userSettings, chatId, "1h");
                 return;
             }
             else if (text == "⏱ 1 Saat (1h) Siqnalları" || text == "⏱ 1 Saat (1h)" || text == "1h")
@@ -2907,7 +2889,6 @@ namespace CryptoSense.Infrastructure.Telegram
                                $"🪙 <b>İzlənən:</b> {userSettings.Coins.Count} coin\n" +
                                $"<code>{cleanList}</code>";
                 await SendMessageAsync(startMsg, chatId, TelegramKeyboards.BuildUserKeyboard(userSettings, isAdmin));
-                await ScanUserCoinsInstantlyAsync(userSettings, chatId, "1h");
                 return;
             }
             else if (text == "⏱ 4 Saat (4h)" || text == "4h")
@@ -2930,7 +2911,6 @@ namespace CryptoSense.Infrastructure.Telegram
                                $"🪙 <b>İzlənən:</b> {userSettings.Coins.Count} coin\n" +
                                $"<code>{cleanList}</code>";
                 await SendMessageAsync(startMsg, chatId, TelegramKeyboards.BuildUserKeyboard(userSettings, isAdmin));
-                await ScanUserCoinsInstantlyAsync(userSettings, chatId, "4h");
                 return;
             }
             else if (text == "📋 Standart 40 Coini Seç" || text == "📋 Standart 16 Coini Seç")

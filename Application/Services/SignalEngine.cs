@@ -83,6 +83,14 @@ namespace CryptoSense.Application.Services
             return sumProduct / denom;
         }
 
+        public static decimal GetCoinTickSize(decimal basePrice)
+        {
+            if (basePrice >= 100m) return 0.01m;
+            if (basePrice >= 1m) return 0.0001m;
+            if (basePrice >= 0.01m) return 0.00001m;
+            return 0.00000001m;
+        }
+
         public static SrTargetResult CalculateSrTargetsAndStops(
             List<Kline> closedKlines,
             SignalDirection direction,
@@ -160,41 +168,118 @@ namespace CryptoSense.Application.Services
             decimal atrPct = (atr14 > 0 && calculationRefPrice > 0) ? (atr14 / calculationRefPrice) * 100m : 1.0m;
             fail = new SrTargetResult(false, null, 0, 0, 0, 0, 0, atrPct, signalSwingLow, signalSwingHigh, clusters);
 
-            decimal slPct, tp1Pct;
-            if (timeframe == "4h")
+            // BƏND 2 — SL = DƏSTƏK/DİRƏNC + ATR (ƏSAS PUL QAYDASI)
+            // son 4–6 şamın swing HIGH / swing LOW
+            int swingCount = Math.Min(6, closedKlines.Count);
+            var recentCandles = closedKlines.TakeLast(swingCount).ToList();
+            decimal swingHigh = recentCandles.Max(c => c.High);
+            decimal swingLow = recentCandles.Min(c => c.Low);
+
+            decimal bufferAtr = 0.10m * atr14;
+            decimal minAtrDistance = 1.50m * atr14;
+            decimal floorAtrDistance = 1.20m * atr14;
+
+            decimal slDistance;
+            decimal sl;
+
+            if (direction == SignalDirection.Sell) // SHORT
             {
-                // 4h siqnal: SL = 1.0 * ATR(4h), cap min 1.00% max 2.50%; TP1 = 1.5 * ATR(4h), cap min 1.50% max 3.50%
-                slPct = Math.Clamp(1.0m * atrPct, 1.00m, 2.50m);
-                tp1Pct = Math.Clamp(1.5m * atrPct, 1.50m, 3.50m);
+                // 1h SHORT SL = max(1.50 × ATR(14) eyni 1h, son 4–6 × 1h şamın swing HIGH + 0.10 × ATR)
+                decimal swingLevel = swingHigh + bufferAtr;
+                decimal swingDist = swingLevel - calculationRefPrice;
+                slDistance = Math.Max(minAtrDistance, swingDist);
+                if (slDistance < floorAtrDistance) slDistance = floorAtrDistance;
+                sl = calculationRefPrice + slDistance;
             }
-            else // 1h (default)
+            else // LONG (SignalDirection.Buy)
             {
-                // 1h siqnal: SL = 1.0 * ATR(1h), cap min 0.70% max 1.50%; TP1 = 1.5 * ATR(1h), cap min 1.10% max 2.20%
-                slPct = Math.Clamp(1.0m * atrPct, 0.70m, 1.50m);
-                tp1Pct = Math.Clamp(1.5m * atrPct, 1.10m, 2.20m);
+                // 1h LONG SL = max(1.50×ATR, swing LOW − 0.10×ATR)
+                decimal swingLevel = swingLow - bufferAtr;
+                decimal swingDist = calculationRefPrice - swingLevel;
+                slDistance = Math.Max(minAtrDistance, swingDist);
+                if (slDistance < floorAtrDistance) slDistance = floorAtrDistance;
+                sl = calculationRefPrice - slDistance;
             }
 
-            // R:R = |TP1 - Entry| / |Entry - SL|
-            decimal rrRatio = slPct > 0 ? (tp1Pct / slPct) : 0m;
+            // 05:00–07:00 +4 pəncərəsində 1h: əlavə filtr — SL minimum 1.70 ATR (nazik kitab)
+            var aztNowHour = DateTime.UtcNow.AddHours(4).Hour;
+            if (timeframe == "1h" && aztNowHour >= 5 && aztNowHour < 7)
+            {
+                decimal thinBookDist = 1.70m * atr14;
+                if (slDistance < thinBookDist)
+                {
+                    slDistance = thinBookDist;
+                    sl = direction == SignalDirection.Buy
+                        ? calculationRefPrice - slDistance
+                        : calculationRefPrice + slDistance;
+                }
+            }
+
+            decimal slPct = calculationRefPrice > 0 ? (slDistance / calculationRefPrice) * 100m : 0m;
+
+            // 1h SL məsafəsi > 2.8% → kart AÇMA (ölçünü sıxmaq yox, treydi keç)
+            if (timeframe == "1h" && slPct > 2.80m)
+            {
+                Console.WriteLine($"[SignalEngine] 1h SL too wide ({slPct:F2}% > 2.80%). Trade skipped.");
+                return fail with { SkipReason = $"SKIP_SL_TOO_WIDE (1h SL {slPct:F2}% > 2.80%)" };
+            }
+            // 4h: eyni qayda, ATR(4h), swing 4–6 × 4h (4h AAVE 1.87 ATR / 2.40% saxla, max 4.0%)
+            if (timeframe == "4h" && slPct > 4.00m)
+            {
+                Console.WriteLine($"[SignalEngine] 4h SL too wide ({slPct:F2}% > 4.00%). Trade skipped.");
+                return fail with { SkipReason = $"SKIP_SL_TOO_WIDE (4h SL {slPct:F2}% > 4.00%)" };
+            }
+
+            // BƏND 3 — TP = 1R PARTİAL + STRUKTUR
+            // TP_A = 1.00R (girişdən SL məsafəsi qədər)
+            // TP_B = min(2.0R, növbəti struktur dəstək/dirənc)
+            decimal riskR = slDistance; // 1.00R
+            decimal tickSize = GetCoinTickSize(calculationRefPrice);
+
+            decimal tp1, tp2;
+            if (direction == SignalDirection.Buy) // LONG
+            {
+                tp1 = calculationRefPrice + riskR;
+                decimal maxTp2 = calculationRefPrice + (2.00m * riskR);
+                var nextRes = clusters.Where(c => c > tp1 + (0.15m * riskR)).OrderBy(c => c).ToList();
+                decimal structRes = nextRes.Count > 0 ? nextRes.First() : maxTp2;
+                tp2 = Math.Min(maxTp2, structRes);
+                if (tp2 <= tp1) tp2 = maxTp2;
+
+                // HBAR #3 tipi: TP səviyyəsi low/high-a 1 tik qalırsa, TP-ni 1 tik YAXINLAŞDIR (hit olsun), SL-i daraltma
+                tp1 -= tickSize;
+                tp2 -= tickSize;
+            }
+            else // SHORT
+            {
+                tp1 = calculationRefPrice - riskR;
+                decimal maxTp2 = calculationRefPrice - (2.00m * riskR);
+                var nextSup = clusters.Where(c => c < tp1 - (0.15m * riskR)).OrderByDescending(c => c).ToList();
+                decimal structSup = nextSup.Count > 0 ? nextSup.First() : maxTp2;
+                tp2 = Math.Max(maxTp2, structSup);
+                if (tp2 >= tp1) tp2 = maxTp2;
+
+                // HBAR #3 tipi: TP səviyyəsi low/high-a 1 tik qalırsa, TP-ni 1 tik YAXINLAŞDIR (hit olsun), SL-i daraltma
+                tp1 += tickSize;
+                tp2 += tickSize;
+            }
+
+            tp1 = RoundToCoinPrecision(calculationRefPrice, tp1);
+            tp2 = RoundToCoinPrecision(calculationRefPrice, tp2);
+            sl = RoundToCoinPrecision(calculationRefPrice, sl);
+
+            // R:R < 1.30 (YENİ SL ilə hesabla) → kart yox
+            decimal tp1DistActual = Math.Abs(tp1 - calculationRefPrice);
+            decimal tp2DistActual = Math.Abs(tp2 - calculationRefPrice);
+            decimal weightedTpDist = (0.50m * tp1DistActual) + (0.50m * tp2DistActual);
+            decimal rrRatio = riskR > 0 ? (weightedTpDist / riskR) : 0m;
+
             if (rrRatio < 1.30m)
             {
-                Console.WriteLine($"[SignalEngine] R:R filter blocked (R:R {rrRatio:F2} < 1.30)");
-                return fail with { SkipReason = "R:R filter blocked" };
+                Console.WriteLine($"[SignalEngine] R:R filter blocked (Weighted R:R {rrRatio:F2} < 1.30)");
+                return fail with { SkipReason = $"SKIP_LOW_RR (Weighted R:R {rrRatio:F2} < 1.30)" };
             }
 
-            decimal tp1 = direction == SignalDirection.Buy
-                ? calculationRefPrice * (1m + tp1Pct / 100m)
-                : calculationRefPrice * (1m - tp1Pct / 100m);
-
-            decimal sl = direction == SignalDirection.Buy
-                ? calculationRefPrice * (1m - slPct / 100m)
-                : calculationRefPrice * (1m + slPct / 100m);
-
-            decimal riskR = Math.Abs(calculationRefPrice - sl);
-
-            // 1h-də TP2/TP3 yox. Yalnız TP1 + SL.
-            // 4h-də uzaq TP3 ilkin kartda yox.
-            decimal tp2 = 0m;
             decimal tp3 = 0m;
 
             return new SrTargetResult(
@@ -344,7 +429,7 @@ namespace CryptoSense.Application.Services
             symbol = symbol.ToUpper();
             if (!symbol.EndsWith("USDT")) symbol += "USDT";
 
-            if (timeframe == "15m")
+            if (timeframe != "1h" && timeframe != "4h")
             {
                 var now = DateTime.UtcNow;
                 return new FuturesSignal
@@ -358,7 +443,7 @@ namespace CryptoSense.Application.Services
                     GeneratedAt = now,
                     ExpiryTimeUtc = now.AddMinutes(90),
                     TimestampFormatted = CryptoSense.Domain.Common.TimeHelper.NowFormatted,
-                    AnalysisReasons = new List<string> { "15m zaman kəsiyi deaktiv edilib (Yalnız 1h və 4h aktivdir)." }
+                    AnalysisReasons = new List<string> { "Yalnız 1h və 4h şam bağlanışları dəstəklənir (15m/5m/3m/30m qadağandır)." }
                 };
             }
 
@@ -783,7 +868,7 @@ namespace CryptoSense.Application.Services
                 }
 
                 newSignal.TakeProfit1 = RoundToCoinPrecision(calculationRefPrice, srResult.TakeProfit1);
-                newSignal.TakeProfit2 = 0m;
+                newSignal.TakeProfit2 = RoundToCoinPrecision(calculationRefPrice, srResult.TakeProfit2);
                 newSignal.TakeProfit3 = 0m;
                 newSignal.StopLoss = RoundToCoinPrecision(calculationRefPrice, srResult.StopLoss);
                 newSignal.InitialRiskR = srResult.InitialRiskR;
