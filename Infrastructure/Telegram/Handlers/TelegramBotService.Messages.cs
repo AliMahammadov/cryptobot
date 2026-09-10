@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
@@ -14,10 +14,9 @@ using Microsoft.Extensions.DependencyInjection;
 
 namespace CryptoSense.Infrastructure.Telegram
 {
-    // Partial class: Incoming message handler + FSM (auth, admin commands, coin management)
+    // Partial class: incoming message handler + FSM
     public partial class TelegramBotService
     {
-
         private async Task SendMockTestSignalAsync(string chatId, UserSettings settings, string timeframe)
         {
             try
@@ -93,7 +92,6 @@ namespace CryptoSense.Infrastructure.Telegram
             }
         }
 
-
         private async Task HandleIncomingMessageAsync(string chatId, string telegramUsername, long? userId, long messageId, string text)
         {
             // Action debouncer: ignore rapid double-taps/clicks of the exact same action within 1.5 seconds,
@@ -140,7 +138,13 @@ namespace CryptoSense.Infrastructure.Telegram
                 _authenticatedSessions[chatId] = "Ali";
                 SuperAdminChatId = chatId;
                 _loggedOutChats.TryRemove(chatId, out _);
-                _userStates.TryRemove(chatId, out _);
+                // CRITICAL: Do NOT wipe FSM state if admin is mid-input (create/delete/reset user)
+                bool adminInFsm = _userStates.TryGetValue(chatId, out var existingAdmState) &&
+                                  (existingAdmState == "ADMIN_WAITING_CREATE_USER" ||
+                                   existingAdmState == "ADMIN_WAITING_DELETE_USER" ||
+                                   existingAdmState == "ADMIN_WAITING_RESET_PWD");
+                if (!adminInFsm)
+                    _userStates.TryRemove(chatId, out _);
                 var aSettings = GetSettings(chatId);
                 aSettings.TelegramUserId = userId ?? 1219998176;
                 aSettings.Username = "Ali (Super Admin)";
@@ -196,6 +200,17 @@ namespace CryptoSense.Infrastructure.Telegram
                                      text == "➕ Öz coini əlavə et" || text == "➕ İstifadəçi Yarat" ||
                                      text.Contains("Siqnallar") || text.Contains("Menyu") || text.Contains("Statistika") ||
                                      (text.StartsWith("/") && !text.StartsWith("/login", StringComparison.OrdinalIgnoreCase) && !text.StartsWith("/admin ", StringComparison.OrdinalIgnoreCase));
+
+            // FSM guard: if user is mid text-input step, force isMenuButtonClick = false
+            if (_userStates.TryGetValue(chatId, out var fsmGuardState) &&
+                (fsmGuardState == "ADMIN_WAITING_CREATE_USER" ||
+                 fsmGuardState == "ADMIN_WAITING_DELETE_USER" ||
+                 fsmGuardState == "ADMIN_WAITING_RESET_PWD" ||
+                 fsmGuardState == "WAITING_ADD_CUSTOM_COIN" ||
+                 fsmGuardState == "USER_WAITING_DELETE_COIN"))
+            {
+                isMenuButtonClick = false;
+            }
 
             // =========================================================================
             // 0. LOGOUT COMMAND (ALWAYS CLEARS DATABASE & SESSION)
@@ -1521,5 +1536,5 @@ namespace CryptoSense.Infrastructure.Telegram
                 }
             }
     }
-    }
+}
 }

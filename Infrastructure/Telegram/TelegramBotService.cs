@@ -1298,7 +1298,7 @@ namespace CryptoSense.Infrastructure.Telegram
             // Ensure no lingering webhook exists to prevent conflicts or duplicate updates
             try
             {
-                var delWebhookUrl = $"https://api.telegram.org/bot{_config.TelegramBotToken}/deleteWebhook?drop_pending_updates=false";
+                var delWebhookUrl = $"https://api.telegram.org/bot{_config.TelegramBotToken}/deleteWebhook?drop_pending_updates=true";
                 var delResp = await _httpClient.GetAsync(delWebhookUrl, stoppingToken);
                 Console.WriteLine($"[TelegramBotService] Startup deleteWebhook executed: {delResp.StatusCode}");
             }
