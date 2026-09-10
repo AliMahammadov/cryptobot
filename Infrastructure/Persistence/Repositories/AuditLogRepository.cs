@@ -28,5 +28,27 @@ namespace CryptoSense.Infrastructure.Persistence.Repositories
                 .Take(count)
                 .ToListAsync();
         }
+
+        public async Task<bool> HasDailyReportBeenSentAsync(string dateKey)
+        {
+            return await _context.AuditLogs
+                .AnyAsync(a => a.Action == "DAILY_REPORT_SENT" && a.TargetUsername == dateKey);
+        }
+
+        public async Task RecordDailyReportSentAsync(string dateKey)
+        {
+            var exists = await _context.AuditLogs
+                .AnyAsync(a => a.Action == "DAILY_REPORT_SENT" && a.TargetUsername == dateKey);
+            if (!exists)
+            {
+                await _context.AuditLogs.AddAsync(new AuditLog
+                {
+                    Action = "DAILY_REPORT_SENT",
+                    TargetUsername = dateKey,
+                    CreatedAtUtc = System.DateTime.UtcNow
+                });
+                await _context.SaveChangesAsync();
+            }
+        }
     }
 }

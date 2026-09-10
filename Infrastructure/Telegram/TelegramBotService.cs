@@ -1049,14 +1049,26 @@ namespace CryptoSense.Infrastructure.Telegram
         {
             using var scope = _serviceProvider.CreateScope();
             var uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
-            var todayUtc = DateTime.UtcNow.Date;
 
-            var todaySignals = await uow.Signals.GetSignalsSinceAsync(todayUtc);
+            // QIZIL QAYDA: Gündəlik hesabat Bakı təqvimi (UTC+4) ilə hər gün yalnız 1 DƏFƏ göndərilə bilər.
+            // Baza (AuditLogs) üzərindən yoxlanılır — heç bir restart və ya deploy təkrar hesabat çıxara BİLMƏZ.
+            var bakuDateStr = DateTime.UtcNow.AddHours(4).ToString("yyyy-MM-dd");
+            if (await uow.AuditLogs.HasDailyReportBeenSentAsync(bakuDateStr))
+            {
+                Console.WriteLine($"[DailyReport] Bakı tarixi {bakuDateStr} üçün gün sonu hesabatı artıq bazada mövcuddur. Təkrar ləğv edildi.");
+                return;
+            }
+
+            // Dərhal bazaya qeyd edilir ki, paralel və ya ardıcıl deploy çağırışları təkrar göndərə bilməsin
+            await uow.AuditLogs.RecordDailyReportSentAsync(bakuDateStr);
+
+            var sinceUtc = DateTime.UtcNow.AddHours(-24);
+            var todaySignals = await uow.Signals.GetSignalsSinceAsync(sinceUtc);
             var globalCoinsEntered = todaySignals.Select(s => s.Symbol.Replace("USDT", "")).Distinct().ToList();
             var defaultReasons = new List<string>
             {
-                "Bazar konsolidasiyası və ADX < 20 olan cütlüklər kənarlaşdırıldı",
-                "R:R < 1.80 olan qeyri-sabit setup-lar bloklandı",
+                "Bazar konsolidasiyası və ADX < 16 olan cütlüklər kənarlaşdırıldı",
+                "R:R < 1.30 olan qeyri-sabit setup-lar bloklandı",
                 "Spayk və qeyri-təbii dalğalanma olan riskli zonalar filtrləndi"
             };
 

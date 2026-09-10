@@ -48,7 +48,7 @@ namespace CryptoSense.Worker
         private static readonly ConcurrentDictionary<string, DateTime> _lastSymbolAlertTime = new();
         private static readonly object _heartbeatLock = new();
         private static readonly SemaphoreSlim _signalDispatchLock = new(1, 1);
-        private static DateTime _lastDailyReportDateUtc = DateTime.MinValue;
+        private static string _lastDailyReportDateBaku = "";
 
         private static readonly ConcurrentDictionary<string, List<(string Symbol, SignalDirection Direction)>> _hourlyDispatches = new();
         private static readonly ConcurrentDictionary<int, SemaphoreSlim> _signalOutcomeSemaphores = new();
@@ -1396,17 +1396,22 @@ namespace CryptoSense.Worker
                 }
             }
 
-            // Daily Report Dispatch (Once per day at Baku midnight = 20:00 UTC)
-            if (nowUtc.Date > _lastDailyReportDateUtc && nowUtc.Hour >= 20)
+            // QIZIL QAYDA: Gündəlik hesabat (Günün sonu - Bakı vaxtı ilə 00:00 - 00:30 pəncərəsi)
+            var bakuNow = DateTime.UtcNow.AddHours(4);
+            if (bakuNow.Hour == 0 && bakuNow.Minute < 30)
             {
-                _lastDailyReportDateUtc = nowUtc.Date;
-                try
+                var bakuDateStr = bakuNow.ToString("yyyy-MM-dd");
+                if (_lastDailyReportDateBaku != bakuDateStr)
                 {
-                    await _telegramService.SendDailyReportAsync();
-                }
-                catch (Exception ex)
-                {
-                    Console.WriteLine($"[BackgroundMarketScanner] Daily Report error: {ex.Message}");
+                    _lastDailyReportDateBaku = bakuDateStr;
+                    try
+                    {
+                        await _telegramService.SendDailyReportAsync();
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"[BackgroundMarketScanner] Daily Report error: {ex.Message}");
+                    }
                 }
             }
         }

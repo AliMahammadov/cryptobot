@@ -8,5 +8,7 @@ namespace CryptoSense.Domain.Interfaces
     {
         Task AddAsync(AuditLog log);
         Task<List<AuditLog>> GetRecentLogsAsync(int count = 50);
+        Task<bool> HasDailyReportBeenSentAsync(string dateKey);
+        Task RecordDailyReportSentAsync(string dateKey);
     }
 }
