@@ -1519,7 +1519,15 @@ namespace CryptoSense.Infrastructure.Telegram
                 var activeCount = await unitOfWork.Signals.GetActiveSignalsCountAsync();
                 var lastTime = userSettings.LastSignalSentUtc == default ? "" : Domain.Common.TimeHelper.FormatAz(userSettings.LastSignalSentUtc);
                 var dashText = TelegramMessageFormatter.FormatTerminalDashboard(userSettings, activeCount, lastTime);
-                await EditMessageTextAsync(chatId, messageId, dashText, TelegramKeyboards.BuildTerminalInlineKeyboard(userSettings, _testModeChats.ContainsKey(chatId), isCallerAdmin));
+                var inlineKb = TelegramKeyboards.BuildTerminalInlineKeyboard(userSettings, _testModeChats.ContainsKey(chatId), isCallerAdmin);
+                bool edited = await EditMessageTextAsync(chatId, messageId, dashText, inlineKb);
+                if (!edited)
+                {
+                    var newMsgId = await SendMessageReturnIdAsync(dashText, chatId, inlineKb);
+                    userSettings.LastTerminalMessageId = newMsgId;
+                    userSettings.IsTerminalOpen = true;
+                    SaveSettings();
+                }
                 _ = BuildAndSendPortfolioSummaryAsync(chatId, userSettings, forceRefresh: false);
             }
             else if (data == "cb_refresh")
@@ -1527,7 +1535,15 @@ namespace CryptoSense.Infrastructure.Telegram
                 var activeCount = await unitOfWork.Signals.GetActiveSignalsCountAsync();
                 var lastTime = userSettings.LastSignalSentUtc == default ? "" : Domain.Common.TimeHelper.FormatAz(userSettings.LastSignalSentUtc);
                 var dashText = TelegramMessageFormatter.FormatTerminalDashboard(userSettings, activeCount, lastTime);
-                await EditMessageTextAsync(chatId, messageId, dashText, TelegramKeyboards.BuildTerminalInlineKeyboard(userSettings, _testModeChats.ContainsKey(chatId), isCallerAdmin));
+                var inlineKb = TelegramKeyboards.BuildTerminalInlineKeyboard(userSettings, _testModeChats.ContainsKey(chatId), isCallerAdmin);
+                bool edited = await EditMessageTextAsync(chatId, messageId, dashText, inlineKb);
+                if (!edited)
+                {
+                    var newMsgId = await SendMessageReturnIdAsync(dashText, chatId, inlineKb);
+                    userSettings.LastTerminalMessageId = newMsgId;
+                    userSettings.IsTerminalOpen = true;
+                    SaveSettings();
+                }
                 _ = BuildAndSendPortfolioSummaryAsync(chatId, userSettings, forceRefresh: true);
             }
             else if (data == "cb_news")
@@ -1552,7 +1568,15 @@ namespace CryptoSense.Infrastructure.Telegram
                 var activeCount = await unitOfWork.Signals.GetActiveSignalsCountAsync();
                 var lastTime = userSettings.LastSignalSentUtc == default ? "" : Domain.Common.TimeHelper.FormatAz(userSettings.LastSignalSentUtc);
                 var dashText = TelegramMessageFormatter.FormatTerminalDashboard(userSettings, activeCount, lastTime);
-                await EditMessageTextAsync(chatId, messageId, dashText, TelegramKeyboards.BuildTerminalInlineKeyboard(userSettings, _testModeChats.ContainsKey(chatId), isCallerAdmin));
+                var inlineKb = TelegramKeyboards.BuildTerminalInlineKeyboard(userSettings, _testModeChats.ContainsKey(chatId), isCallerAdmin);
+                bool edited = await EditMessageTextAsync(chatId, messageId, dashText, inlineKb);
+                if (!edited)
+                {
+                    var newMsgId = await SendMessageReturnIdAsync(dashText, chatId, inlineKb);
+                    userSettings.LastTerminalMessageId = newMsgId;
+                    userSettings.IsTerminalOpen = true;
+                    SaveSettings();
+                }
             }
             else if (data == "cb_toggle_testmode")
             {
@@ -1809,7 +1833,14 @@ namespace CryptoSense.Infrastructure.Telegram
                 var totalCount = allUsers.Count;
                 var activeCount = allUsers.Count(u => u.IsActive);
                 var adminDash = TelegramMessageFormatter.FormatAdminDashboard(totalCount, activeCount);
-                await EditMessageTextAsync(chatId, messageId, adminDash, TelegramKeyboards.BuildAdminTerminalInlineKeyboard());
+                bool edited = await EditMessageTextAsync(chatId, messageId, adminDash, TelegramKeyboards.BuildAdminTerminalInlineKeyboard());
+                if (!edited)
+                {
+                    var newMsgId = await SendMessageReturnIdAsync(adminDash, chatId, TelegramKeyboards.BuildAdminTerminalInlineKeyboard());
+                    userSettings.LastAdminMessageId = newMsgId;
+                    userSettings.IsAdminOpen = true;
+                    SaveSettings();
+                }
             }
             else if (data == "cb_admin_create_user")
             {
@@ -1818,14 +1849,18 @@ namespace CryptoSense.Infrastructure.Telegram
                              "Yaratmaq istədiyiniz <b>İstifadəçi Adını</b> və <b>Parolu</b> aralarında boşluq qoyaraq yazın:\n\n" +
                              "📌 <b>Məsələn:</b>\n" +
                              "<code>Murad 123456</code>";
-                await EditMessageTextAsync(chatId, messageId, prompt, TelegramKeyboards.BuildBackToAdminKeyboard());
+                bool edited = await EditMessageTextAsync(chatId, messageId, prompt, TelegramKeyboards.BuildBackToAdminKeyboard());
+                if (!edited)
+                    await SendMessageAsync(prompt, chatId, TelegramKeyboards.BuildBackToAdminKeyboard());
             }
             else if (data == "cb_admin_list_users")
             {
                 var userManager = scope.ServiceProvider.GetRequiredService<IUserManagerService>();
                 var allUsers = await userManager.GetAllUsersAsync();
                 var userListMsg = TelegramMessageFormatter.FormatUserList(allUsers);
-                await EditMessageTextAsync(chatId, messageId, userListMsg, TelegramKeyboards.BuildBackToAdminKeyboard());
+                bool edited = await EditMessageTextAsync(chatId, messageId, userListMsg, TelegramKeyboards.BuildBackToAdminKeyboard());
+                if (!edited)
+                    await SendMessageAsync(userListMsg, chatId, TelegramKeyboards.BuildBackToAdminKeyboard());
             }
             else if (data == "cb_admin_del_user")
             {
@@ -1833,7 +1868,9 @@ namespace CryptoSense.Infrastructure.Telegram
                 var prompt = "🗑 <b>İstifadəçi Silmək</b>\n\n" +
                              "Silmək istədiyiniz <b>İstifadəçi Adını</b> yazın:\n\n" +
                              "📌 <b>Məsələn:</b> <code>Murad</code>";
-                await EditMessageTextAsync(chatId, messageId, prompt, TelegramKeyboards.BuildBackToAdminKeyboard());
+                bool edited = await EditMessageTextAsync(chatId, messageId, prompt, TelegramKeyboards.BuildBackToAdminKeyboard());
+                if (!edited)
+                    await SendMessageAsync(prompt, chatId, TelegramKeyboards.BuildBackToAdminKeyboard());
             }
             else if (data == "cb_admin_change_pwd")
             {
@@ -1841,7 +1878,9 @@ namespace CryptoSense.Infrastructure.Telegram
                 var prompt = "🔑 <b>Parolu Dəyişmək</b>\n\n" +
                              "İstifadəçi adını və yeni parolu aralarında boşluq qoyaraq yazın:\n\n" +
                              "📌 <b>Məsələn:</b> <code>Murad yeniParol123</code>";
-                await EditMessageTextAsync(chatId, messageId, prompt, TelegramKeyboards.BuildBackToAdminKeyboard());
+                bool edited = await EditMessageTextAsync(chatId, messageId, prompt, TelegramKeyboards.BuildBackToAdminKeyboard());
+                if (!edited)
+                    await SendMessageAsync(prompt, chatId, TelegramKeyboards.BuildBackToAdminKeyboard());
             }
             else if (data == "cb_admin_export_db")
             {
@@ -1868,7 +1907,9 @@ namespace CryptoSense.Infrastructure.Telegram
             {
                 var stats = await signalEngine.GetPerformanceStatsAsync(userSettings.Timeframe, userSettings.Coins);
                 var statsMsg = TelegramMessageFormatter.FormatPerformanceStats(stats, "Qlobal Admin");
-                await EditMessageTextAsync(chatId, messageId, statsMsg, TelegramKeyboards.BuildBackToAdminKeyboard());
+                bool edited = await EditMessageTextAsync(chatId, messageId, statsMsg, TelegramKeyboards.BuildBackToAdminKeyboard());
+                if (!edited)
+                    await SendMessageAsync(statsMsg, chatId, TelegramKeyboards.BuildBackToAdminKeyboard());
             }
             else if (data == "cb_close_terminal")
             {
