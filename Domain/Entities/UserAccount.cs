@@ -33,6 +33,7 @@ namespace CryptoSense.Domain.Entities
         public long? TelegramUserId { get; set; }
         
         public bool IsActive { get; set; } = true;
+        public bool IsLoggedIn { get; set; } = false;
         
         public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;
         public DateTime LastLoginAt { get; set; } = DateTime.UtcNow;

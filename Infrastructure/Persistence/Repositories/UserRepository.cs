@@ -54,6 +54,15 @@ namespace CryptoSense.Infrastructure.Persistence.Repositories
                 .ToListAsync();
         }
 
+        public async Task<List<UserAccount>> GetAllLoggedInActiveUsersAsync()
+        {
+            return await _context.Users
+                .Where(u => u.IsActive && u.IsLoggedIn && !string.IsNullOrEmpty(u.TelegramChatId))
+                .OrderByDescending(u => u.Role == UserRole.Admin)
+                .ThenBy(u => u.Username)
+                .ToListAsync();
+        }
+
         public async Task<List<UserAccount>> GetAllUsersAsync()
         {
             return await _context.Users

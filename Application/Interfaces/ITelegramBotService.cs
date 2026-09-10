@@ -19,5 +19,6 @@ namespace CryptoSense.Application.Interfaces
         Task BroadcastSystemAlertAsync(string message);
         Task SendDailyReportAsync();
         Task<bool> SendDocumentAsync(string filePath, string targetChatId, string caption = "");
+        Task<bool> CanReceivePushAsync(string chatId);
     }
 }

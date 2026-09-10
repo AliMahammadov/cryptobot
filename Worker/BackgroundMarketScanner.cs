@@ -1070,7 +1070,7 @@ namespace CryptoSense.Worker
                                 if (!_lastVolatilityAlertSent.TryGetValue(volKey, out var lastSent) || (DateTime.UtcNow - lastSent).TotalMinutes >= 45)
                                 {
                                     _lastVolatilityAlertSent[volKey] = DateTime.UtcNow;
-                                    var reasonText = signal.AnalysisReasons.Count > 0 ? signal.AnalysisReasons[0] : "Kəskin dalğalanma və spayklar aşkarlandı";
+                                    var reasonText = (signal.AnalysisReasons != null && signal.AnalysisReasons.Count > 0) ? signal.AnalysisReasons[0] : "Kəskin dalğalanma və spayklar aşkarlandı";
                                     var ticker = await marketData.Get24hTickerAsync(signal.Symbol);
                                     decimal chg24 = ticker?.PriceChangePercent ?? 0m;
                                     var ind = signal.Indicators as CryptoSense.Application.DTOs.IndicatorResult;
@@ -1089,7 +1089,7 @@ namespace CryptoSense.Worker
                             }
 
                             // HIGH-CONVICTION TRADE DISPATCH (Faza A: Live WebSocket Price, Emit Lag & Stale Filter, Atomic Send-Success Numbering)
-                            if (signal.Timeframe != "15m" && signal.Confidence >= 75 && (signal.SignalType.Contains("LONG") || signal.SignalType.Contains("SHORT")))
+                            if (signal.Timeframe != "15m" && signal.Confidence >= 75 && signal.SignalType != null && (signal.SignalType.Contains("LONG") || signal.SignalType.Contains("SHORT")))
                             {
                                 var candleDuration = signal.Timeframe switch
                                 {
@@ -1272,6 +1272,13 @@ namespace CryptoSense.Worker
 
                                     if (ok)
                                     {
+                                        foreach (var s in TelegramBotService.UserPreferences.Values)
+                                        {
+                                            s.LastSignalSentUtc = DateTime.UtcNow;
+                                            s.LastHeartbeatSentUtc = DateTime.UtcNow;
+                                        }
+                                        TelegramBotService.SaveSettings();
+
                                         lock (hourDispatches)
                                         {
                                             hourDispatches.Add((signal.Symbol, signal.Direction));
@@ -1313,6 +1320,9 @@ namespace CryptoSense.Worker
                 var chatId = kvp.Key;
                 var s = kvp.Value;
                 if (!s.IsActive) continue;
+
+                // BUG 6 & BUG 2: Skip logged-out users strictly via database & session gate
+                if (!await _telegramService.CanReceivePushAsync(chatId)) continue;
 
                 if (s.LastHeartbeatSentUtc == default)
                 {
@@ -1356,7 +1366,23 @@ namespace CryptoSense.Worker
                 }
 
                 var heartbeatMsg = TelegramMessageFormatter.FormatNoSignalReason(noSignalReason, nextCheckMinutes: 30);
-                await _telegramService.SendMessageAsync(heartbeatMsg, chatId);
+
+                // Anti-flood: Edit previous heartbeat message if possible, or send new one and record messageId
+                bool edited = false;
+                if (s.LastHeartbeatMessageId.HasValue)
+                {
+                    edited = await _telegramService.EditMessageTextAsync(chatId, s.LastHeartbeatMessageId.Value, heartbeatMsg);
+                }
+
+                if (!edited)
+                {
+                    var newMsgId = await _telegramService.SendMessageReturnIdAsync(heartbeatMsg, chatId);
+                    if (newMsgId.HasValue)
+                    {
+                        s.LastHeartbeatMessageId = newMsgId;
+                        TelegramBotService.SaveSettings();
+                    }
+                }
             }
 
             // Daily Report Dispatch (Once per day at Baku midnight = 20:00 UTC)

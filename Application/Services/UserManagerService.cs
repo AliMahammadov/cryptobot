@@ -203,6 +203,7 @@ namespace CryptoSense.Application.Services
                 }
 
                 adminUser.LastLoginAt = DateTime.UtcNow;
+                adminUser.IsLoggedIn = true;
                 if (!string.IsNullOrEmpty(chatId))
                 {
                     adminUser.TelegramChatId = chatId;
@@ -268,6 +269,7 @@ namespace CryptoSense.Application.Services
             if (valid)
             {
                 user.LastLoginAt = DateTime.UtcNow;
+                user.IsLoggedIn = true;
                 if (!string.IsNullOrEmpty(chatId)) user.TelegramChatId = chatId;
                 if (telegramUserId.HasValue && telegramUserId.Value > 0) user.TelegramUserId = telegramUserId.Value;
                 if (!string.IsNullOrEmpty(telegramUsername)) user.TelegramUsername = telegramUsername;
@@ -291,12 +293,30 @@ namespace CryptoSense.Application.Services
             var user = await _unitOfWork.Users.GetByChatIdOrTelegramUserIdAsync(chatId, telegramUserId);
             if (user != null)
             {
+                user.IsLoggedIn = false;
                 user.TelegramChatId = "";
                 user.TelegramUserId = null;
                 await _unitOfWork.Users.UpdateAsync(user);
                 await _unitOfWork.SaveChangesAsync();
                 SaveBackupUsers();
             }
+        }
+
+        public async Task LogoutAsync(string chatId, long? telegramUserId = null)
+        {
+            var user = await _unitOfWork.Users.GetByChatIdOrTelegramUserIdAsync(chatId, telegramUserId);
+            if (user != null)
+            {
+                user.IsLoggedIn = false;
+                await _unitOfWork.Users.UpdateAsync(user);
+                await _unitOfWork.SaveChangesAsync();
+                SaveBackupUsers();
+            }
+        }
+
+        public async Task<List<UserAccount>> GetAllLoggedInActiveUsersAsync()
+        {
+            return await _unitOfWork.Users.GetAllLoggedInActiveUsersAsync();
         }
 
         public async Task<bool> CreateUserAsync(string username, string password, UserRole role = UserRole.User, int? adminUserId = null)
@@ -342,6 +362,7 @@ namespace CryptoSense.Application.Services
             if (user == null) return false;
 
             user.IsActive = false; // Soft-delete
+            user.IsLoggedIn = false;
             await _unitOfWork.Users.UpdateAsync(user);
             await _unitOfWork.AuditLogs.AddAsync(new AuditLog
             {

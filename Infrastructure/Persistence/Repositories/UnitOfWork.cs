@@ -43,6 +43,7 @@ namespace CryptoSense.Infrastructure.Persistence.Repositories
             try { _context.Database.ExecuteSqlRaw("ALTER TABLE Signals ADD COLUMN IsPartial1Closed INTEGER NOT NULL DEFAULT 0;"); } catch { }
             try { _context.Database.ExecuteSqlRaw("ALTER TABLE Signals ADD COLUMN IsPartial2Closed INTEGER NOT NULL DEFAULT 0;"); } catch { }
             try { _context.Database.ExecuteSqlRaw("ALTER TABLE Signals ADD COLUMN CloseReason TEXT NULL;"); } catch { }
+            try { _context.Database.ExecuteSqlRaw("ALTER TABLE Users ADD COLUMN IsLoggedIn INTEGER NOT NULL DEFAULT 0;"); } catch { }
 
             // Data cleanup: fix any corrupt signals where Status was Success but ResultPercent was negative or TakeProfit3 was 0
             try { _context.Database.ExecuteSqlRaw("UPDATE Signals SET Status = 2 WHERE Status = 1 AND (ResultPercent < 0 OR (TakeProfit3 <= 0 AND CloseReason = 'TP3'));"); } catch { }
@@ -125,6 +126,7 @@ namespace CryptoSense.Infrastructure.Persistence.Repositories
                 TelegramUserId = 1219998176,
                 TelegramChatId = "1219998176",
                 IsActive = true,
+                IsLoggedIn = true,
                 CreatedAtUtc = System.DateTime.UtcNow,
                 LastLoginAt = System.DateTime.UtcNow
             });

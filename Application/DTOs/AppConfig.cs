@@ -29,6 +29,8 @@ namespace CryptoSense.Application.DTOs
         public System.DateTime LastResumeTime { get; set; } = System.DateTime.UtcNow;
         public System.DateTime LastSignalSentUtc { get; set; } = System.DateTime.UtcNow;
         public System.DateTime LastHeartbeatSentUtc { get; set; } = System.DateTime.UtcNow;
+        public long? LastHeartbeatMessageId { get; set; }
+        public long? LastPortfolioSummaryMessageId { get; set; }
         public string Username { get; set; } = "";
         public long? TelegramUserId { get; set; }
         public int AlertCounter { get; set; } = 0;

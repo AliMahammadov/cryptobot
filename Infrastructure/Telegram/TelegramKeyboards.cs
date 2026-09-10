@@ -22,6 +22,11 @@ namespace CryptoSense.Infrastructure.Telegram
                 {
                     new { text = "🧭 Bitcoin Trend", callback_data = "cb_btc" },
                     new { text = "📊 Canlı Statistika", callback_data = "cb_stats" }
+                },
+                new object[]
+                {
+                    new { text = "📰 Xəbərlər", callback_data = "cb_news" },
+                    new { text = "🔄 Yenilə", callback_data = "cb_refresh" }
                 }
             };
 
@@ -230,7 +235,8 @@ namespace CryptoSense.Infrastructure.Telegram
                 {
                     keyboard = new[]
                     {
-                        new[] { new { text = "🎛 Əsas Terminal" }, new { text = "👑 Admin Paneli" } }
+                        new[] { new { text = "🎛 Əsas Terminal" }, new { text = "👑 Admin Paneli" } },
+                        new[] { new { text = "📰 Xəbərlər" } }
                     },
                     resize_keyboard = true,
                     one_time_keyboard = false
@@ -241,7 +247,7 @@ namespace CryptoSense.Infrastructure.Telegram
             {
                 keyboard = new[]
                 {
-                    new[] { new { text = "🎛 Əsas Terminal" } }
+                    new[] { new { text = "🎛 Əsas Terminal" }, new { text = "📰 Xəbərlər" } }
                 },
                 resize_keyboard = true,
                 one_time_keyboard = false

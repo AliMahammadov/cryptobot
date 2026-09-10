@@ -352,7 +352,8 @@ namespace CryptoSense.Infrastructure.Telegram
                     ? $"@{u.TelegramUsername}" 
                     : (!string.IsNullOrWhiteSpace(u.TelegramChatId) ? $"ID: {u.TelegramChatId}" : "⏳ Hələ daxil olmayıb");
                 var statusText = u.IsActive ? "Aktiv 🟢" : "Deaktiv 🔴";
-                sb.AppendLine($"{index}. <b>{u.Username}</b> | Rol: <code>{u.Role}</code> | Status: {statusText}");
+                var sessionText = u.IsLoggedIn ? "Daxil olub 🟢" : "Çıxış edib ⚪";
+                sb.AppendLine($"{index}. <b>{u.Username}</b> | Rol: <code>{u.Role}</code> | {statusText} | {sessionText}");
                 sb.AppendLine($"   Telegram: <code>{tgName}</code>");
                 index++;
             }
