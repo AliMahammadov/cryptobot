@@ -1,22 +1,26 @@
+using System;
 using System.Threading;
 using System.Threading.Tasks;
 using CryptoSense.Domain.Entities;
 using CryptoSense.Domain.Enums;
 using CryptoSense.Domain.Interfaces;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 
 namespace CryptoSense.Infrastructure.Persistence.Repositories
 {
     public class UnitOfWork : IUnitOfWork
     {
         private readonly AppDbContext _context;
+        private readonly IConfiguration _configuration;
         private IUserRepository? _users;
         private ISignalRepository? _signals;
         private IAuditLogRepository? _auditLogs;
 
-        public UnitOfWork(AppDbContext context)
+        public UnitOfWork(AppDbContext context, IConfiguration configuration)
         {
             _context = context;
+            _configuration = configuration;
         }
 
         public IUserRepository Users => _users ??= new UserRepository(_context);
@@ -52,7 +56,15 @@ namespace CryptoSense.Infrastructure.Persistence.Repositories
             var adminUser = _context.Users.FirstOrDefault(u => u.Username == "Ali" || u.Role == UserRole.Admin);
             if (adminUser == null)
             {
-                var hash = BCrypt.Net.BCrypt.HashPassword("23031999Am");
+                // Admin seed password comes from ADMIN_PASSWORD env var (PostConfigure in Program.cs).
+                // If not set, the admin account is created without a usable password — set it via Railway dashboard.
+                var seedPwd = _configuration["AppConfig:AdminSeedPassword"] ?? "";
+                if (string.IsNullOrWhiteSpace(seedPwd))
+                {
+                    Console.WriteLine("[UnitOfWork] WARNING: ADMIN_PASSWORD env var not set. Admin account will be created without a valid password.");
+                    seedPwd = Guid.NewGuid().ToString("N"); // random, unusable — forces env-var based reset
+                }
+                var hash = BCrypt.Net.BCrypt.HashPassword(seedPwd);
                 _context.Users.Add(new UserAccount
                 {
                     Username = "Ali",
@@ -62,8 +74,8 @@ namespace CryptoSense.Infrastructure.Persistence.Repositories
                     TelegramUserId = 1219998176,
                     TelegramChatId = "1219998176",
                     IsActive = true,
-                    CreatedAtUtc = System.DateTime.UtcNow,
-                    LastLoginAt = System.DateTime.UtcNow
+                    CreatedAtUtc = DateTime.UtcNow,
+                    LastLoginAt = DateTime.UtcNow
                 });
                 _context.SaveChanges();
             }
@@ -104,7 +116,10 @@ namespace CryptoSense.Infrastructure.Persistence.Repositories
                     _context.SaveChanges();
                 }
             }
-            catch { }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[UnitOfWork] Password hash migration error: {ex.Message}");
+            }
         }
 
         public void PurgeAndResetDatabase()
@@ -116,19 +131,22 @@ namespace CryptoSense.Infrastructure.Persistence.Repositories
             _context.SaveChanges();
 
             // Re-create default clean SuperAdmin
-            var hash = BCrypt.Net.BCrypt.HashPassword("23031999Am");
+            var seedPwd2 = _configuration["AppConfig:AdminSeedPassword"] ?? "";
+            if (string.IsNullOrWhiteSpace(seedPwd2))
+                seedPwd2 = Guid.NewGuid().ToString("N");
+            var hash2 = BCrypt.Net.BCrypt.HashPassword(seedPwd2);
             _context.Users.Add(new UserAccount
             {
                 Username = "Ali",
-                PasswordHash = hash,
+                PasswordHash = hash2,
                 Role = UserRole.Admin,
                 TelegramUsername = "Ali_Mahammadov",
                 TelegramUserId = 1219998176,
                 TelegramChatId = "1219998176",
                 IsActive = true,
                 IsLoggedIn = true,
-                CreatedAtUtc = System.DateTime.UtcNow,
-                LastLoginAt = System.DateTime.UtcNow
+                CreatedAtUtc = DateTime.UtcNow,
+                LastLoginAt = DateTime.UtcNow
             });
             _context.SaveChanges();
         }

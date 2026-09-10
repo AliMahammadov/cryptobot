@@ -30,8 +30,26 @@ var builder = WebApplication.CreateBuilder(args);
 var port = Environment.GetEnvironmentVariable("PORT") ?? "5083";
 builder.WebHost.UseUrls($"http://0.0.0.0:{port}");
 
-// 1. Configuration
+// 1. Configuration — bind base values from appsettings.json
 builder.Services.Configure<AppConfig>(builder.Configuration.GetSection("AppConfig"));
+
+// Override sensitive fields from environment variables (Railway / Docker secrets).
+// TELEGRAM_BOT_TOKEN env var always wins over appsettings.json — prevents accidental commit of live token.
+builder.Services.PostConfigure<AppConfig>(cfg =>
+{
+    var envToken = Environment.GetEnvironmentVariable("TELEGRAM_BOT_TOKEN");
+    if (!string.IsNullOrWhiteSpace(envToken))
+        cfg.TelegramBotToken = envToken;
+
+    var envChatId = Environment.GetEnvironmentVariable("SUPER_ADMIN_CHAT_ID");
+    if (!string.IsNullOrWhiteSpace(envChatId))
+        cfg.SuperAdminChatId = envChatId;
+
+    var envAdminPwd = Environment.GetEnvironmentVariable("ADMIN_PASSWORD");
+    if (!string.IsNullOrWhiteSpace(envAdminPwd))
+        cfg.AdminSeedPassword = envAdminPwd;
+});
+
 
 // 2. Persistence Layer (SQLite with EF Core)
 var volumeEnv = Environment.GetEnvironmentVariable("RAILWAY_VOLUME_MOUNT_PATH");

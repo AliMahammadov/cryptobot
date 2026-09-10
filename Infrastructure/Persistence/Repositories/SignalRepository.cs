@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
@@ -114,7 +114,7 @@ namespace CryptoSense.Infrastructure.Persistence.Repositories
 
             using var cmd = conn.CreateCommand();
             cmd.CommandText = "BEGIN IMMEDIATE";
-            try { await cmd.ExecuteNonQueryAsync(); } catch { }
+            try { await cmd.ExecuteNonQueryAsync(); } catch (Exception _ex) { Console.WriteLine($"[SignalRepository] Swallowed exception: {_ex.Message}"); }
 
             try
             {
@@ -122,14 +122,14 @@ namespace CryptoSense.Infrastructure.Persistence.Repositories
                 if (sig == null)
                 {
                     cmd.CommandText = "ROLLBACK";
-                    try { await cmd.ExecuteNonQueryAsync(); } catch { }
+                    try { await cmd.ExecuteNonQueryAsync(); } catch (Exception _ex) { Console.WriteLine($"[SignalRepository] Swallowed exception: {_ex.Message}"); }
                     return 0;
                 }
 
                 if (sig.SignalAlertSent && sig.SignalNumber > 0)
                 {
                     cmd.CommandText = "COMMIT";
-                    try { await cmd.ExecuteNonQueryAsync(); } catch { }
+                    try { await cmd.ExecuteNonQueryAsync(); } catch (Exception _ex) { Console.WriteLine($"[SignalRepository] Swallowed exception: {_ex.Message}"); }
                     return sig.SignalNumber;
                 }
 
@@ -143,13 +143,13 @@ namespace CryptoSense.Infrastructure.Persistence.Repositories
                 await _context.SaveChangesAsync();
 
                 cmd.CommandText = "COMMIT";
-                try { await cmd.ExecuteNonQueryAsync(); } catch { }
+                try { await cmd.ExecuteNonQueryAsync(); } catch (Exception _ex) { Console.WriteLine($"[SignalRepository] Swallowed exception: {_ex.Message}"); }
                 return nextNum;
             }
             catch (Exception ex)
             {
                 cmd.CommandText = "ROLLBACK";
-                try { await cmd.ExecuteNonQueryAsync(); } catch { }
+                try { await cmd.ExecuteNonQueryAsync(); } catch (Exception _ex) { Console.WriteLine($"[SignalRepository] Swallowed exception: {_ex.Message}"); }
                 Console.WriteLine($"[SignalRepository] CommitSignalNumber error: {ex.Message}");
                 throw;
             }

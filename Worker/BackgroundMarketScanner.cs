@@ -257,7 +257,7 @@ namespace CryptoSense.Worker
                         await ProcessSignalOutcomeAsync(sig, snap, unitOfWork, CancellationToken.None);
                     }
                 }
-                catch { }
+                catch (Exception _ex) { Console.WriteLine($"[BackgroundMarketScanner] Swallowed exception: {_ex.Message}"); }
             });
         }
 
@@ -652,7 +652,7 @@ namespace CryptoSense.Worker
                                         await _telegramService.BroadcastSystemAlertAsync("⚠️ <b>RISK CIRCUIT BREAKER AKTİVLƏŞDİ:</b>\n\n" +
                                             "Ardıcıl 3 uğursuz əməliyyat (Stop Loss) qeydə alındı. Bazar skaneri kapitalı qorumaq üçün <b>2 saatlıq</b> müşahidə rejiminə keçdi.");
                                     }
-                                    catch { }
+                                    catch (Exception _ex) { Console.WriteLine($"[BackgroundMarketScanner] Swallowed exception: {_ex.Message}"); }
                                 });
                             }
                         }
@@ -919,7 +919,7 @@ namespace CryptoSense.Worker
                     return;
                 }
             }
-            catch { }
+            catch (Exception _ex) { Console.WriteLine($"[BackgroundMarketScanner] Swallowed exception: {_ex.Message}"); }
 
             var activeTimeframes = new HashSet<string>();
             var subscribedCoins = new HashSet<string>();
@@ -1307,8 +1307,9 @@ namespace CryptoSense.Worker
                             }
                         }
                     }
-                    catch (Exception)
+                    catch (Exception ex)
                     {
+                        Console.WriteLine($"[BackgroundMarketScanner] Heartbeat send error: {ex.Message}");
                     }
                 });
             }

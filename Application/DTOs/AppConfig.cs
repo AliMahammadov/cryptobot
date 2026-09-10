@@ -5,11 +5,16 @@ namespace CryptoSense.Application.DTOs
     public class AppConfig
     {
         public string SuperAdminTelegram { get; set; } = "@Ali_Mahammadov";
+        /// <summary>Set via SUPER_ADMIN_CHAT_ID env variable in production.</summary>
         public string SuperAdminChatId { get; set; } = "1219998176";
         public long SuperAdminUserId { get; set; } = 1219998176;
-        public string TelegramBotToken { get; set; } = "8671151605:AAH6dzgLm2fiYaKGOtvK3Ic34UcsNuZVMDg";
+        /// <summary>Set via TELEGRAM_BOT_TOKEN env variable. Never commit a live token here.</summary>
+        public string TelegramBotToken { get; set; } = "";
+        /// <summary>Initial admin password — set via ADMIN_PASSWORD env variable. Falls back to empty (safe).</summary>
+        public string AdminSeedPassword { get; set; } = "";
         public bool AutoScanEnabled { get; set; } = true;
-        public int MinConfidenceThreshold { get; set; } = 78;
+        /// <summary>Minimum confluence score for 1h/4h signals (75%).</summary>
+        public int MinConfidenceThreshold { get; set; } = 75;
         public List<string> SelectedCoins { get; set; } = new();
         public bool AlertAllCoins { get; set; } = true;
         public string DefaultTimeframe { get; set; } = "1h";

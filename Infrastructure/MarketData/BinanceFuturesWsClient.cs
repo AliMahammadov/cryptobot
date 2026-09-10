@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Globalization;
@@ -143,7 +143,7 @@ namespace CryptoSense.Infrastructure.MarketData
                     int delay = backoffs[Math.Min(attempt, backoffs.Length - 1)];
                     attempt++;
                     Console.WriteLine($"[BinanceWs] Reconnecting in {delay}ms (attempt {attempt})...");
-                    try { await Task.Delay(delay, token); } catch { }
+                    try { await Task.Delay(delay, token); } catch (Exception _ex) { Console.WriteLine($"[BinanceFuturesWsClient] Swallowed exception: {_ex.Message}"); }
                 }
             }
         }
@@ -229,7 +229,7 @@ namespace CryptoSense.Infrastructure.MarketData
             if (_disposed) return;
             _disposed = true;
             _cts?.Cancel();
-            try { _ws?.Dispose(); } catch { }
+            try { _ws?.Dispose(); } catch (Exception _ex) { Console.WriteLine($"[BinanceFuturesWsClient] Swallowed exception: {_ex.Message}"); }
             _sendLock.Dispose();
         }
     }

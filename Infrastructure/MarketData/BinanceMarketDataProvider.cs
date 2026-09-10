@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Net.Http;
@@ -47,7 +47,7 @@ namespace CryptoSense.Infrastructure.MarketData
                     var response = await _spotClient.GetStringAsync(url);
                     if (!string.IsNullOrWhiteSpace(response)) return response;
                 }
-                catch { }
+                catch (Exception _ex) { Console.WriteLine($"[BinanceMarketDataProvider] Swallowed exception: {_ex.Message}"); }
             }
             return null;
         }
@@ -299,7 +299,7 @@ namespace CryptoSense.Infrastructure.MarketData
                         };
                     }
                 }
-                catch { }
+                catch (Exception _ex) { Console.WriteLine($"[BinanceMarketDataProvider] Swallowed exception: {_ex.Message}"); }
             }
 
             // Fallback to Official Binance Public Spot APIs
@@ -331,7 +331,7 @@ namespace CryptoSense.Infrastructure.MarketData
                     }
                 }
             }
-            catch { }
+            catch (Exception _ex) { Console.WriteLine($"[BinanceMarketDataProvider] Swallowed exception: {_ex.Message}"); }
 
             // Third tier fallback: Bybit Public Spot Ticker
             try
@@ -358,7 +358,7 @@ namespace CryptoSense.Infrastructure.MarketData
                     }
                 }
             }
-            catch { }
+            catch (Exception _ex) { Console.WriteLine($"[BinanceMarketDataProvider] Swallowed exception: {_ex.Message}"); }
 
             return null;
         }

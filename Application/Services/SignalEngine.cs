@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
@@ -337,7 +337,7 @@ namespace CryptoSense.Application.Services
                     compass.UsdtDominance = macro.UsdtDominance;
                     compass.MarketCapChange24h = macro.MarketCapChange24h;
                 }
-                catch { }
+                catch (Exception _ex) { Console.WriteLine($"[SignalEngine] Swallowed exception: {_ex.Message}"); }
 
                 // BTC 1h SuperTrend + HH/HL = rejim (Problem 8)
                 var btc1hKlines = await _marketData.GetKlinesAsync("BTCUSDT", "1h", 60);
@@ -649,7 +649,7 @@ namespace CryptoSense.Application.Services
                         altRs = altChg - btcChg;
                     }
                 }
-                catch { }
+                catch (Exception _ex) { Console.WriteLine($"[SignalEngine] Swallowed exception: {_ex.Message}"); }
             }
 
             bool btcConfirmsLong = true;
@@ -774,7 +774,7 @@ namespace CryptoSense.Application.Services
                         }
                     }
                 }
-                catch { }
+                catch (Exception _ex) { Console.WriteLine($"[SignalEngine] Swallowed exception: {_ex.Message}"); }
             }
 
             decimal directionalConfluence = direction == SignalDirection.Sell 

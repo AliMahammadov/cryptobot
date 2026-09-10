@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
 using CryptoSense.Application.Interfaces;
@@ -50,7 +50,7 @@ namespace CryptoSense.Application.Services
                         }
                         File.WriteAllText(path, json);
                     }
-                    catch { }
+                    catch (Exception _ex) { Console.WriteLine($"[UserManagerService] Swallowed exception: {_ex.Message}"); }
                 }
             }
             catch (Exception ex)
@@ -151,7 +151,7 @@ namespace CryptoSense.Application.Services
                                 }
                                 break;
                             }
-                            catch { }
+                            catch (Exception _ex) { Console.WriteLine($"[UserManagerService] Swallowed exception: {_ex.Message}"); }
                         }
                     }
 
