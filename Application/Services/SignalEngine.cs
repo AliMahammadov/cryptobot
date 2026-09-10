@@ -507,9 +507,8 @@ namespace CryptoSense.Application.Services
                 var candleAge = DateTime.UtcNow - candleCloseTime;
                 var maxLiveDelay = timeframe switch
                 {
-                    "1h" => TimeSpan.FromMinutes(15),
-                    "4h" => TimeSpan.FromMinutes(30),
-                    _ => TimeSpan.FromMinutes(15)
+                    "4h" => TimeSpan.FromHours(3),
+                    _ => TimeSpan.FromMinutes(50)
                 };
 
                 if (candleAge > maxLiveDelay)

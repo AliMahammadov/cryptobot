@@ -55,6 +55,49 @@ namespace CryptoSense.Worker
         private static readonly ConcurrentDictionary<string, DateTime> _sentOutcomeDeduplication = new();
         private static readonly ConcurrentDictionary<string, DateTime> _lastPriceUpdateHandled = new();
 
+        public class ScanTelemetry
+        {
+            public int CoinsScanned;
+            public int Sent;
+            public int SkipChase;
+            public int SkipCorr;
+            public int SkipSL;
+            public int SkipRR;
+            public int SkipLock;
+            public int SkipLag;
+            public int SkipStale;
+
+            public ScanTelemetry Clone() => new ScanTelemetry
+            {
+                CoinsScanned = this.CoinsScanned,
+                Sent = this.Sent,
+                SkipChase = this.SkipChase,
+                SkipCorr = this.SkipCorr,
+                SkipSL = this.SkipSL,
+                SkipRR = this.SkipRR,
+                SkipLock = this.SkipLock,
+                SkipLag = this.SkipLag,
+                SkipStale = this.SkipStale
+            };
+
+            public void Reset()
+            {
+                CoinsScanned = 0;
+                Sent = 0;
+                SkipChase = 0;
+                SkipCorr = 0;
+                SkipSL = 0;
+                SkipRR = 0;
+                SkipLock = 0;
+                SkipLag = 0;
+                SkipStale = 0;
+            }
+        }
+
+        private static readonly ScanTelemetry _hourlyTelemetry = new();
+        public static ScanTelemetry LatestTelemetrySnapshot { get; private set; } = new();
+        private static string _lastLoggedHourKey = "";
+
         public static void ClearLocks()
         {
             _coinCooldowns.Clear();
@@ -983,18 +1026,21 @@ namespace CryptoSense.Worker
                 // Strict Coin-Level Rule 1: Post-trade cooldown active?
                 if (_coinCooldowns.TryGetValue(sym, out var cooldownUntil) && scanNowUtc < cooldownUntil)
                 {
+                    Interlocked.Increment(ref _hourlyTelemetry.SkipLock);
                     continue;
                 }
 
                 // Strict Coin-Level Rule 2: Does this coin ALREADY have ANY open unclosed position across ANY timeframe?
                 if (_coinActiveLocks.ContainsKey(sym))
                 {
+                    Interlocked.Increment(ref _hourlyTelemetry.SkipLock);
                     continue;
                 }
 
                 if (await unitOfWork.Signals.HasActiveSignalForSymbolAsync(sym))
                 {
                     _coinActiveLocks.TryAdd(sym, 1);
+                    Interlocked.Increment(ref _hourlyTelemetry.SkipLock);
                     continue;
                 }
 
@@ -1010,8 +1056,16 @@ namespace CryptoSense.Worker
                     try
                     {
                         // Check if portfolio limit was reached by another parallel thread
-                        if (_coinActiveLocks.Count >= MaxGlobalOpenPositions) return;
-                        if (_coinActiveLocks.ContainsKey(sym)) return;
+                        if (_coinActiveLocks.Count >= MaxGlobalOpenPositions)
+                        {
+                            Interlocked.Increment(ref _hourlyTelemetry.SkipLock);
+                            return;
+                        }
+                        if (_coinActiveLocks.ContainsKey(sym))
+                        {
+                            Interlocked.Increment(ref _hourlyTelemetry.SkipLock);
+                            return;
+                        }
 
                         using var innerScope = _serviceProvider.CreateScope();
                         var engine = innerScope.ServiceProvider.GetRequiredService<ISignalEngine>();
@@ -1021,6 +1075,7 @@ namespace CryptoSense.Worker
                         if (await uow.Signals.HasActiveSignalForSymbolAsync(sym))
                         {
                             _coinActiveLocks.TryAdd(sym, 1);
+                            Interlocked.Increment(ref _hourlyTelemetry.SkipLock);
                             return;
                         }
 
@@ -1031,6 +1086,7 @@ namespace CryptoSense.Worker
                             var cooldownRequired = lastClosed.Timeframe == "4h" ? TimeSpan.FromHours(4) : TimeSpan.FromHours(1);
                             if (DateTime.UtcNow - lastClosed.ClosedAt.Value < cooldownRequired)
                             {
+                                Interlocked.Increment(ref _hourlyTelemetry.SkipLock);
                                 return;
                             }
                         }
@@ -1047,10 +1103,31 @@ namespace CryptoSense.Worker
 
                         foreach (var tf in prioritizedTfs)
                         {
-                            if (_coinActiveLocks.ContainsKey(sym)) break;
-                            if (_coinActiveLocks.Count >= MaxGlobalOpenPositions) break;
+                            if (_coinActiveLocks.ContainsKey(sym))
+                            {
+                                Interlocked.Increment(ref _hourlyTelemetry.SkipLock);
+                                break;
+                            }
+                            if (_coinActiveLocks.Count >= MaxGlobalOpenPositions)
+                            {
+                                Interlocked.Increment(ref _hourlyTelemetry.SkipLock);
+                                break;
+                            }
+
+                            Interlocked.Increment(ref _hourlyTelemetry.CoinsScanned);
 
                             var signal = await engine.AnalyzeCoinAsync(sym, tf, isLiveScan: true);
+
+                            // Telemetriya: S/R və Chase filtrlərini sayğaca əlavə et
+                            if (signal.AnalysisReasons != null && signal.AnalysisReasons.Count > 0)
+                            {
+                                foreach (var r in signal.AnalysisReasons)
+                                {
+                                    if (r.Contains("SKIP_CHASE") || r.Contains("Chase")) Interlocked.Increment(ref _hourlyTelemetry.SkipChase);
+                                    if (r.Contains("SKIP_SL_TOO_WIDE") || r.Contains("SL too wide")) Interlocked.Increment(ref _hourlyTelemetry.SkipSL);
+                                    if (r.Contains("SKIP_LOW_RR") || r.Contains("R:R")) Interlocked.Increment(ref _hourlyTelemetry.SkipRR);
+                                }
+                            }
 
                             // Telemetriya: Hər analiz olunan coin üçün real log
                             var aztNow = CryptoSense.Domain.Common.TimeHelper.NowFormatted;
@@ -1098,15 +1175,17 @@ namespace CryptoSense.Worker
                                 };
                                 var candleCloseUtc = signal.SourceCandleOpenTimeUtc + candleDuration;
 
-                                // (2) emitTs - candleCloseTime > maxAllowedLagMs skip (SKIP_CYCLE_LAG)
+                                // (2) 1h/4h PƏNCƏRƏ: emitTs - candleCloseTime > maxAllowedLagMs skip (SKIP_CYCLE_LAG)
+                                // 1h: 50 dəqiqəyə qədər (3,000,000 ms), 4h: 3 saata qədər (10,800,000 ms)
                                 var maxAllowedLagMs = signal.Timeframe switch
                                 {
-                                    "4h" => 1800000, // 30 dəqiqə
-                                    _ => 900000     // 15 dəqiqə (1h şam bağlanışı üçün)
+                                    "4h" => 10800000, // 3 saat
+                                    _ => 3000000     // 50 dəqiqə (1h şam bağlanışı üçün)
                                 };
                                 var emitLagMs = (DateTime.UtcNow - candleCloseUtc).TotalMilliseconds;
                                 if (emitLagMs > maxAllowedLagMs)
                                 {
+                                    Interlocked.Increment(ref _hourlyTelemetry.SkipLag);
                                     Console.WriteLine($"[MarketScanner] SKIP_CYCLE_LAG: {signal.Symbol} lag={emitLagMs:F0}ms > {maxAllowedLagMs}ms");
                                     continue;
                                 }
@@ -1123,6 +1202,7 @@ namespace CryptoSense.Worker
 
                                 if (snap == null || snap.DataAgeMs > 1000 || snap.Source == "rest_fallback")
                                 {
+                                    Interlocked.Increment(ref _hourlyTelemetry.SkipStale);
                                     Console.WriteLine($"[MarketScanner] SKIP_STALE_OR_REST: {signal.Symbol} dataAgeMs={(snap?.DataAgeMs ?? -1)} source={snap?.Source}");
                                     continue;
                                 }
@@ -1146,6 +1226,7 @@ namespace CryptoSense.Worker
                                 decimal maxSlPct = signal.Timeframe == "4h" ? 4.00m : 2.80m;
                                 if (slPct > maxSlPct)
                                 {
+                                    Interlocked.Increment(ref _hourlyTelemetry.SkipSL);
                                     Console.WriteLine($"[MarketScanner] SL too wide: {signal.Symbol} ({signal.Timeframe}) sl%={slPct:F2}% > {maxSlPct:F2}%. Trade skipped.");
                                     continue;
                                 }
@@ -1158,6 +1239,7 @@ namespace CryptoSense.Worker
                                 // R:R < 1.30 (YENİ SL ilə hesabla) → kart yox
                                 if (effectiveRr < 1.30m)
                                 {
+                                    Interlocked.Increment(ref _hourlyTelemetry.SkipRR);
                                     Console.WriteLine($"[MarketScanner] R:R filter blocked: {signal.Symbol} effectiveRr={effectiveRr:F2} < 1.30");
                                     continue;
                                 }
@@ -1175,11 +1257,20 @@ namespace CryptoSense.Worker
                                 try
                                 {
                                     // BƏND 5: Həmin Symbol açıqdırsa (istənilən TF) yeni kart YOX
-                                    if (_coinActiveLocks.ContainsKey(sym)) break;
-                                    if (_coinActiveLocks.Count >= MaxGlobalOpenPositions) break;
+                                    if (_coinActiveLocks.ContainsKey(sym))
+                                    {
+                                        Interlocked.Increment(ref _hourlyTelemetry.SkipLock);
+                                        break;
+                                    }
+                                    if (_coinActiveLocks.Count >= MaxGlobalOpenPositions)
+                                    {
+                                        Interlocked.Increment(ref _hourlyTelemetry.SkipLock);
+                                        break;
+                                    }
                                     if (await uow.Signals.HasActiveSignalForSymbolAsync(sym))
                                     {
                                         _coinActiveLocks.TryAdd(sym, 1);
+                                        Interlocked.Increment(ref _hourlyTelemetry.SkipLock);
                                         break;
                                     }
 
@@ -1192,6 +1283,7 @@ namespace CryptoSense.Worker
                                         {
                                             if (DateTime.UtcNow - lastClosedSig.ClosedAt.Value < TimeSpan.FromHours(6))
                                             {
+                                                Interlocked.Increment(ref _hourlyTelemetry.SkipLock);
                                                 Console.WriteLine($"[MarketScanner] 6-hour same direction cooldown active for {sym} ({signal.Direction}). Skipping.");
                                                 break;
                                             }
@@ -1200,6 +1292,7 @@ namespace CryptoSense.Worker
                                         var candleCooldown = signal.Timeframe == "4h" ? TimeSpan.FromHours(4) : TimeSpan.FromHours(1);
                                         if (DateTime.UtcNow - lastClosedSig.ClosedAt.Value < candleCooldown)
                                         {
+                                            Interlocked.Increment(ref _hourlyTelemetry.SkipLock);
                                             Console.WriteLine($"[MarketScanner] 1-candle cooldown active for {sym}. Skipping.");
                                             break;
                                         }
@@ -1215,6 +1308,7 @@ namespace CryptoSense.Worker
                                         {
                                             if (morningDispatches.Count >= 1)
                                             {
+                                                Interlocked.Increment(ref _hourlyTelemetry.SkipCorr);
                                                 Console.WriteLine($"[MarketScanner] Thin book 05:00-07:00 +4 limit reached (max 1 1h signal). Skipping {signal.Symbol}.");
                                                 break;
                                             }
@@ -1228,6 +1322,7 @@ namespace CryptoSense.Worker
                                     {
                                         if (hourDispatches.Count >= 2)
                                         {
+                                            Interlocked.Increment(ref _hourlyTelemetry.SkipCorr);
                                             Console.WriteLine($"[MarketScanner] Hourly limit reached (2 signals sent for hour {hourKey}). Skipping {signal.Symbol}.");
                                             break;
                                         }
@@ -1235,6 +1330,7 @@ namespace CryptoSense.Worker
                                         int sameDirectionCount = hourDispatches.Count(d => d.Direction == signal.Direction);
                                         if (sameDirectionCount >= 2)
                                         {
+                                            Interlocked.Increment(ref _hourlyTelemetry.SkipCorr);
                                             Console.WriteLine($"[MarketScanner] Max 2 same direction signals reached for hour {hourKey} ({signal.Direction}). Skipping {signal.Symbol}.");
                                             break;
                                         }
@@ -1282,6 +1378,7 @@ namespace CryptoSense.Worker
 
                                     if (ok)
                                     {
+                                        Interlocked.Increment(ref _hourlyTelemetry.Sent);
                                         foreach (var s in TelegramBotService.UserPreferences.Values)
                                         {
                                             s.LastSignalSentUtc = DateTime.UtcNow;
@@ -1324,7 +1421,36 @@ namespace CryptoSense.Worker
                 });
             }
 
-            // Anti-Spam Heartbeat (Minimum once per 30 minutes per chat with lock, real reason, persisted LastHeartbeatSentUtc)
+            // 3) HƏR 1h BAĞLANIŞINDA KONSOL (JSON Telemetriya)
+            var currentHourKey = DateTime.UtcNow.ToString("yyyyMMdd_HH");
+            bool isNewHour = string.IsNullOrEmpty(_lastLoggedHourKey) || _lastLoggedHourKey != currentHourKey;
+            if (isNewHour)
+            {
+                _lastLoggedHourKey = currentHourKey;
+                var jsonTelemetry = System.Text.Json.JsonSerializer.Serialize(new
+                {
+                    time = CryptoSense.Domain.Common.TimeHelper.NowFormatted,
+                    coinsScanned = _hourlyTelemetry.CoinsScanned,
+                    sent = _hourlyTelemetry.Sent,
+                    skipChase = _hourlyTelemetry.SkipChase,
+                    skipCorr = _hourlyTelemetry.SkipCorr,
+                    skipSL = _hourlyTelemetry.SkipSL,
+                    skipRR = _hourlyTelemetry.SkipRR,
+                    skipLock = _hourlyTelemetry.SkipLock,
+                    skipLag = _hourlyTelemetry.SkipLag,
+                    skipStale = _hourlyTelemetry.SkipStale
+                });
+                Console.WriteLine(jsonTelemetry);
+
+                LatestTelemetrySnapshot = _hourlyTelemetry.Clone();
+                _hourlyTelemetry.Reset();
+            }
+            else
+            {
+                LatestTelemetrySnapshot = _hourlyTelemetry.Clone();
+            }
+
+            // 1) Anti-Spam Heartbeat (Minimum once per 30 minutes per chat with lock, real reason, persisted LastHeartbeatSentUtc)
             var nowUtc = DateTime.UtcNow;
             foreach (var kvp in TelegramBotService.UserPreferences)
             {
@@ -1352,6 +1478,20 @@ namespace CryptoSense.Worker
                     continue;
                 }
 
+                // DB-də son 30 dəq-də hər hansı siqnal və ya nəticə (TP/SL/BE) varsa heartbeat YOX
+                try
+                {
+                    var recentSignals = await unitOfWork.Signals.GetRecentSignalsAsync(10);
+                    bool hasRecentActivityIn30m = recentSignals.Any(sig =>
+                        (sig.ClosedAt.HasValue && (nowUtc - sig.ClosedAt.Value).TotalMinutes < 30) ||
+                        (sig.GeneratedAt != default && (nowUtc - sig.GeneratedAt).TotalMinutes < 30 && sig.SignalAlertSent));
+                    if (hasRecentActivityIn30m)
+                    {
+                        continue;
+                    }
+                }
+                catch (Exception _ex) { Console.WriteLine($"[BackgroundMarketScanner] Swallowed exception: {_ex.Message}"); }
+
                 lock (_heartbeatLock)
                 {
                     if ((DateTime.UtcNow - s.LastHeartbeatSentUtc).TotalMinutes < 30)
@@ -1362,37 +1502,33 @@ namespace CryptoSense.Worker
                     TelegramBotService.SaveSettings();
                 }
 
-                string noSignalReason;
-                if (s.Coins.Count == 0)
-                {
-                    noSignalReason = "0 coin seçilib (ticarət bloklanıb, zəhmət olmasa coin seçin)";
-                }
-                else if (_coinActiveLocks.Count >= MaxGlobalOpenPositions)
-                {
-                    noSignalReason = $"Limit dolu ({_coinActiveLocks.Count} aktiv mövqe izlənir)";
-                }
-                else
-                {
-                    noSignalReason = $"Filtrlər aktivdir: R:R < 1.30, zəif impuls/ADX və ya 1h/4h şam bağlanışı gözlənilir ({s.Coins.Count} coin BLOCK)";
-                }
+                var snapTelemetry = LatestTelemetrySnapshot ?? new ScanTelemetry();
+                int activeLocksCount = Math.Max(snapTelemetry.SkipLock, _coinActiveLocks.Count);
+                var heartbeatMsg = TelegramMessageFormatter.FormatLiveHeartbeat(
+                    snapTelemetry.SkipChase,
+                    snapTelemetry.SkipCorr,
+                    snapTelemetry.SkipSL,
+                    snapTelemetry.SkipRR,
+                    activeLocksCount,
+                    snapTelemetry.Sent,
+                    nextCheckMinutes: 30);
 
-                var heartbeatMsg = TelegramMessageFormatter.FormatNoSignalReason(noSignalReason, nextCheckMinutes: 30);
-
-                // Anti-flood: Edit previous heartbeat message if possible, or send new one and record messageId
-                bool edited = false;
+                // 1) HEARTBEAT: EditMessage ilə köhnə ℹ️-ni gizlin yeniləmə YOXDUR.
+                // Hər 30 dəq-də YENİ mesaj. Telefon bildirişi gəlsin.
                 if (s.LastHeartbeatMessageId.HasValue)
                 {
-                    edited = await _telegramService.EditMessageTextAsync(chatId, s.LastHeartbeatMessageId.Value, heartbeatMsg);
+                    try
+                    {
+                        await _telegramService.DeleteMessageAsync(chatId, s.LastHeartbeatMessageId.Value);
+                    }
+                    catch { /* Köhnə mesaj silinə bilməsə belə yeni mesaj mütləq getməlidir */ }
                 }
 
-                if (!edited)
+                var newMsgId = await _telegramService.SendMessageReturnIdAsync(heartbeatMsg, chatId);
+                if (newMsgId.HasValue)
                 {
-                    var newMsgId = await _telegramService.SendMessageReturnIdAsync(heartbeatMsg, chatId);
-                    if (newMsgId.HasValue)
-                    {
-                        s.LastHeartbeatMessageId = newMsgId;
-                        TelegramBotService.SaveSettings();
-                    }
+                    s.LastHeartbeatMessageId = newMsgId;
+                    TelegramBotService.SaveSettings();
                 }
             }
 

@@ -626,6 +626,15 @@ namespace CryptoSense.Infrastructure.Telegram
             return sb.ToString();
         }
 
+        public static string FormatLiveHeartbeat(int chase, int corr, int slWide, int lowRr, int activeLocks, int sent, int nextCheckMinutes = 30)
+        {
+            var sb = new StringBuilder();
+            sb.AppendLine("ℹ️ <b>Bazar Nəzarəti (Heartbeat)</b>");
+            sb.AppendLine($"Canlı: Chase:{chase} | Korrelyasiya:{corr} | SL geniş:{slWide} | R:R:{lowRr} | Aktiv kilid:{activeLocks} | Göndərildi:{sent}");
+            sb.AppendLine($"⏱ <b>Növbəti yoxlama:</b> {nextCheckMinutes} dəq");
+            return sb.ToString();
+        }
+
         public static string FormatNoSignalReason(string reason, int nextCheckMinutes = 30)
         {
             var sb = new StringBuilder();

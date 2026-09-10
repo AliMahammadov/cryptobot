@@ -779,8 +779,8 @@ namespace CryptoSense.Infrastructure.Telegram
                     };
                     var maxTolerance = signal.Timeframe switch
                     {
-                        "4h" => TimeSpan.FromMinutes(30),
-                        _ => TimeSpan.FromMinutes(15)
+                        "4h" => TimeSpan.FromHours(3),
+                        _ => TimeSpan.FromMinutes(50)
                     };
                     var candleCloseUtc = signal.SourceCandleOpenTimeUtc + candleDuration;
                     if (DateTime.UtcNow - candleCloseUtc > maxTolerance)
