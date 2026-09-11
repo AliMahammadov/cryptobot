@@ -373,8 +373,25 @@ namespace CryptoSense.Worker
             {
                 if (sig.OutcomeAlertSent || sig.IsClosed) return;
 
-                bool is180MinReached = (DateTime.UtcNow - sig.GeneratedAt).TotalMinutes >= 180;
-                bool isMaxTimeReached = is180MinReached || (sig.ExpiryTimeUtc != default && DateTime.UtcNow >= sig.ExpiryTimeUtc);
+                // Maksimum ömür yalnız timeframe TTL ilə: 1h -> 8 saat (480 dəq), 4h -> 24 saat (1440 dəq).
+                int ttlMinutes = sig.Timeframe == "4h" ? 1440 : 480;
+                DateTime expiryUtc = (sig.ExpiryTimeUtc != default && sig.ExpiryTimeUtc > sig.GeneratedAt)
+                    ? sig.ExpiryTimeUtc
+                    : sig.GeneratedAt.AddMinutes(ttlMinutes);
+
+                // Açıq siqnalların (o cümlədən cari 4h BTC/DOGE) 3 saatda kəsilməməsi üçün timeframe TTL təmin edilir:
+                if (sig.Timeframe == "4h" && (expiryUtc - sig.GeneratedAt).TotalMinutes < 1440)
+                {
+                    expiryUtc = sig.GeneratedAt.AddMinutes(1440);
+                    sig.ExpiryTimeUtc = expiryUtc;
+                }
+                else if (sig.Timeframe == "1h" && (expiryUtc - sig.GeneratedAt).TotalMinutes < 480)
+                {
+                    expiryUtc = sig.GeneratedAt.AddMinutes(480);
+                    sig.ExpiryTimeUtc = expiryUtc;
+                }
+
+                bool isMaxTimeReached = DateTime.UtcNow >= expiryUtc;
 
                 var isLong = sig.Direction == SignalDirection.Buy || sig.SignalType.Contains("LONG");
 
@@ -531,29 +548,42 @@ namespace CryptoSense.Worker
                         }
                     }
                     // 5. Long Time Expiry
-                    else if (isMaxTimeReached && !sig.OutcomeAlertSent && !sig.Tp1Notified)
+                    // 5. Long Time Expiry (Yalnız timeframe TTL çatanda)
+                    else if (isMaxTimeReached && !sig.OutcomeAlertSent)
                     {
                         sig.OutcomeAlertSent = true;
                         sig.IsClosed = true;
                         sig.ClosePrice = exitPrice;
                         sig.ClosedAt = DateTime.UtcNow;
-                        sig.ResultPercent = Math.Round(netPnl, 2);
                         sig.CloseReason = "TIME";
 
-                        if (netPnl > 0.2m)
+                        if (sig.Tp1Notified)
                         {
-                            sig.Status = SignalStatus.Success;
-                            sig.OutcomeStatus = $"{sig.Timeframe} Müddəti Bitdi (Kiçik Bazar Çıxışı: +{netPnl}%) ⚪";
-                        }
-                        else if (Math.Abs(netPnl) <= 0.2m)
-                        {
-                            sig.Status = SignalStatus.Neutral;
-                            sig.OutcomeStatus = $"{sig.Timeframe} Müddəti Bitdi (Neytral/Konsolidasiya) ⚪";
+                            decimal remainingGrossPnl = Math.Round(((exitPrice - sig.EntryPrice) / sig.EntryPrice) * 100, 2);
+                            sig.RealizedProfitPercent += Math.Round(sig.RemainingPositionRatio * remainingGrossPnl, 2);
+                            sig.RemainingPositionRatio = 0m;
+                            sig.ResultPercent = Math.Round(sig.RealizedProfitPercent - 0.10m, 2);
+                            sig.Status = (sig.ResultPercent >= 0) ? SignalStatus.Success : SignalStatus.Failed;
+                            sig.OutcomeStatus = $"{sig.Timeframe} Müddəti Bitdi (TP1 Sonrası TIME ilə Tam Bağlandı: +{sig.ResultPercent}%) ⚪";
                         }
                         else
                         {
-                            sig.Status = SignalStatus.Failed;
-                            sig.OutcomeStatus = $"{sig.Timeframe} Müddəti Bitdi (UĞURSUZ: {netPnl}%) ❌";
+                            sig.ResultPercent = Math.Round(netPnl, 2);
+                            if (netPnl > 0.2m)
+                            {
+                                sig.Status = SignalStatus.Success;
+                                sig.OutcomeStatus = $"{sig.Timeframe} Müddəti Bitdi (Kiçik Bazar Çıxışı: +{netPnl}%) ⚪";
+                            }
+                            else if (Math.Abs(netPnl) <= 0.2m)
+                            {
+                                sig.Status = SignalStatus.Neutral;
+                                sig.OutcomeStatus = $"{sig.Timeframe} Müddəti Bitdi (Neytral/Konsolidasiya) ⚪";
+                            }
+                            else
+                            {
+                                sig.Status = SignalStatus.Failed;
+                                sig.OutcomeStatus = $"{sig.Timeframe} Müddəti Bitdi (UĞURSUZ: {netPnl}%) ❌";
+                            }
                         }
 
                         await unitOfWork.Signals.UpdateAsync(sig);
@@ -562,7 +592,8 @@ namespace CryptoSense.Worker
                         string dedupKey = $"{sig.Id}_TIME";
                         if (_sentOutcomeDeduplication.TryAdd(dedupKey, DateTime.UtcNow))
                         {
-                            if (sig.SignalAlertSent) await _telegramService.SendOutcomeAlertAsync(sig, $"{sig.Timeframe} Müddəti Bitdi", exitPrice, netPnl);
+                            decimal finalPnl = sig.ResultPercent ?? netPnl;
+                            if (sig.SignalAlertSent) await _telegramService.SendOutcomeAlertAsync(sig, $"{sig.Timeframe} Müddəti Bitdi", exitPrice, finalPnl);
                         }
                     }
                 }
@@ -694,29 +725,42 @@ namespace CryptoSense.Worker
                         }
                     }
                     // 5. Short Time Expiry
-                    else if (isMaxTimeReached && !sig.OutcomeAlertSent && !sig.Tp1Notified)
+                    // 5. Short Time Expiry (Yalnız timeframe TTL çatanda)
+                    else if (isMaxTimeReached && !sig.OutcomeAlertSent)
                     {
                         sig.OutcomeAlertSent = true;
                         sig.IsClosed = true;
                         sig.ClosePrice = exitPrice;
                         sig.ClosedAt = DateTime.UtcNow;
-                        sig.ResultPercent = Math.Round(netPnl, 2);
                         sig.CloseReason = "TIME";
 
-                        if (netPnl > 0.2m)
+                        if (sig.Tp1Notified)
                         {
-                            sig.Status = SignalStatus.Success;
-                            sig.OutcomeStatus = $"{sig.Timeframe} Müddəti Bitdi (Kiçik Bazar Çıxışı: +{netPnl}%) ⚪";
-                        }
-                        else if (Math.Abs(netPnl) <= 0.2m)
-                        {
-                            sig.Status = SignalStatus.Neutral;
-                            sig.OutcomeStatus = $"{sig.Timeframe} Müddəti Bitdi (Neytral/Konsolidasiya) ⚪";
+                            decimal remainingGrossPnl = Math.Round(((sig.EntryPrice - exitPrice) / sig.EntryPrice) * 100, 2);
+                            sig.RealizedProfitPercent += Math.Round(sig.RemainingPositionRatio * remainingGrossPnl, 2);
+                            sig.RemainingPositionRatio = 0m;
+                            sig.ResultPercent = Math.Round(sig.RealizedProfitPercent - 0.10m, 2);
+                            sig.Status = (sig.ResultPercent >= 0) ? SignalStatus.Success : SignalStatus.Failed;
+                            sig.OutcomeStatus = $"{sig.Timeframe} Müddəti Bitdi (TP1 Sonrası TIME ilə Tam Bağlandı: +{sig.ResultPercent}%) ⚪";
                         }
                         else
                         {
-                            sig.Status = SignalStatus.Failed;
-                            sig.OutcomeStatus = $"{sig.Timeframe} Müddəti Bitdi (UĞURSUZ: {netPnl}%) ❌";
+                            sig.ResultPercent = Math.Round(netPnl, 2);
+                            if (netPnl > 0.2m)
+                            {
+                                sig.Status = SignalStatus.Success;
+                                sig.OutcomeStatus = $"{sig.Timeframe} Müddəti Bitdi (Kiçik Bazar Çıxışı: +{netPnl}%) ⚪";
+                            }
+                            else if (Math.Abs(netPnl) <= 0.2m)
+                            {
+                                sig.Status = SignalStatus.Neutral;
+                                sig.OutcomeStatus = $"{sig.Timeframe} Müddəti Bitdi (Neytral/Konsolidasiya) ⚪";
+                            }
+                            else
+                            {
+                                sig.Status = SignalStatus.Failed;
+                                sig.OutcomeStatus = $"{sig.Timeframe} Müddəti Bitdi (UĞURSUZ: {netPnl}%) ❌";
+                            }
                         }
 
                         await unitOfWork.Signals.UpdateAsync(sig);
@@ -725,7 +769,8 @@ namespace CryptoSense.Worker
                         string dedupKey = $"{sig.Id}_TIME";
                         if (_sentOutcomeDeduplication.TryAdd(dedupKey, DateTime.UtcNow))
                         {
-                            if (sig.SignalAlertSent) await _telegramService.SendOutcomeAlertAsync(sig, $"{sig.Timeframe} Müddəti Bitdi", exitPrice, netPnl);
+                            decimal finalPnl = sig.ResultPercent ?? netPnl;
+                            if (sig.SignalAlertSent) await _telegramService.SendOutcomeAlertAsync(sig, $"{sig.Timeframe} Müddəti Bitdi", exitPrice, finalPnl);
                         }
                     }
                 }
@@ -839,12 +884,30 @@ namespace CryptoSense.Worker
                 : Math.Round(((sig.EntryPrice - exitPrice) / sig.EntryPrice) * 100, 2);
             decimal netPnl = Math.Round(grossPnl - 0.10m, 2);
 
-            // Problem 5: 4 qapalı şam MFE < 0.3R -> NO_EDGE
+            // NO_EDGE (ölü edge) — timeframe-nisbi: (1h: 4 şam = 4 saat) və ya (4h: 3 şam = 12 saat)
+            // YALNIZ: MFE < 0.4R VƏ TP_A hit olmayıb.
+            // Vaxt kill TƏTBİQ OLUNMASIN əgər: MFE >= 0.4R VƏ ya qiymət TP_A-ya yaxındır / artıq +R-dədir VƏ ya TP_A artıq vurulub.
             decimal riskRPct = (sig.InitialRiskR > 0 && sig.EntryPrice > 0)
                 ? (sig.InitialRiskR / sig.EntryPrice) * 100m
                 : (Math.Abs(sig.EntryPrice - sig.StopLoss) / (sig.EntryPrice > 0 ? sig.EntryPrice : 1m)) * 100m;
 
-            if (sig.CandlesObserved >= 4 && !sig.Tp1Notified && sig.MfePercent < (0.3m * riskRPct))
+            int requiredNoEdgeCandles = sig.Timeframe == "4h" ? 3 : 4;
+            decimal tickSize = SignalEngine.GetCoinTickSize(sig.EntryPrice);
+
+            bool isNearTpA = isLong
+                ? (sig.TakeProfit1 > 0 && currentLast >= (sig.TakeProfit1 - (5 * tickSize)))
+                : (sig.TakeProfit1 > 0 && currentLast <= (sig.TakeProfit1 + (5 * tickSize)));
+
+            bool isPositiveR = grossPnl > 0;
+
+            bool canTriggerNoEdge = sig.CandlesObserved >= requiredNoEdgeCandles
+                                 && sig.MfePercent < (0.4m * riskRPct)
+                                 && !sig.Tp1Notified
+                                 && !sig.IsPartial1Closed
+                                 && !isNearTpA
+                                 && !isPositiveR;
+
+            if (canTriggerNoEdge)
             {
                 sig.OutcomeAlertSent = true;
                 sig.IsClosed = true;
@@ -853,11 +916,11 @@ namespace CryptoSense.Worker
                 sig.Status = SignalStatus.Neutral;
                 sig.CloseReason = "NO_EDGE";
                 sig.ResultPercent = netPnl;
-                sig.OutcomeStatus = $"{sig.Timeframe} 4 Şam Hərəkətsiz (NO_EDGE) ⚪";
+                sig.OutcomeStatus = $"{sig.Timeframe} {requiredNoEdgeCandles} Şam Hərəkətsiz (NO_EDGE) ⚪";
 
                 await unitOfWork.Signals.UpdateAsync(sig);
                 await unitOfWork.SaveChangesAsync(stoppingToken);
-                if (sig.SignalAlertSent) await _telegramService.SendOutcomeAlertAsync(sig, "NO_EDGE (4 Şam Ərzində Hərəkətsiz)", exitPrice, netPnl);
+                if (sig.SignalAlertSent) await _telegramService.SendOutcomeAlertAsync(sig, $"NO_EDGE ({requiredNoEdgeCandles} Şam Ərzində Hərəkətsiz)", exitPrice, netPnl);
                 return;
             }
 
