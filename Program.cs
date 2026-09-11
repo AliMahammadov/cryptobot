@@ -382,7 +382,7 @@ app.MapGet("/version", () =>
             dataAgeMs = btcSnap?.DataAgeMs ?? -1,
             source = btcSnap?.Source ?? "no_snap",
             last = btcSnap?.Last ?? 0,
-            wsHealthy = (btcSnap != null && btcSnap.DataAgeMs <= 1000 && btcSnap.Source != "rest_fallback")
+            wsHealthy = (btcSnap != null && btcSnap.DataAgeMs <= 3500 && btcSnap.Source != "rest_fallback")
         }
     });
 });

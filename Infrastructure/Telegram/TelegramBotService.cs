@@ -694,10 +694,10 @@ namespace CryptoSense.Infrastructure.Telegram
             // Strict Timeframe check: Only 1h, 4h
             if (signal.Timeframe == "15m") return false;
 
-            // Strict DataAge check: <= 1000ms
-            if (signal.DataAgeMs > 1000)
+            // Strict DataAge check: <= 3500ms
+            if (signal.DataAgeMs > 3500)
             {
-                Console.WriteLine($"[TelegramBotService] DataAge gate blocked: {signal.Symbol} DataAge={signal.DataAgeMs}ms > 1000ms");
+                Console.WriteLine($"[TelegramBotService] DataAge gate blocked: {signal.Symbol} DataAge={signal.DataAgeMs}ms > 3500ms");
                 return false;
             }
 

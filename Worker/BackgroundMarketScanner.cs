@@ -298,7 +298,7 @@ namespace CryptoSense.Worker
                 var nowUtc = DateTime.UtcNow;
 
                 // 3s loop safety: WS down -> GetLastAggTrade only for 1-3 open symbols, interval >= 2s, log REST_FALLBACK
-                if (snap == null || snap.DataAgeMs > 3000)
+                if (snap == null || snap.DataAgeMs > 3500)
                 {
                     if (!_lastRestFallbackTime.TryGetValue(sig.Symbol, out var lastFallback) || (nowUtc - lastFallback).TotalMilliseconds >= 2000)
                     {
