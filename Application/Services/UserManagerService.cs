@@ -23,9 +23,7 @@ namespace CryptoSense.Application.Services
 
         private static readonly string[] BackupFilePaths = new[]
         {
-            CryptoSense.Domain.Common.AppPaths.UserBackupFilePath,
-            Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "users_backup.json"),
-            Path.Combine(Directory.GetCurrentDirectory(), "users_backup.json")
+            CryptoSense.Domain.Common.AppPaths.UserBackupFilePath
         };
 
         private void SaveBackupUsers()

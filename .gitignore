@@ -11,3 +11,4 @@ publish/
 data/
 user_preferences.json
 signal_user_numbers.json
+users_backup.json
