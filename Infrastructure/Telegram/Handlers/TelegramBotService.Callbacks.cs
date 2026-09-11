@@ -40,19 +40,34 @@ namespace CryptoSense.Infrastructure.Telegram
 
             if (data == "cb_menu")
             {
+                if (userSettings.LastPortfolioSummaryMessageId.HasValue && userSettings.LastPortfolioSummaryMessageId.Value == messageId)
+                {
+                    userSettings.LastPortfolioSummaryMessageId = null;
+                }
+
                 var activeCount = await unitOfWork.Signals.GetActiveSignalsCountAsync();
                 var lastTime = userSettings.LastSignalSentUtc == default ? "" : Domain.Common.TimeHelper.FormatAz(userSettings.LastSignalSentUtc);
                 var dashText = TelegramMessageFormatter.FormatTerminalDashboard(userSettings, activeCount, lastTime);
                 var inlineKb = TelegramKeyboards.BuildTerminalInlineKeyboard(userSettings, _testModeChats.ContainsKey(chatId), isCallerAdmin);
+
+                if (userSettings.LastTerminalMessageId.HasValue && userSettings.LastTerminalMessageId.Value != messageId)
+                {
+                    _ = DeleteMessageAsync(chatId, userSettings.LastTerminalMessageId.Value);
+                }
+
                 bool edited = await EditMessageTextAsync(chatId, messageId, dashText, inlineKb);
                 if (!edited)
                 {
                     var newMsgId = await SendMessageReturnIdAsync(dashText, chatId, inlineKb);
                     userSettings.LastTerminalMessageId = newMsgId;
-                    userSettings.IsTerminalOpen = true;
-                    SaveSettings();
                 }
-                _ = BuildAndSendPortfolioSummaryAsync(chatId, userSettings, forceRefresh: false);
+                else
+                {
+                    userSettings.LastTerminalMessageId = messageId;
+                }
+
+                userSettings.IsTerminalOpen = true;
+                SaveSettings();
             }
             else if (data == "cb_refresh")
             {
