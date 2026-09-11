@@ -523,7 +523,7 @@ namespace CryptoSense.Infrastructure.Telegram
             }
             if (string.IsNullOrEmpty(commitHash))
             {
-                commitHash = "f8827f5";
+                commitHash = "2737c31";
             }
             sb.AppendLine($"📌 <b>Deploy Versiyası:</b> <code>v2.0 (Commit: {commitHash})</code>");
             var tfDisplay = (settings.Timeframe == "Hamısı" || settings.Timeframe == "Hamisi") ? "1h, 4h" : (settings.Timeframe == "15m" ? "1h" : settings.Timeframe);
