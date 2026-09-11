@@ -149,6 +149,12 @@ namespace CryptoSense.Infrastructure.Telegram
                 var aSettings = GetSettings(chatId);
                 aSettings.TelegramUserId = userId ?? 1219998176;
                 aSettings.Username = "Ali (Super Admin)";
+                if (aSettings.Coins == null || aSettings.Coins.Count == 0)
+                {
+                    aSettings.Coins = new List<string>(Default40Coins);
+                    aSettings.Timeframe = "1h, 4h";
+                    aSettings.PortfolioMode = "Standard40";
+                }
                 SaveSettings();
             }
 
@@ -225,7 +231,10 @@ namespace CryptoSense.Infrastructure.Telegram
                 _ = DeleteMessageAsync(chatId, messageId);
                 _authenticatedSessions.TryRemove(chatId, out _);
                 _loggedOutChats[chatId] = true;
-                UserPreferences.TryRemove(chatId, out _);
+                if (UserPreferences.TryGetValue(chatId, out var pref))
+                {
+                    pref.IsActive = false;
+                }
                 _userStates.TryRemove(chatId, out _);
                 if (SuperAdminChatId == chatId) SuperAdminChatId = null;
                 SaveSettings();
@@ -330,7 +339,7 @@ namespace CryptoSense.Infrastructure.Telegram
             // 1. AUTHENTICATION GATING (STRICT: NO AUTO-LOGIN BYPASS)
             // =========================================================================
             string? currentUsername = null;
-            bool isAuthenticated = isAdminUser;
+            bool isAuthenticated = isAdminUser && !_loggedOutChats.ContainsKey(chatId);
             if (!isAuthenticated)
             {
                 if (!_authenticatedSessions.TryGetValue(chatId, out currentUsername))
@@ -380,9 +389,13 @@ namespace CryptoSense.Infrastructure.Telegram
 
                         var settings = GetSettings(chatId);
                         settings.TelegramUserId = userId;
-                        settings.IsActive = false;
-                        settings.Timeframe = "Təyin olunmayıb";
-                        settings.PortfolioMode = "Təyin olunmayıb";
+                        if (settings.Coins == null || settings.Coins.Count == 0)
+                        {
+                            settings.Coins = new List<string>(Default40Coins);
+                            settings.Timeframe = "1h, 4h";
+                            settings.PortfolioMode = "Standard40";
+                        }
+                        settings.IsActive = true;
                         settings.LastResumeTime = DateTime.UtcNow;
                         settings.IsTerminalOpen = false;
                         settings.LastTerminalMessageId = null;
@@ -923,6 +936,10 @@ namespace CryptoSense.Infrastructure.Telegram
                 if (!await CanReceivePushAsync(chatId))
                 {
                     Console.WriteLine($"[TestSignal] Blocked: {chatId} cannot receive push (CanReceivePush=false).");
+                    if (_loggedOutChats.ContainsKey(chatId) || !_authenticatedSessions.ContainsKey(chatId))
+                    {
+                        return;
+                    }
                     await SendMessageAsync(
                         "⚠️ <b>Test siqnalı bloklandı.</b>\n\n" +
                         "Siqnal almaq üçün:\n" +
@@ -944,6 +961,10 @@ namespace CryptoSense.Infrastructure.Telegram
                 if (!await CanReceivePushAsync(chatId))
                 {
                     Console.WriteLine($"[TestOutcome] Blocked: {chatId} cannot receive push (CanReceivePush=false).");
+                    if (_loggedOutChats.ContainsKey(chatId) || !_authenticatedSessions.ContainsKey(chatId))
+                    {
+                        return;
+                    }
                     await SendMessageAsync(
                         "⚠️ <b>Test nəticəsi bloklandı.</b>\n\n" +
                         "Bildiriş Statusu 🟢 Aktiv olmadıqda nəticə kartı göndərilə bilməz.\n" +
@@ -962,6 +983,10 @@ namespace CryptoSense.Infrastructure.Telegram
                 if (!await CanReceivePushAsync(chatId))
                 {
                     Console.WriteLine($"[TestPipeline] Blocked: {chatId} cannot receive push (CanReceivePush=false).");
+                    if (_loggedOutChats.ContainsKey(chatId) || !_authenticatedSessions.ContainsKey(chatId))
+                    {
+                        return;
+                    }
                     await SendMessageAsync(
                         "⚠️ <b>Test borusu bloklandı.</b>\n\n" +
                         "Bildiriş Statusu 🟢 Aktiv olmadıqda test borusu işə düşə bilməz.\n" +
@@ -1441,7 +1466,8 @@ namespace CryptoSense.Infrastructure.Telegram
                 string? lastTime = lastDeliveredUtc.HasValue 
                     ? Domain.Common.TimeHelper.FormatAz(lastDeliveredUtc.Value) 
                     : null;
-                var statusMsg = TelegramMessageFormatter.FormatBotStatus(userSettings, openCount, lastTime);
+                bool canPush = await CanReceivePushAsync(chatId);
+                var statusMsg = TelegramMessageFormatter.FormatBotStatus(userSettings, openCount, lastTime, canPush);
                 await SendMessageAsync(statusMsg, chatId, TelegramKeyboards.BuildUserKeyboard(userSettings, isAdmin));
                 return;
             }
@@ -1677,6 +1703,7 @@ namespace CryptoSense.Infrastructure.Telegram
                     Confidence = isShort ? 88 : 89,
                     Timeframe = tf,
                     GeneratedAt = DateTime.UtcNow,
+                    SourceCandleOpenTimeUtc = DateTime.UtcNow,
                     TimestampFormatted = CryptoSense.Domain.Common.TimeHelper.NowFormatted,
                     CandleCloseTimeUtc = DateTime.UtcNow,
                     PriceSource = "ws_last",
@@ -1756,6 +1783,13 @@ namespace CryptoSense.Infrastructure.Telegram
                     return false;
                 }
 
+                if (testSig.IsClosed)
+                {
+                    int closedNum = testSig.SignalNumber > 0 ? testSig.SignalNumber : testSig.Id;
+                    await SendMessageAsync($"⚠️ <b>Bu test siqnalı (#{closedNum}) artıq bağlanıb!</b>\nYeni nəticə testi üçün əvvəlcə <code>/test_signal long</code> və ya <code>/test_signal short</code> göndərin.", chatId);
+                    return false;
+                }
+
                 bool isSl = outcomeArg.Contains("sl") || outcomeArg.Contains("loss") || outcomeArg.Contains("zerer") || outcomeArg.Contains("zərər");
 
                 string outcomeType;
@@ -1799,6 +1833,7 @@ namespace CryptoSense.Infrastructure.Telegram
 
                 await uow.Signals.UpdateAsync(testSig);
                 await uow.SaveChangesAsync();
+                _lastTestSignals.TryRemove(chatId, out _);
 
                 int sigNum = testSig.SignalNumber > 0 ? testSig.SignalNumber : await uow.Signals.GetUserSignalNumberAsync(testSig.Id, chatId);
                 if (sigNum == 0) sigNum = 1;

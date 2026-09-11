@@ -430,7 +430,7 @@ namespace CryptoSense.Infrastructure.Telegram
             return sb.ToString();
         }
 
-        public static string FormatBotStatus(UserSettings settings, int userOpenPositionsCount, string? lastSignalTime)
+        public static string FormatBotStatus(UserSettings settings, int userOpenPositionsCount, string? lastSignalTime, bool? canReceivePush = null)
         {
             var sb = new StringBuilder();
             sb.AppendLine("ℹ️ <b>CryptoSense Sistem Statusu:</b>");
@@ -540,7 +540,8 @@ namespace CryptoSense.Infrastructure.Telegram
             }
             sb.AppendLine($"🪙 <b>Seçilmiş Coinlər:</b> {coinText}");
             sb.AppendLine($"🟡 <b>Açıq Mövqeləriniz:</b> {userOpenPositionsCount} ədəd (Maksimum limit: 20)");
-            sb.AppendLine($"🔔 <b>Bildiriş Statusu:</b> {(settings.IsActive ? "Aktiv 🟢" : "Dayandırılıb 🔴")}");
+            bool isPushActive = canReceivePush ?? settings.IsActive;
+            sb.AppendLine($"🔔 <b>Bildiriş Statusu:</b> {(isPushActive ? "Aktiv 🟢" : "Dayandırılıb 🔴")}");
             sb.AppendLine($"🕒 <b>Son Siqnal Vaxtı:</b> {(string.IsNullOrEmpty(lastSignalTime) ? "Hələ yoxdur" : lastSignalTime)}");
             sb.AppendLine("-----------------------------------");
             return sb.ToString();
