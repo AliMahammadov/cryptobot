@@ -1278,8 +1278,8 @@ namespace CryptoSense.Worker
                                 // (3) WS Live Price Snapshot (əvvəlcədən abunə olunduğu üçün gecikmədən birbaşa yoxlanılır)
                                 var snap = _livePriceCache.GetSnapshot(signal.Symbol);
 
-                                // SKIP_STALE yalnız DataAge həqiqətən həddi keçəndə (və ya tick hələ çatmayıbsa)
-                                if (snap == null || snap.DataAgeMs > 1000 || snap.Source == "rest_fallback")
+                                // SKIP_STALE yalnız DataAge həqiqətən həddi (3500ms) keçəndə (və ya tick hələ çatmayıbsa)
+                                if (snap == null || snap.DataAgeMs > 3500 || snap.Source == "rest_fallback")
                                 {
                                     Interlocked.Increment(ref _hourlyTelemetry.SkipStale);
                                     Console.WriteLine($"[MarketScanner] SKIP_STALE_OR_REST: {signal.Symbol} dataAgeMs={(snap?.DataAgeMs ?? -1)} source={snap?.Source}");

@@ -636,8 +636,8 @@ namespace CryptoSense.Infrastructure.Telegram
                 sb.AppendLine($"&#9888;&#65039; <b>TELEGRAM_FAIL={telegramFail}</b> &#8212; signal haz&#305;rland&#305;, lakin g&#246;nd&#601;rilm&#601;di!");
             if (dataAgeMsBtc < 0)
                 sb.AppendLine("&#128993; BTC DataAge: <code>&#246;l&#231;&#252;lm&#601;yib (snap yoxdur)</code>");
-            else if (dataAgeMsBtc > 1000)
-                sb.AppendLine($"&#128308; <b>WS &#214;L&#220; DataAge:{dataAgeMsBtc}ms &gt; 1000ms</b> &#8212; b&#252;t&#252;n kartlar k&#601;silib!");
+            else if (dataAgeMsBtc > 3500)
+                sb.AppendLine($"&#128308; <b>WS GECİKİR DataAge:{dataAgeMsBtc}ms &gt; 3500ms</b>");
             else
                 sb.AppendLine($"&#128994; BTC DataAge: <code>{dataAgeMsBtc}ms</code> (WS sa&#287;lam)");
             sb.AppendLine($"&#8987; <b>N&#246;vb&#601;ti yoxlama:</b> {nextCheckMinutes} d&#601;q");

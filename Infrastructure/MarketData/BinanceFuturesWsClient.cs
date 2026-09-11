@@ -47,7 +47,7 @@ namespace CryptoSense.Infrastructure.MarketData
             {
                 if (IsConnected)
                 {
-                    await SendSubscriptionCommandAsync("SUBSCRIBE", new[] { $"{cleanSym}@aggTrade", $"{cleanSym}@bookTicker" });
+                    await SendSubscriptionCommandAsync("SUBSCRIBE", new[] { $"{cleanSym}@aggTrade" });
                 }
             }
         }
@@ -64,7 +64,7 @@ namespace CryptoSense.Infrastructure.MarketData
             {
                 if (IsConnected)
                 {
-                    await SendSubscriptionCommandAsync("UNSUBSCRIBE", new[] { $"{cleanSym}@aggTrade", $"{cleanSym}@bookTicker" });
+                    await SendSubscriptionCommandAsync("UNSUBSCRIBE", new[] { $"{cleanSym}@aggTrade" });
                 }
             }
         }
@@ -116,7 +116,6 @@ namespace CryptoSense.Infrastructure.MarketData
                     foreach (var sym in _subscribedSymbols.Keys)
                     {
                         initialStreams.Add($"{sym}@aggTrade");
-                        initialStreams.Add($"{sym}@bookTicker");
                     }
 
                     var wsUrl = initialStreams.Count > 0
