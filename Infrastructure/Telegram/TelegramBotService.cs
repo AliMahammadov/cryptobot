@@ -38,6 +38,7 @@ namespace CryptoSense.Infrastructure.Telegram
         private static readonly ConcurrentDictionary<string, bool> _loggedOutChats = new();
         private static readonly ConcurrentDictionary<string, string> _authenticatedSessions = new();
         private static readonly ConcurrentDictionary<string, bool> _testModeChats = new();
+        private static readonly ConcurrentDictionary<string, FuturesSignal> _lastTestSignals = new();
         private static readonly SemaphoreSlim _sendNumberLock = new(1, 1);
         private static readonly ConcurrentDictionary<string, DateTime> _lastPortfolioSummarySent = new();
         private static readonly ConcurrentDictionary<string, (string Content, DateTime CachedAt)> _portfolioSummaryCache = new();

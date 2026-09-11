@@ -129,11 +129,12 @@ namespace CryptoSense.Infrastructure.Telegram
             var newsService = scope.ServiceProvider.GetRequiredService<INewsService>();
 
             bool isAdminUser = IsSuperAdmin(chatId, userId, telegramUsername);
+            bool isLogoutCommand = text == "/logout" || text.Equals("/cixis", StringComparison.OrdinalIgnoreCase) || text.Equals("/exit", StringComparison.OrdinalIgnoreCase) || text.Equals("Çıxış", StringComparison.OrdinalIgnoreCase) || text.Equals("Cixis", StringComparison.OrdinalIgnoreCase) || text.Equals("logout", StringComparison.OrdinalIgnoreCase);
 
             // ZERO-PASSWORD ADMIN DIRECT ACCESS:
             // Admin (Ali) is recognized instantly by Telegram UserId (1219998176), TelegramUsername (@Ali_Mahammadov),
             // or SuperAdmin ChatId. No password is ever asked!
-            if (isAdminUser)
+            if (isAdminUser && !_loggedOutChats.ContainsKey(chatId) && !isLogoutCommand)
             {
                 _authenticatedSessions[chatId] = "Ali";
                 SuperAdminChatId = chatId;
@@ -179,7 +180,10 @@ namespace CryptoSense.Infrastructure.Telegram
                 text.Contains("testi başlat", StringComparison.OrdinalIgnoreCase) ||
                 text.StartsWith("/adduser", StringComparison.OrdinalIgnoreCase) ||
                 text.StartsWith("/createuser", StringComparison.OrdinalIgnoreCase) ||
-                text.StartsWith("/deluser", StringComparison.OrdinalIgnoreCase);
+                text.StartsWith("/deluser", StringComparison.OrdinalIgnoreCase) ||
+                text.StartsWith("/test_signal", StringComparison.OrdinalIgnoreCase) ||
+                text.StartsWith("/test_outcome", StringComparison.OrdinalIgnoreCase) ||
+                text.StartsWith("/test_pipeline", StringComparison.OrdinalIgnoreCase);
 
             if (!isAdminUser && isRestrictedAdminCommand)
             {
@@ -910,6 +914,74 @@ namespace CryptoSense.Infrastructure.Telegram
                 return;
             }
 
+            // =========================================================================
+            // SUPERADMIN TEST PIPELINE COMMANDS (/test_signal, /test_outcome, /test_pipeline)
+            // =========================================================================
+            if (isAdmin && (text == "/test_signal" || text.StartsWith("/test_signal ", StringComparison.OrdinalIgnoreCase)))
+            {
+                if (!await CanReceivePushAsync(chatId))
+                {
+                    Console.WriteLine($"[TestSignal] Blocked: {chatId} cannot receive push (CanReceivePush=false).");
+                    return;
+                }
+
+                var arg = text.Length > 12 ? text.Substring(12).Trim().ToLowerInvariant() : "long";
+                await ExecuteTestSignalCommandAsync(chatId, userSettings, scope, arg);
+                return;
+            }
+
+            if (isAdmin && (text == "/test_outcome" || text.StartsWith("/test_outcome ", StringComparison.OrdinalIgnoreCase)))
+            {
+                if (!await CanReceivePushAsync(chatId))
+                {
+                    Console.WriteLine($"[TestOutcome] Blocked: {chatId} cannot receive push (CanReceivePush=false).");
+                    return;
+                }
+
+                var arg = text.Length > 13 ? text.Substring(13).Trim().ToLowerInvariant() : "tp1";
+                await ExecuteTestOutcomeCommandAsync(chatId, userSettings, scope, arg);
+                return;
+            }
+
+            if (isAdmin && (text == "/test_pipeline" || text.StartsWith("/test_pipeline", StringComparison.OrdinalIgnoreCase)))
+            {
+                if (!await CanReceivePushAsync(chatId))
+                {
+                    Console.WriteLine($"[TestPipeline] Blocked: {chatId} cannot receive push (CanReceivePush=false).");
+                    return;
+                }
+
+                var sig = await ExecuteTestSignalCommandAsync(chatId, userSettings, scope, "long");
+                if (sig != null)
+                {
+                    await SendMessageAsync("⏱ <i>Test borusu aktivdir: ~60 saniyə sonra nəticə kartı (TP1) avtomatik göndəriləcək...</i>", chatId);
+
+                    _ = Task.Run(async () =>
+                    {
+                        try
+                        {
+                            await Task.Delay(60000);
+
+                            // Strict single-gate check: If user logged out or deactivated notifications in the meantime -> 0 messages!
+                            if (!await CanReceivePushAsync(chatId))
+                            {
+                                Console.WriteLine($"[TestPipeline] Aborted 60s outcome push: {chatId} is logged out or inactive.");
+                                return;
+                            }
+
+                            using var delayScope = _serviceProvider.CreateScope();
+                            var delaySettings = GetSettings(chatId);
+                            await ExecuteTestOutcomeCommandAsync(chatId, delaySettings, delayScope, "tp1");
+                        }
+                        catch (Exception ex)
+                        {
+                            Console.WriteLine($"[TestPipeline] 60s outcome error: {ex.Message}");
+                        }
+                    });
+                }
+                return;
+            }
+
 
             // =========================================================================
             // 6. AUTHENTICATED REGULAR & ADMIN USER ACTIONS
@@ -1537,6 +1609,194 @@ namespace CryptoSense.Infrastructure.Telegram
                     await SendMessageAsync(helpMsg, chatId, TelegramKeyboards.BuildUserKeyboard(userSettings, isAdmin));
                 }
             }
+        }
+
+        private async Task<FuturesSignal?> ExecuteTestSignalCommandAsync(string chatId, UserSettings userSettings, IServiceScope scope, string directionArg)
+        {
+            try
+            {
+                bool isShort = directionArg.Contains("short") || directionArg.Contains("sell") || directionArg.Contains("qisa");
+                var dir = isShort ? SignalDirection.Sell : SignalDirection.Buy;
+                var sigType = isShort ? "GÜCLÜ SHORT 🔴" : "GÜCLÜ LONG 🟢";
+
+                // Live BTC price or fallback
+                decimal currentPrice = 64500.00m;
+                try
+                {
+                    var liveCache = scope.ServiceProvider.GetService<CryptoSense.Application.Services.LivePriceCache>();
+                    if (liveCache != null)
+                    {
+                        var snap = liveCache.GetSnapshot("BTCUSDT");
+                        if (snap != null && snap.Last > 0) currentPrice = Math.Round(snap.Last, 2);
+                    }
+                }
+                catch { }
+
+                decimal entry = currentPrice;
+                decimal entryLow = Math.Round(entry * 0.9985m, 2);
+                decimal entryHigh = Math.Round(entry * 1.0015m, 2);
+                decimal sl = isShort ? Math.Round(entry * 1.0150m, 2) : Math.Round(entry * 0.9850m, 2);
+                decimal tp1 = isShort ? Math.Round(entry * 0.9850m, 2) : Math.Round(entry * 1.0150m, 2);
+                decimal tp2 = isShort ? Math.Round(entry * 0.9700m, 2) : Math.Round(entry * 1.0300m, 2);
+                string tf = (userSettings.Timeframe != "Hamısı" && !string.IsNullOrWhiteSpace(userSettings.Timeframe) && userSettings.Timeframe != "Təyin olunmayıb") 
+                    ? userSettings.Timeframe 
+                    : "1h";
+
+                var testSignal = new FuturesSignal
+                {
+                    Symbol = "BTCUSDT",
+                    SignalType = sigType,
+                    Direction = dir,
+                    EntryPrice = entry,
+                    EntryLow = entryLow,
+                    EntryHigh = entryHigh,
+                    TakeProfit1 = tp1,
+                    TakeProfit2 = tp2,
+                    TakeProfit3 = tp2,
+                    StopLoss = sl,
+                    ConfluenceScore = isShort ? 87.8m : 88.5m,
+                    Confidence = isShort ? 88 : 89,
+                    Timeframe = tf,
+                    GeneratedAt = DateTime.UtcNow,
+                    TimestampFormatted = CryptoSense.Domain.Common.TimeHelper.NowFormatted,
+                    CandleCloseTimeUtc = DateTime.UtcNow,
+                    PriceSource = "ws_last",
+                    DataAgeMs = 115,
+                    NewsSentimentImpact = isShort ? "BEARISH 🔴" : "BULLISH 🟢",
+                    Status = SignalStatus.Open,
+                    IsTest = true,
+                    SignalAlertSent = false,
+                    SignalNumber = 0
+                };
+
+                var uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
+                await uow.Signals.AddAsync(testSignal);
+                await uow.SaveChangesAsync();
+
+                // Nömrə: Telegram true-dan SONRA, bir lock, bir sıra (#1,#2,#3…)
+                int nextNum = await uow.Signals.GetNextSequentialSignalNumberAsync();
+                testSignal.SignalNumber = nextNum;
+                _signalUserNumberMap[$"{testSignal.Id}_{chatId}"] = nextNum;
+
+                var cardMsg = TelegramMessageFormatter.FormatSignalAlert(testSignal, nextNum);
+                bool sent = await SendMessageAsync(cardMsg, chatId);
+                if (sent)
+                {
+                    try
+                    {
+                        var committedNum = await uow.Signals.CommitSignalNumberOnSendSuccessAsync(testSignal.Id);
+                        if (committedNum > 0)
+                        {
+                            testSignal.SignalNumber = committedNum;
+                        }
+                        testSignal.SignalAlertSent = true;
+                        await uow.SaveChangesAsync();
+
+                        await uow.Signals.RecordDeliveryAsync(testSignal.Id, chatId, testSignal.SignalNumber);
+                        _lastTestSignals[chatId] = testSignal;
+                        _signalUserNumberMap[$"{testSignal.Id}_{chatId}"] = testSignal.SignalNumber;
+
+                        userSettings.AlertCounter = Math.Max(userSettings.AlertCounter, testSignal.SignalNumber);
+                        userSettings.LastSignalSentUtc = DateTime.UtcNow;
+                        userSettings.LastHeartbeatSentUtc = DateTime.UtcNow;
+                        SaveSettings();
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"[TestSignal] RecordDelivery error: {ex.Message}");
+                    }
+                }
+                else
+                {
+                    testSignal.SignalNumber = 0;
+                }
+
+                return testSignal;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[ExecuteTestSignalCommandAsync] Error: {ex.Message}");
+                await SendMessageAsync($"⚠️ Test siqnalı göndərilərkən xəta baş verdi: <code>{ex.Message}</code>", chatId);
+                return null;
+            }
+        }
+
+        private async Task<bool> ExecuteTestOutcomeCommandAsync(string chatId, UserSettings userSettings, IServiceScope scope, string outcomeArg)
+        {
+            try
+            {
+                var uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
+                if (!_lastTestSignals.TryGetValue(chatId, out var testSig) || testSig == null)
+                {
+                    testSig = await uow.Signals.GetLastTestSignalAsync(chatId);
+                }
+
+                if (testSig == null)
+                {
+                    await SendMessageAsync("⚠️ <b>Aktiv test siqnalı tapılmadı!</b>\nƏvvəlcə <code>/test_signal long</code> və ya <code>/test_signal short</code> göndərin.", chatId);
+                    return false;
+                }
+
+                bool isSl = outcomeArg.Contains("sl") || outcomeArg.Contains("loss") || outcomeArg.Contains("zerer") || outcomeArg.Contains("zərər");
+
+                string outcomeType;
+                decimal hitPrice;
+                decimal profitPct;
+
+                if (isSl)
+                {
+                    outcomeType = "Stop Loss (SL)";
+                    hitPrice = testSig.StopLoss;
+                    decimal lossDist = Math.Abs(testSig.StopLoss - testSig.EntryPrice);
+                    profitPct = testSig.EntryPrice > 0 ? -Math.Round((lossDist / testSig.EntryPrice) * 100m, 2) : -1.50m;
+                    testSig.Status = SignalStatus.Failed;
+                    testSig.CloseReason = "SL";
+                    testSig.ClosePrice = hitPrice;
+                    testSig.ResultPercent = profitPct;
+                    testSig.GrossResultPercent = profitPct;
+                    testSig.NetResultPercent = profitPct;
+                    testSig.IsClosed = true;
+                    testSig.ClosedAt = DateTime.UtcNow;
+                    testSig.OutcomeAlertSent = true;
+                    testSig.OutcomeStatus = "STOP LOSS 🔴";
+                }
+                else
+                {
+                    outcomeType = "Hədəf 1 (TP1)";
+                    hitPrice = testSig.TakeProfit1;
+                    decimal winDist = Math.Abs(testSig.TakeProfit1 - testSig.EntryPrice);
+                    profitPct = testSig.EntryPrice > 0 ? Math.Round((winDist / testSig.EntryPrice) * 100m, 2) : 1.50m;
+                    testSig.Status = SignalStatus.Success;
+                    testSig.CloseReason = "TP1";
+                    testSig.ClosePrice = hitPrice;
+                    testSig.ResultPercent = profitPct;
+                    testSig.GrossResultPercent = profitPct + 0.10m;
+                    testSig.NetResultPercent = profitPct;
+                    testSig.IsClosed = true;
+                    testSig.ClosedAt = DateTime.UtcNow;
+                    testSig.OutcomeAlertSent = true;
+                    testSig.OutcomeStatus = "UĞURLU 🟢 (TP1)";
+                }
+
+                await uow.Signals.UpdateAsync(testSig);
+                await uow.SaveChangesAsync();
+
+                int sigNum = testSig.SignalNumber > 0 ? testSig.SignalNumber : await uow.Signals.GetUserSignalNumberAsync(testSig.Id, chatId);
+                if (sigNum == 0) sigNum = 1;
+
+                userSettings.LastHeartbeatSentUtc = DateTime.UtcNow;
+                SaveSettings();
+
+                var outcomeMsg = TelegramMessageFormatter.FormatOutcomeAlert(testSig, sigNum, outcomeType, hitPrice, profitPct);
+                await SendMessageAsync(outcomeMsg, chatId);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[ExecuteTestOutcomeCommandAsync] Error: {ex.Message}");
+                await SendMessageAsync($"⚠️ Test nəticəsi göndərilərkən xəta baş verdi: <code>{ex.Message}</code>", chatId);
+                return false;
+            }
+        }
     }
-}
 }

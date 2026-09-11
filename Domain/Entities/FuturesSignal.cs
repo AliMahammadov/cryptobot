@@ -105,6 +105,7 @@ namespace CryptoSense.Domain.Entities
         public bool Tp3Notified { get; set; } = false;
         public bool SignalAlertSent { get; set; } = false;
         public bool OutcomeAlertSent { get; set; } = false;
+        public bool IsTest { get; set; } = false;
         
         public string TimestampFormatted { get; set; } = CryptoSense.Domain.Common.TimeHelper.NowFormatted;
         

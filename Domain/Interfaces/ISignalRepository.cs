@@ -35,5 +35,6 @@ namespace CryptoSense.Domain.Interfaces
         Task ClearAllSignalsAsync();
         Task<int> CleanupOrphanedSignalsAsync();
         Task<DateTime?> GetLastDeliveredSignalTimeUtcAsync(string chatId);
+        Task<FuturesSignal?> GetLastTestSignalAsync(string chatId);
     }
 }

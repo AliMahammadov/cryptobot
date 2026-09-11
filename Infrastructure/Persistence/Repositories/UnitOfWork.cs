@@ -47,6 +47,7 @@ namespace CryptoSense.Infrastructure.Persistence.Repositories
             try { _context.Database.ExecuteSqlRaw("ALTER TABLE Signals ADD COLUMN IsPartial1Closed INTEGER NOT NULL DEFAULT 0;"); } catch { }
             try { _context.Database.ExecuteSqlRaw("ALTER TABLE Signals ADD COLUMN IsPartial2Closed INTEGER NOT NULL DEFAULT 0;"); } catch { }
             try { _context.Database.ExecuteSqlRaw("ALTER TABLE Signals ADD COLUMN CloseReason TEXT NULL;"); } catch { }
+            try { _context.Database.ExecuteSqlRaw("ALTER TABLE Signals ADD COLUMN IsTest INTEGER NOT NULL DEFAULT 0;"); } catch { }
             try { _context.Database.ExecuteSqlRaw("ALTER TABLE Users ADD COLUMN IsLoggedIn INTEGER NOT NULL DEFAULT 0;"); } catch { }
 
             // Data cleanup: fix any corrupt signals where Status was Success but ResultPercent was negative or TakeProfit3 was 0

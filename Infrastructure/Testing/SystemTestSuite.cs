@@ -1225,6 +1225,98 @@ namespace CryptoSense.Infrastructure.Testing
                 return Task.FromResult(true);
             });
 
+            // 40. SuperAdmin Test Pipeline: Card Formats, Outcome Formats, Stats Isolation, Single Gate
+            await AssertTest("Test 47: SuperAdmin Test Pipeline - Long Card, SL Card, TP1 Card & Stats Isolation", async () =>
+            {
+                var testSig = new FuturesSignal
+                {
+                    Symbol = "BTCUSDT",
+                    SignalType = "GÜCLÜ LONG 🟢",
+                    Direction = SignalDirection.Buy,
+                    EntryPrice = 64500.00m,
+                    EntryLow = 64403.25m,
+                    EntryHigh = 64596.75m,
+                    TakeProfit1 = 65467.50m,
+                    TakeProfit2 = 66435.00m,
+                    TakeProfit3 = 66435.00m,
+                    StopLoss = 63532.50m,
+                    ConfluenceScore = 88.5m,
+                    Confidence = 89,
+                    Timeframe = "1h",
+                    GeneratedAt = DateTime.UtcNow,
+                    TimestampFormatted = CryptoSense.Domain.Common.TimeHelper.NowFormatted,
+                    CandleCloseTimeUtc = DateTime.UtcNow,
+                    PriceSource = "ws_last",
+                    DataAgeMs = 115,
+                    NewsSentimentImpact = "BULLISH 🟢",
+                    Status = SignalStatus.Open,
+                    IsTest = true,
+                    SignalAlertSent = true,
+                    SignalNumber = 1
+                };
+
+                // 1. Verify Entry Card format
+                var entryCard = TelegramMessageFormatter.FormatSignalAlert(testSig, 1);
+                bool validEntry = entryCard.Contains("#1 🟢 <b>SİQNAL</b>") &&
+                                  entryCard.Contains("BTC Futures (1h)") &&
+                                  entryCard.Contains("88.5%") &&
+                                  entryCard.Contains("$64500") &&
+                                  entryCard.Contains("Hədəf A (TP_A 1.0R - 50%)") &&
+                                  entryCard.Contains("Stop Loss (SL)");
+
+                if (!validEntry)
+                {
+                    Console.WriteLine($"[Test 47 Fail] Invalid Entry Card:\n{entryCard}");
+                    return false;
+                }
+
+                // 2. Verify SL Outcome Card format
+                var slCard = TelegramMessageFormatter.FormatOutcomeAlert(testSig, 1, "Stop Loss (SL)", 63532.50m, -1.50m);
+                bool validSl = slCard.Contains("#1 NƏTİCƏ HESABATI") &&
+                               slCard.Contains("Stop-Loss vurdu (UĞURSUZ OLDU) ❌") &&
+                               slCard.Contains("Təcili əməliyyatı dayandırın!");
+
+                if (!validSl)
+                {
+                    Console.WriteLine($"[Test 47 Fail] Invalid SL Outcome Card:\n{slCard}");
+                    return false;
+                }
+
+                // 3. Verify TP1 Outcome Card format
+                var tp1Card = TelegramMessageFormatter.FormatOutcomeAlert(testSig, 1, "Hədəf 1 (TP1)", 65467.50m, 1.50m);
+                bool validTp1 = tp1Card.Contains("#1 NƏTİCƏ HESABATI") &&
+                                tp1Card.Contains("UĞURLU OLDU") &&
+                                tp1Card.Contains("1.50%");
+
+                if (!validTp1)
+                {
+                    Console.WriteLine($"[Test 47 Fail] Invalid TP1 Outcome Card:\n{tp1Card}");
+                    return false;
+                }
+
+                // 4. Verify Stats Isolation: Add test signal to DB, verify GetPerformanceStatsAsync does not count it
+                var preStats = await _unitOfWork.Signals.GetPerformanceStatsAsync();
+                await _unitOfWork.Signals.AddAsync(testSig);
+                await _unitOfWork.SaveChangesAsync();
+
+                var postStats = await _unitOfWork.Signals.GetPerformanceStatsAsync();
+                bool statsIsolated = postStats.TotalSignals == preStats.TotalSignals &&
+                                     postStats.OpenSignals == preStats.OpenSignals;
+
+                if (!statsIsolated)
+                {
+                    Console.WriteLine($"[Test 47 Fail] Test signal leaked into live performance stats! Pre: {preStats.TotalSignals}, Post: {postStats.TotalSignals}");
+                    return false;
+                }
+
+                // Clean up test signal
+                testSig.Status = SignalStatus.Failed;
+                testSig.IsClosed = true;
+                await _unitOfWork.SaveChangesAsync();
+
+                return true;
+            });
+
             Console.WriteLine("\n========================================================");
             Console.WriteLine($"🏁 TEST NƏTİCƏLƏRİ: {passed} UĞURLU (PASS), {failed} UĞURSUZ (FAIL)");
             Console.WriteLine("========================================================\n");

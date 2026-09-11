@@ -36,7 +36,7 @@ namespace CryptoSense.Infrastructure.Persistence.Repositories
         public async Task<List<FuturesSignal>> GetOpenTrackedSignalsAsync()
         {
             return await _context.Signals
-                .Where(s => s.Status == SignalStatus.Open && !s.IsClosed && s.SignalAlertSent)
+                .Where(s => !s.IsTest && s.Status == SignalStatus.Open && !s.IsClosed && s.SignalAlertSent)
                 .OrderByDescending(s => s.GeneratedAt)
                 .ToListAsync();
         }
@@ -44,13 +44,13 @@ namespace CryptoSense.Infrastructure.Persistence.Repositories
         public async Task<bool> HasActiveSignalForSymbolAsync(string symbol)
         {
             return await _context.Signals
-                .AnyAsync(s => s.Symbol == symbol && s.Status == SignalStatus.Open && !s.IsClosed && s.SignalAlertSent && s.SignalNumber > 0);
+                .AnyAsync(s => !s.IsTest && s.Symbol == symbol && s.Status == SignalStatus.Open && !s.IsClosed && s.SignalAlertSent && s.SignalNumber > 0);
         }
 
         public async Task<int> GetActiveSignalsCountAsync()
         {
             return await _context.Signals
-                .CountAsync(s => s.Status == SignalStatus.Open && !s.IsClosed && s.SignalAlertSent && s.SignalNumber > 0);
+                .CountAsync(s => !s.IsTest && s.Status == SignalStatus.Open && !s.IsClosed && s.SignalAlertSent && s.SignalNumber > 0);
         }
 
         public async Task<List<FuturesSignal>> GetRecentSignalsAsync(int count = 25)
@@ -190,7 +190,7 @@ namespace CryptoSense.Infrastructure.Persistence.Repositories
         public async Task<PerformanceStats> GetPerformanceStatsAsync(string? specificTimeframe = null, List<string>? userCoins = null)
         {
             var query = _context.Signals
-                .Where(s => (s.SignalType.Contains("LONG") || s.SignalType.Contains("SHORT")) && (s.SignalAlertSent || s.IsClosed || s.Status != SignalStatus.Open));
+                .Where(s => !s.IsTest && (s.SignalType.Contains("LONG") || s.SignalType.Contains("SHORT")) && (s.SignalAlertSent || s.IsClosed || s.Status != SignalStatus.Open));
 
             if (!string.IsNullOrEmpty(specificTimeframe) && specificTimeframe != "Hamısı" && specificTimeframe != "Hamisi")
             {
@@ -280,7 +280,7 @@ namespace CryptoSense.Infrastructure.Persistence.Repositories
         public async Task<List<CryptoSense.Application.DTOs.CoinPerformanceBreakdownDto>> GetCoinPerformanceBreakdownAsync(List<string>? monitoredCoins = null)
         {
             var signals = await _context.Signals
-                .Where(s => (s.SignalType.Contains("LONG") || s.SignalType.Contains("SHORT")) && s.SignalAlertSent)
+                .Where(s => !s.IsTest && (s.SignalType.Contains("LONG") || s.SignalType.Contains("SHORT")) && s.SignalAlertSent)
                 .ToListAsync();
 
             var closedSignals = signals.Where(s => s.IsClosed || s.Status != SignalStatus.Open).ToList();
@@ -430,7 +430,7 @@ namespace CryptoSense.Infrastructure.Persistence.Repositories
             }
 
             return await _context.Signals
-                .Where(s => deliveredSignalIds.Contains(s.Id) && s.Status == SignalStatus.Open && !s.IsClosed && s.SignalAlertSent && s.SignalNumber > 0)
+                .Where(s => !s.IsTest && deliveredSignalIds.Contains(s.Id) && s.Status == SignalStatus.Open && !s.IsClosed && s.SignalAlertSent && s.SignalNumber > 0)
                 .OrderByDescending(s => s.GeneratedAt)
                 .ToListAsync();
         }
@@ -453,7 +453,7 @@ namespace CryptoSense.Infrastructure.Persistence.Repositories
             }
 
             var query = _context.Signals
-                .Where(s => deliveredSignalIds.Contains(s.Id) && (s.SignalType.Contains("LONG") || s.SignalType.Contains("SHORT")));
+                .Where(s => !s.IsTest && deliveredSignalIds.Contains(s.Id) && (s.SignalType.Contains("LONG") || s.SignalType.Contains("SHORT")));
 
             if (!string.IsNullOrEmpty(specificTimeframe) && specificTimeframe != "Hamısı" && specificTimeframe != "Hamisi")
             {
@@ -581,6 +581,30 @@ namespace CryptoSense.Infrastructure.Persistence.Repositories
             }
 
             return null;
+        }
+
+        public async Task<FuturesSignal?> GetLastTestSignalAsync(string chatId)
+        {
+            var deliveredSignalIds = await _context.UserSignalDeliveries
+                .Where(d => d.TelegramChatId == chatId)
+                .OrderByDescending(d => d.DeliveredAtUtc)
+                .Select(d => d.SignalId)
+                .ToListAsync();
+
+            if (deliveredSignalIds.Count > 0)
+            {
+                var sig = await _context.Signals
+                    .Where(s => s.IsTest && deliveredSignalIds.Contains(s.Id))
+                    .OrderByDescending(s => s.GeneratedAt)
+                    .FirstOrDefaultAsync();
+
+                if (sig != null) return sig;
+            }
+
+            return await _context.Signals
+                .Where(s => s.IsTest)
+                .OrderByDescending(s => s.GeneratedAt)
+                .FirstOrDefaultAsync();
         }
     }
 }
