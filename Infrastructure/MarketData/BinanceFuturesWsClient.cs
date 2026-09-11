@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Globalization;
@@ -99,8 +99,9 @@ namespace CryptoSense.Infrastructure.MarketData
 
         private async Task ConnectionLoopAsync(CancellationToken token)
         {
-            int[] backoffs = { 1000, 2000, 5000, 15000 };
+            int[] backoffs = { 1000, 2000, 5000, 15000, 30000, 60000 };
             int attempt = 0;
+            int consecutiveFails = 0;
 
             while (!token.IsCancellationRequested && !_disposed)
             {
@@ -122,10 +123,11 @@ namespace CryptoSense.Infrastructure.MarketData
                         ? $"wss://fstream.binance.com/market/stream?streams={string.Join("/", initialStreams)}"
                         : "wss://fstream.binance.com/market/stream?streams=btcusdt@aggTrade";
 
-                    Console.WriteLine($"[BinanceWs] Connecting to {wsUrl}...");
+                    Console.WriteLine($"[BinanceWs] Connecting to {wsUrl}... (attempt={attempt+1} consecutiveFails={consecutiveFails})");
                     await _ws.ConnectAsync(new Uri(wsUrl), token);
-                    Console.WriteLine("[BinanceWs] Connected successfully.");
+                    Console.WriteLine("[BinanceWs] Connected successfully. consecutiveFails reset.");
                     attempt = 0;
+                    consecutiveFails = 0;
 
                     await ReceiveLoopAsync(_ws, token);
                 }
@@ -135,18 +137,27 @@ namespace CryptoSense.Infrastructure.MarketData
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine($"[BinanceWs] Connection error: {ex.Message}");
+                    consecutiveFails++;
+                    Console.WriteLine($"[BinanceWs] Connection error (consecutiveFails={consecutiveFails}): {ex.Message}");
+                    if (consecutiveFails >= 3)
+                    {
+                        Console.WriteLine($"[WS_DEAD] {consecutiveFails} ardıcıl uğursuzluq. WS öldü. REST_FALLBACK aktiv. DataAge>1000ms olacaq, kartlar kəsiləcək.");
+                    }
                 }
 
                 if (!token.IsCancellationRequested && !_disposed)
                 {
-                    int delay = backoffs[Math.Min(attempt, backoffs.Length - 1)];
+                    // After 3+ fails use 60s delay to avoid hammering; otherwise exponential backoff
+                    int delay = consecutiveFails >= 3
+                        ? 60000
+                        : backoffs[Math.Min(attempt, backoffs.Length - 1)];
                     attempt++;
-                    Console.WriteLine($"[BinanceWs] Reconnecting in {delay}ms (attempt {attempt})...");
+                    Console.WriteLine($"[BinanceWs] Reconnecting in {delay}ms (attempt {attempt}, consecutiveFails={consecutiveFails})...");
                     try { await Task.Delay(delay, token); } catch (Exception _ex) { Console.WriteLine($"[BinanceFuturesWsClient] Swallowed exception: {_ex.Message}"); }
                 }
             }
         }
+
 
         private async Task ReceiveLoopAsync(ClientWebSocket ws, CancellationToken token)
         {

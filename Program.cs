@@ -372,6 +372,43 @@ app.MapGet("/", () => Results.Ok(new
     TimeUtc = DateTime.UtcNow
 }));
 
+// /version — commit hash + canl\u0131 skaner v\u0259ziyy\u0259ti
+app.MapGet("/version", () =>
+{
+    var commit = Environment.GetEnvironmentVariable("RAILWAY_GIT_COMMIT_SHA") ?? "unknown";
+    var shortCommit = commit.Length >= 7 ? commit[..7] : commit;
+    var btcSnap = app.Services.GetService<CryptoSense.Application.Services.LivePriceCache>()?.GetSnapshot("BTCUSDT");
+    var telemetry = CryptoSense.Worker.BackgroundMarketScanner.LatestTelemetrySnapshot;
+    return Results.Ok(new
+    {
+        commit = shortCommit,
+        commitFull = commit,
+        version = "2.0.0",
+        timeUtc = DateTime.UtcNow,
+        timeBaku = DateTime.UtcNow.AddHours(4).ToString("yyyy-MM-dd HH:mm:ss"),
+        scanner = new
+        {
+            sent = telemetry?.Sent ?? 0,
+            coinsScanned = telemetry?.CoinsScanned ?? 0,
+            skipConfluence = telemetry?.SkipConfluence ?? 0,
+            skipLag = telemetry?.SkipLag ?? 0,
+            skipStale = telemetry?.SkipStale ?? 0,
+            skipHourCap = telemetry?.SkipHourCap ?? 0,
+            telegramFail = telemetry?.TelegramFail ?? 0,
+            skipLock = telemetry?.SkipLock ?? 0,
+            skipRR = telemetry?.SkipRR ?? 0,
+            skipSL = telemetry?.SkipSL ?? 0
+        },
+        btc = new
+        {
+            dataAgeMs = btcSnap?.DataAgeMs ?? -1,
+            source = btcSnap?.Source ?? "no_snap",
+            last = btcSnap?.Last ?? 0,
+            wsHealthy = (btcSnap != null && btcSnap.DataAgeMs <= 1000 && btcSnap.Source != "rest_fallback")
+        }
+    });
+});
+
 app.MapPost("/api/auth/login", async (LoginRequest req, IUserManagerService userManager, ITelegramBotService tgService) =>
 {
     var (isValid, user) = await userManager.ValidateLoginAsync(req.Username, req.Password);

@@ -626,12 +626,20 @@ namespace CryptoSense.Infrastructure.Telegram
             return sb.ToString();
         }
 
-        public static string FormatLiveHeartbeat(int chase, int corr, int slWide, int lowRr, int activeLocks, int sent, int nextCheckMinutes = 30)
+        public static string FormatLiveHeartbeat(int chase, int corr, int slWide, int lowRr, int activeLocks, int sent, int nextCheckMinutes = 30, long dataAgeMsBtc = -1, int skipStale = 0, int skipLag = 0, int skipConfluence = 0, int telegramFail = 0)
         {
             var sb = new StringBuilder();
-            sb.AppendLine("ℹ️ <b>Bazar Nəzarəti (Heartbeat)</b>");
-            sb.AppendLine($"Canlı: Chase:{chase} | Korrelyasiya:{corr} | SL geniş:{slWide} | R:R:{lowRr} | Aktiv kilid:{activeLocks} | Göndərildi:{sent}");
-            sb.AppendLine($"⏱ <b>Növbəti yoxlama:</b> {nextCheckMinutes} dəq");
+            sb.AppendLine("&#8505;&#65039; <b>Bazar N&#601;zar&#601;ti (Heartbeat)</b>");
+            sb.AppendLine($"A+ yoxdur | Chase:{chase} Corr:{corr} SL:{slWide} RR:{lowRr} Lag:{skipLag} Stale:{skipStale} Conf:{skipConfluence} G&#246;nd&#601;rildi:{sent}");
+            if (telegramFail > 0)
+                sb.AppendLine($"&#9888;&#65039; <b>TELEGRAM_FAIL={telegramFail}</b> &#8212; signal haz&#305;rland&#305;, lakin g&#246;nd&#601;rilm&#601;di!");
+            if (dataAgeMsBtc < 0)
+                sb.AppendLine("&#128993; BTC DataAge: <code>&#246;l&#231;&#252;lm&#601;yib (snap yoxdur)</code>");
+            else if (dataAgeMsBtc > 1000)
+                sb.AppendLine($"&#128308; <b>WS &#214;L&#220; DataAge:{dataAgeMsBtc}ms &gt; 1000ms</b> &#8212; b&#252;t&#252;n kartlar k&#601;silib!");
+            else
+                sb.AppendLine($"&#128994; BTC DataAge: <code>{dataAgeMsBtc}ms</code> (WS sa&#287;lam)");
+            sb.AppendLine($"&#8987; <b>N&#246;vb&#601;ti yoxlama:</b> {nextCheckMinutes} d&#601;q");
             return sb.ToString();
         }
 
