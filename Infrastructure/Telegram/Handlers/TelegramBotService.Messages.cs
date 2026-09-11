@@ -203,7 +203,8 @@ namespace CryptoSense.Infrastructure.Telegram
                                      text.StartsWith("ℹ️") || text.StartsWith("📥") || text.StartsWith("🎛") ||
                                      text == "➕ Öz coini əlavə et" || text == "➕ İstifadəçi Yarat" ||
                                      text.Contains("Siqnallar") || text.Contains("Menyu") || text.Contains("Statistika") ||
-                                     (text.StartsWith("/") && !text.StartsWith("/login", StringComparison.OrdinalIgnoreCase) && !text.StartsWith("/admin ", StringComparison.OrdinalIgnoreCase));
+                                     (text.StartsWith("/") && !text.StartsWith("/login", StringComparison.OrdinalIgnoreCase) && !text.StartsWith("/admin ", StringComparison.OrdinalIgnoreCase)
+                                      && !text.StartsWith("/test_signal", StringComparison.OrdinalIgnoreCase) && !text.StartsWith("/test_outcome", StringComparison.OrdinalIgnoreCase) && !text.StartsWith("/test_pipeline", StringComparison.OrdinalIgnoreCase));
 
             // FSM guard: if user is mid text-input step, force isMenuButtonClick = false
             if (_userStates.TryGetValue(chatId, out var fsmGuardState) &&
@@ -922,6 +923,14 @@ namespace CryptoSense.Infrastructure.Telegram
                 if (!await CanReceivePushAsync(chatId))
                 {
                     Console.WriteLine($"[TestSignal] Blocked: {chatId} cannot receive push (CanReceivePush=false).");
+                    await SendMessageAsync(
+                        "⚠️ <b>Test siqnalı bloklandı.</b>\n\n" +
+                        "Siqnal almaq üçün:\n" +
+                        "1. Terminalı açın → ⚙️ Coin Seçimi\n" +
+                        "2. Zaman kəsiyini seçin\n" +
+                        "3. ▶️ Başlat düyməsinə basın\n\n" +
+                        "<i>Bildiriş Statusu 🟢 Aktiv olduqdan sonra yenidən cəhd edin.</i>",
+                        chatId);
                     return;
                 }
 
@@ -935,6 +944,11 @@ namespace CryptoSense.Infrastructure.Telegram
                 if (!await CanReceivePushAsync(chatId))
                 {
                     Console.WriteLine($"[TestOutcome] Blocked: {chatId} cannot receive push (CanReceivePush=false).");
+                    await SendMessageAsync(
+                        "⚠️ <b>Test nəticəsi bloklandı.</b>\n\n" +
+                        "Bildiriş Statusu 🟢 Aktiv olmadıqda nəticə kartı göndərilə bilməz.\n" +
+                        "Zəhmət olmasa terminaldan ▶️ Başlat düyməsinə basaraq xidməti aktivləşdirin.",
+                        chatId);
                     return;
                 }
 
@@ -948,6 +962,11 @@ namespace CryptoSense.Infrastructure.Telegram
                 if (!await CanReceivePushAsync(chatId))
                 {
                     Console.WriteLine($"[TestPipeline] Blocked: {chatId} cannot receive push (CanReceivePush=false).");
+                    await SendMessageAsync(
+                        "⚠️ <b>Test borusu bloklandı.</b>\n\n" +
+                        "Bildiriş Statusu 🟢 Aktiv olmadıqda test borusu işə düşə bilməz.\n" +
+                        "Zəhmət olmasa terminaldan ▶️ Başlat düyməsinə basaraq xidməti aktivləşdirin.",
+                        chatId);
                     return;
                 }
 
