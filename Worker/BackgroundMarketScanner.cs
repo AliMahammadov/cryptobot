@@ -192,6 +192,23 @@ namespace CryptoSense.Worker
                 Console.WriteLine($"[BackgroundMarketScanner] Error resetting heartbeat timers on startup: {ex.Message}");
             }
 
+            // Pre-subscribe Default 40 institutional coins and active portfolio coins to WebSocket stream on startup
+            foreach (var coin in TelegramBotService.Default40Coins)
+            {
+                _wsClient.Subscribe(coin);
+            }
+            foreach (var pref in TelegramBotService.UserPreferences.Values)
+            {
+                if (pref.IsActive && pref.Coins != null)
+                {
+                    foreach (var c in pref.Coins)
+                    {
+                        var norm = c.EndsWith("USDT", StringComparison.OrdinalIgnoreCase) ? c.ToUpperInvariant() : c.ToUpperInvariant() + "USDT";
+                        _wsClient.Subscribe(norm);
+                    }
+                }
+            }
+
             // Start WebSocket client independently
             _wsClient.Start(stoppingToken);
 
@@ -260,7 +277,10 @@ namespace CryptoSense.Worker
                     if (!stillHasActive)
                     {
                         _coinActiveLocks.TryRemove(lockedSym, out _);
-                        _wsClient.Unsubscribe(lockedSym);
+                        if (!TelegramBotService.Default40Coins.Contains(lockedSym, StringComparer.OrdinalIgnoreCase))
+                        {
+                            _wsClient.Unsubscribe(lockedSym);
+                        }
                     }
                 }
             }
@@ -754,7 +774,7 @@ namespace CryptoSense.Worker
                     _coinActiveLocks.TryRemove(sig.Symbol, out _);
 
                     bool hasOther = await unitOfWork.Signals.HasActiveSignalForSymbolAsync(sig.Symbol);
-                    if (!hasOther)
+                    if (!hasOther && !TelegramBotService.Default40Coins.Contains(sig.Symbol, StringComparer.OrdinalIgnoreCase))
                     {
                         _wsClient.Unsubscribe(sig.Symbol);
                     }
@@ -1255,16 +1275,10 @@ namespace CryptoSense.Worker
                                     continue;
                                 }
 
-                                // (3) Subscribe, 1500ms ws_last age<=1000, rest_fallback qadağandır
-                                _wsClient.Subscribe(signal.Symbol);
+                                // (3) WS Live Price Snapshot (əvvəlcədən abunə olunduğu üçün gecikmədən birbaşa yoxlanılır)
                                 var snap = _livePriceCache.GetSnapshot(signal.Symbol);
-                                var waitDeadline = DateTime.UtcNow.AddMilliseconds(1500);
-                                while ((snap == null || snap.DataAgeMs > 1000 || snap.Source == "rest_fallback") && DateTime.UtcNow < waitDeadline)
-                                {
-                                    await Task.Delay(100, ct);
-                                    snap = _livePriceCache.GetSnapshot(signal.Symbol);
-                                }
 
+                                // SKIP_STALE yalnız DataAge həqiqətən həddi keçəndə (və ya tick hələ çatmayıbsa)
                                 if (snap == null || snap.DataAgeMs > 1000 || snap.Source == "rest_fallback")
                                 {
                                     Interlocked.Increment(ref _hourlyTelemetry.SkipStale);
