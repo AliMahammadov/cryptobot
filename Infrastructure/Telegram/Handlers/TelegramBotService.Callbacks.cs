@@ -548,6 +548,25 @@ namespace CryptoSense.Infrastructure.Telegram
             userSettings.LastResumeTime = DateTime.UtcNow;
             SaveSettings();
 
+            // Sync IsActive=true to DB so CanReceivePushAsync DB-check passes
+            try
+            {
+                using var activateScope = _serviceProvider.CreateScope();
+                var activateUow = activateScope.ServiceProvider.GetRequiredService<IUnitOfWork>();
+                var dbUser = await activateUow.Users.GetByChatIdOrTelegramUserIdAsync(chatId, null);
+                if (dbUser != null)
+                {
+                    dbUser.IsActive = true;
+                    dbUser.IsLoggedIn = true;
+                    await activateUow.Users.UpdateAsync(dbUser);
+                    await activateUow.SaveChangesAsync();
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[ActivatePortfolio] DB sync error: {ex.Message}");
+            }
+
             var modeName = targetMode switch
             {
                 "Standard40" => "🪙 Standart 40 Coin",
