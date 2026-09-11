@@ -78,6 +78,7 @@ namespace CryptoSense.Application.Services
                             TelegramUserId = 1219998176,
                             TelegramChatId = "1219998176",
                             IsActive = true,
+                            IsLoggedIn = false,
                             CreatedAtUtc = DateTime.UtcNow,
                             LastLoginAt = DateTime.UtcNow
                         };
@@ -94,6 +95,7 @@ namespace CryptoSense.Application.Services
                             PasswordHash = "$2a$11$rqAHb83ZUadJSdNAGGvTuu/ze535B8TvcCku4/6UrV6qctyOO6Sju",
                             Role = UserRole.User,
                             IsActive = true,
+                            IsLoggedIn = false,
                             CreatedAtUtc = DateTime.UtcNow,
                             LastLoginAt = DateTime.UtcNow
                         };
@@ -101,6 +103,7 @@ namespace CryptoSense.Application.Services
                     }
 
                     // 3. Restore all users from users_backup.json (survives container redeploy)
+                    // CRITICAL RULE: Backup restore only adds MISSING rows, NEVER forces IsLoggedIn=true
                     foreach (var path in BackupFilePaths)
                     {
                         if (File.Exists(path))
@@ -126,6 +129,7 @@ namespace CryptoSense.Application.Services
                                                 TelegramUserId = bu.TelegramUserId,
                                                 TelegramChatId = bu.TelegramChatId,
                                                 IsActive = bu.IsActive,
+                                                IsLoggedIn = false, // Never auto-login restored user
                                                 CreatedAtUtc = bu.CreatedAtUtc == default ? DateTime.UtcNow : bu.CreatedAtUtc,
                                                 LastLoginAt = bu.LastLoginAt == default ? DateTime.UtcNow : bu.LastLoginAt
                                             };

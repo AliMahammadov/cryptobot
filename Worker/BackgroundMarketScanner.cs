@@ -171,10 +171,13 @@ namespace CryptoSense.Worker
                         _nextSignalNumber = maxNum;
                     }
                     Console.WriteLine($"[BackgroundMarketScanner] _nextSignalNumber initialized to {_nextSignalNumber}");
+
+                    // STARTUP CATCH-UP: Sönülü / deploy ikən SL və ya TP toxunubsa dərhal aşkarla, bağla və Telegram nəticə göndər
+                    await PerformStartupCatchUpAsync(uow, initScope.ServiceProvider.GetRequiredService<IMarketDataProvider>());
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine($"[BackgroundMarketScanner] Error initializing signal number / cleanup: {ex.Message}");
+                    Console.WriteLine($"[BackgroundMarketScanner] Error initializing signal number / cleanup / catch-up: {ex.Message}");
                 }
             }
 
@@ -328,6 +331,127 @@ namespace CryptoSense.Worker
                 {
                     await CheckCandleInvalidationAndTrailingAsync(sig, marketData, indicatorEngine, unitOfWork, snap.Last, stoppingToken);
                 }
+            }
+        }
+
+        private async Task PerformStartupCatchUpAsync(IUnitOfWork uow, IMarketDataProvider marketData)
+        {
+            try
+            {
+                var openSignals = await uow.Signals.GetOpenTrackedSignalsAsync();
+                if (openSignals.Count == 0) return;
+
+                Console.WriteLine($"[StartupCatchUp] {openSignals.Count} aktiv siqnal üzrə restart catch-up yoxlanışı başladı...");
+
+                foreach (var sig in openSignals)
+                {
+                    _coinActiveLocks.TryAdd(sig.Symbol, 1);
+                    _wsClient.Subscribe(sig.Symbol);
+
+                    var klines = await marketData.GetKlinesAsync(sig.Symbol, "1m", 60);
+                    if (klines.Count == 0)
+                    {
+                        klines = await marketData.GetKlinesAsync(sig.Symbol, sig.Timeframe, 5);
+                    }
+
+                    if (klines.Count == 0) continue;
+
+                    decimal maxHigh = klines.Max(k => k.High);
+                    decimal minLow = klines.Min(k => k.Low);
+                    decimal lastPrice = klines.Last().Close;
+
+                    _livePriceCache.UpdateFromAggTrade(sig.Symbol, lastPrice, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), isRestFallback: true);
+                    var snap = _livePriceCache.GetSnapshot(sig.Symbol);
+                    if (snap != null)
+                    {
+                        snap.SessionHigh = Math.Max(snap.SessionHigh, maxHigh);
+                        snap.SessionLow = Math.Min(snap.SessionLow, minLow);
+                    }
+
+                    bool isLong = sig.Direction == SignalDirection.Buy || sig.SignalType.Contains("LONG");
+                    bool slHit = isLong ? (minLow <= sig.StopLoss) : (maxHigh >= sig.StopLoss);
+                    bool tp1Hit = sig.TakeProfit1 > 0 && (isLong ? (maxHigh >= sig.TakeProfit1) : (minLow <= sig.TakeProfit1));
+
+                    if (slHit && !sig.Tp1Notified)
+                    {
+                        sig.OutcomeAlertSent = true;
+                        sig.IsClosed = true;
+                        sig.ClosePrice = sig.StopLoss;
+                        sig.ClosedAt = DateTime.UtcNow;
+                        sig.CloseReason = "SL_RESTART_CATCHUP";
+                        sig.Status = SignalStatus.Failed;
+                        sig.OutcomeStatus = "Stop Loss (SL) (Restart Catch-up) ❌";
+
+                        decimal exitPnl = isLong
+                            ? Math.Round(((sig.StopLoss - sig.EntryPrice) / sig.EntryPrice) * 100, 2)
+                            : Math.Round(((sig.EntryPrice - sig.StopLoss) / sig.EntryPrice) * 100, 2);
+                        sig.ResultPercent = Math.Round(exitPnl - 0.10m, 2);
+
+                        await uow.Signals.UpdateAsync(sig);
+                        await uow.SaveChangesAsync(CancellationToken.None);
+
+                        _coinActiveLocks.TryRemove(sig.Symbol, out _);
+
+                        if (sig.SignalAlertSent)
+                        {
+                            await _telegramService.SendOutcomeAlertAsync(sig, "Stop Loss (SL) [Restart Aşkarlanması]", sig.StopLoss, sig.ResultPercent.Value);
+                        }
+                        Console.WriteLine($"[StartupCatchUp] SL caught up for {sig.Symbol} (Id={sig.Id}, NetPnL={sig.ResultPercent}%)");
+                    }
+                    else if (tp1Hit && !sig.Tp1Notified)
+                    {
+                        sig.Tp1Notified = true;
+                        sig.IsPartial1Closed = true;
+                        sig.RemainingPositionRatio = 0.50m;
+                        sig.CloseReason = "TP_A";
+
+                        decimal pnl1 = isLong
+                            ? Math.Round(((sig.TakeProfit1 - sig.EntryPrice) / sig.EntryPrice) * 100, 2)
+                            : Math.Round(((sig.EntryPrice - sig.TakeProfit1) / sig.EntryPrice) * 100, 2);
+                        sig.RealizedProfitPercent = Math.Round(0.50m * pnl1, 2);
+                        sig.ProfitPercentAchieved = pnl1;
+                        sig.StopLoss = isLong
+                            ? SignalEngine.RoundToCoinPrecision(sig.EntryPrice, sig.EntryPrice * 1.0012m)
+                            : SignalEngine.RoundToCoinPrecision(sig.EntryPrice, sig.EntryPrice * 0.9988m);
+                        sig.BreakevenTriggered = true;
+
+                        if (sig.TakeProfit2 <= 0 || sig.TakeProfit2 == sig.TakeProfit1)
+                        {
+                            sig.OutcomeAlertSent = true;
+                            sig.IsClosed = true;
+                            sig.ClosePrice = sig.TakeProfit1;
+                            sig.ClosedAt = DateTime.UtcNow;
+                            sig.RemainingPositionRatio = 0m;
+                            sig.RealizedProfitPercent = pnl1;
+                            sig.ResultPercent = Math.Round(sig.RealizedProfitPercent - 0.10m, 2);
+                            sig.Status = (sig.ResultPercent >= 0) ? SignalStatus.Success : SignalStatus.Failed;
+                            sig.OutcomeStatus = "Hədəf A (TP_A 1.0R) (TAM MƏNFƏƏT) [Restart Catch-up] ✅";
+
+                            await uow.Signals.UpdateAsync(sig);
+                            await uow.SaveChangesAsync(CancellationToken.None);
+                            _coinActiveLocks.TryRemove(sig.Symbol, out _);
+
+                            if (sig.SignalAlertSent)
+                            {
+                                await _telegramService.SendOutcomeAlertAsync(sig, "Hədəf A (TP_A 1.0R) [Restart Catch-up]", sig.TakeProfit1, sig.ResultPercent.Value);
+                            }
+                        }
+                        else
+                        {
+                            await uow.Signals.UpdateAsync(sig);
+                            await uow.SaveChangesAsync(CancellationToken.None);
+                            if (sig.SignalAlertSent)
+                            {
+                                await _telegramService.SendOutcomeAlertAsync(sig, "Hədəf A (TP_A 1.0R) [Restart Catch-up + BE Aktiv]", sig.TakeProfit1, pnl1);
+                            }
+                        }
+                        Console.WriteLine($"[StartupCatchUp] TP1 caught up for {sig.Symbol} (Id={sig.Id})");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[StartupCatchUp] Error executing startup catch-up: {ex.Message}");
             }
         }
 
@@ -1341,16 +1465,35 @@ namespace CryptoSense.Worker
                                 // (3) WS Live Price Snapshot (əvvəlcədən abunə olunduğu üçün gecikmədən birbaşa yoxlanılır)
                                 var snap = _livePriceCache.GetSnapshot(signal.Symbol);
 
-                                // SKIP_STALE yalnız DataAge həqiqətən həddi (3500ms) keçəndə (və ya tick hələ çatmayıbsa)
-                                if (snap == null || snap.DataAgeMs > 3500 || snap.Source == "rest_fallback")
+                                // QAYDA 3: DataAge > 1000ms olarsa, REST ilə dərhal ən son ticarət qiyməti çəkilir və DataAge yenilənir
+                                if (snap == null || snap.DataAgeMs > 1000)
+                                {
+                                    try
+                                    {
+                                        var lastAgg = await marketData.GetLastAggTradeAsync(signal.Symbol);
+                                        if (lastAgg.HasValue)
+                                        {
+                                            _livePriceCache.UpdateFromAggTrade(signal.Symbol, lastAgg.Value.Price, lastAgg.Value.ExchangeTsMs, isRestFallback: false);
+                                            snap = _livePriceCache.GetSnapshot(signal.Symbol);
+                                        }
+                                    }
+                                    catch (Exception ex)
+                                    {
+                                        Console.WriteLine($"[MarketScanner] Live price refresh error for {signal.Symbol}: {ex.Message}");
+                                    }
+                                }
+
+                                // SKIP_STALE: Əgər hələ də yoxdursa və ya DataAge > 3500ms-dirsə: köhnə qiymətlə kart QƏTİ GÖNDƏRİLMƏSİN!
+                                if (snap == null || snap.DataAgeMs > 3500)
                                 {
                                     Interlocked.Increment(ref _hourlyTelemetry.SkipStale);
-                                    Console.WriteLine($"[MarketScanner] SKIP_STALE_OR_REST: {signal.Symbol} dataAgeMs={(snap?.DataAgeMs ?? -1)} source={snap?.Source}");
+                                    Console.WriteLine($"[MarketScanner] SKIP_STALE: {signal.Symbol} dataAgeMs={(snap?.DataAgeMs ?? -1)} source={snap?.Source}");
                                     continue;
                                 }
 
-                                // (5) EntryPrice=Last, PriceSource, ExchangeTs, DataAgeMs, CandleCloseTime
+                                // (5) EntryPrice=Last, CurrentPrice=Last (canlı qiymət əks olunsun, köhnə şam bağlanışı yox!)
                                 signal.EntryPrice = snap.Last;
+                                signal.CurrentPrice = snap.Last;
                                 signal.PriceSource = snap.Source;
                                 signal.ExchangeTsMs = snap.ExchangeTsMs;
                                 signal.DataAgeMs = snap.DataAgeMs;

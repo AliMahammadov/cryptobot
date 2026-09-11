@@ -290,13 +290,14 @@ namespace CryptoSense.Infrastructure.Telegram
                 var uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
                 var user = await uow.Users.GetByChatIdOrTelegramUserIdAsync(chatId, null);
 
-                if (user == null)
+                if (user == null || !user.IsLoggedIn || string.IsNullOrWhiteSpace(user.TelegramChatId) || user.TelegramChatId != chatId || !user.IsActive)
                 {
-                    return false;
-                }
-
-                if (!user.IsLoggedIn || string.IsNullOrWhiteSpace(user.TelegramChatId) || user.TelegramChatId != chatId || !user.IsActive)
-                {
+                    _loggedOutChats[chatId] = true;
+                    _authenticatedSessions.TryRemove(chatId, out _);
+                    if (UserPreferences.TryGetValue(chatId, out var stalePref))
+                    {
+                        stalePref.IsActive = false;
+                    }
                     return false;
                 }
 
@@ -787,12 +788,6 @@ namespace CryptoSense.Infrastructure.Telegram
                         continue;
                     }
 
-                    // Strict Chronological check: never send a signal generated before the user selected timeframe / resumed
-                    if (signal.GeneratedAt < settings.LastResumeTime.AddSeconds(-15))
-                    {
-                        continue;
-                    }
-
                     // Strict Candle Freshness check: never deliver a signal whose closed candle is older than tolerance
                     var candleDuration = signal.Timeframe switch
                     {
@@ -852,12 +847,12 @@ namespace CryptoSense.Infrastructure.Telegram
                         continue;
                     }
 
-                    // Limit checks: Max 10 signals per day, Max 5 open positions
+                    // Limit checks: Max 20 signals per day, Max 20 open positions (Harmonized with UI)
                     var todayCount = await uow.Signals.GetUserTodaySignalsCountAsync(chatId);
-                    if (todayCount >= 10) continue;
+                    if (todayCount >= 20) continue;
 
                     var openCount = await uow.Signals.GetUserOpenSignalsCountAsync(chatId);
-                    if (openCount >= 5) continue;
+                    if (openCount >= 20) continue;
 
                     var userSigNum = nextSequentialNum;
                     signal.SignalNumber = userSigNum;
