@@ -675,11 +675,13 @@ namespace CryptoSense.Infrastructure.Telegram
             }
 
             decimal tp1DistCheck = Math.Abs(signal.TakeProfit1 - signal.EntryPrice);
+            decimal tp2DistCheck = signal.TakeProfit2 > 0 ? Math.Abs(signal.TakeProfit2 - signal.EntryPrice) : tp1DistCheck;
+            decimal weightedTpDistCheck = (0.50m * tp1DistCheck) + (0.50m * tp2DistCheck);
             decimal slDistCheck = Math.Abs(signal.StopLoss - signal.EntryPrice);
-            decimal rrCheck = slDistCheck > 0 ? (tp1DistCheck / slDistCheck) : 0m;
+            decimal rrCheck = slDistCheck > 0 ? (weightedTpDistCheck / slDistCheck) : 0m;
             if (rrCheck < 1.30m)
             {
-                Console.WriteLine($"[TelegramBotService] R:R filter blocked (R:R {rrCheck:F2} < 1.30)");
+                Console.WriteLine($"[TelegramBotService] R:R filter blocked (Weighted R:R {rrCheck:F2} < 1.30)");
                 return false;
             }
 
@@ -788,17 +790,24 @@ namespace CryptoSense.Infrastructure.Telegram
                         continue;
                     }
 
-                    // Strict R:R Gate: R:R = (TP1 məsafəsi) / (SL məsafəsi). R:R < 1.30 isə send=NO
+                    // Strict R:R Gate: Weighted R:R = TP1 (1.0R - 50%) + TP2 (min(2.0R, struct) - 50%). R:R < 1.30 isə send=NO
                     decimal tp1Dist = Math.Abs(signal.TakeProfit1 - signal.EntryPrice);
+                    decimal tp2Dist = signal.TakeProfit2 > 0 ? Math.Abs(signal.TakeProfit2 - signal.EntryPrice) : tp1Dist;
+                    decimal weightedTpDist = (0.50m * tp1Dist) + (0.50m * tp2Dist);
                     decimal slDist = Math.Abs(signal.StopLoss - signal.EntryPrice);
-                    decimal rr = slDist > 0 ? (tp1Dist / slDist) : 0m;
+                    decimal rr = slDist > 0 ? (weightedTpDist / slDist) : 0m;
                     if (rr < 1.30m)
                     {
                         continue;
                     }
 
                     // Strict User Coin Filter: User only receives signals if they have explicitly selected coins.
-                    if (settings.Coins.Count == 0 || !settings.Coins.Contains(signal.Symbol)) continue;
+                    if (settings.Coins.Count == 0) continue;
+                    bool coinMatched = settings.Coins.Contains(signal.Symbol)
+                        || (!string.IsNullOrEmpty(signal.CleanSymbol) && settings.Coins.Contains(signal.CleanSymbol))
+                        || settings.Coins.Contains(signal.Symbol.Replace("USDT", ""))
+                        || (!string.IsNullOrEmpty(signal.CleanSymbol) && settings.Coins.Contains(signal.CleanSymbol + "USDT"));
+                    if (!coinMatched) continue;
 
                     // Fresh Entry Filter: If price drifted > 0.35% away from entry towards TP1 or StopLoss, don't send stale setup
                     if (signal.CurrentPrice > 0 && signal.EntryPrice > 0)

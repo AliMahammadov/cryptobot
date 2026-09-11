@@ -44,6 +44,7 @@ namespace CryptoSense.Worker
         private static readonly ConcurrentDictionary<string, DateTime> _lastAlertSent = new();
         private static readonly ConcurrentDictionary<string, DateTime> _coinCooldowns = new();
         private static readonly ConcurrentDictionary<string, byte> _coinActiveLocks = new();
+        private static readonly ConcurrentDictionary<string, byte> _scanningCoins = new();
         private static readonly ConcurrentDictionary<string, DateTime> _lastVolatilityAlertSent = new();
         private static readonly ConcurrentDictionary<string, DateTime> _lastSymbolAlertTime = new();
         private static readonly object _heartbeatLock = new();
@@ -149,13 +150,22 @@ namespace CryptoSense.Worker
         {
             Console.WriteLine("[BackgroundMarketScanner] Yüksək Dəqiqlikli Skaner və Nəticə İzləyicisi başladı.");
 
-            // Initialize highest signal number from database
+            // Initialize highest signal number from database and perform startup cleanup of orphaned signals
             using (var initScope = _serviceProvider.CreateScope())
             {
                 try
                 {
+                    var uow = initScope.ServiceProvider.GetRequiredService<IUnitOfWork>();
+                    int cleaned = await uow.Signals.CleanupOrphanedSignalsAsync();
+                    if (cleaned > 0)
+                    {
+                        Console.WriteLine($"[BackgroundMarketScanner] Cleaned {cleaned} orphaned signals from database on startup.");
+                    }
+
                     var db = initScope.ServiceProvider.GetRequiredService<AppDbContext>();
-                    var maxNum = db.Signals.Any() ? db.Signals.Max(s => s.SignalNumber) : 0;
+                    var maxNum = db.Signals.Any(s => s.SignalAlertSent && s.SignalNumber > 0)
+                        ? db.Signals.Where(s => s.SignalAlertSent && s.SignalNumber > 0).Max(s => s.SignalNumber)
+                        : 0;
                     lock (_sendLock)
                     {
                         _nextSignalNumber = maxNum;
@@ -164,8 +174,22 @@ namespace CryptoSense.Worker
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine($"[BackgroundMarketScanner] Error initializing signal number: {ex.Message}");
+                    Console.WriteLine($"[BackgroundMarketScanner] Error initializing signal number / cleanup: {ex.Message}");
                 }
+            }
+
+            // Reset heartbeat timers on startup so active users receive an immediate live heartbeat on the first scan cycle
+            try
+            {
+                foreach (var pref in TelegramBotService.UserPreferences.Values)
+                {
+                    pref.LastHeartbeatSentUtc = DateTime.UtcNow.AddMinutes(-31);
+                }
+                TelegramBotService.SaveSettings();
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[BackgroundMarketScanner] Error resetting heartbeat timers on startup: {ex.Message}");
             }
 
             // Start WebSocket client independently
@@ -1053,7 +1077,7 @@ namespace CryptoSense.Worker
                 }
 
                 // Strict Coin-Level Rule 2: Does this coin ALREADY have ANY open unclosed position across ANY timeframe?
-                if (_coinActiveLocks.ContainsKey(sym))
+                if (_coinActiveLocks.ContainsKey(sym) || _scanningCoins.ContainsKey(sym))
                 {
                     Interlocked.Increment(ref _hourlyTelemetry.SkipLock);
                     continue;
@@ -1072,18 +1096,19 @@ namespace CryptoSense.Worker
 
             if (coinsToScan.Count > 0)
             {
-                // Scan by COIN in parallel (eliminates multiple threads scanning the same coin simultaneously!)
+                // Scan by COIN in parallel (eliminates multiple threads scanning the same coin simultaneously via _scanningCoins optimistic lock)
                 await Parallel.ForEachAsync(coinsToScan, new ParallelOptions { MaxDegreeOfParallelism = 10, CancellationToken = stoppingToken }, async (sym, ct) =>
                 {
+                    if (_coinActiveLocks.ContainsKey(sym) || !_scanningCoins.TryAdd(sym, 1))
+                    {
+                        Interlocked.Increment(ref _hourlyTelemetry.SkipLock);
+                        return;
+                    }
+
                     try
                     {
                         // Check if portfolio limit was reached by another parallel thread
                         if (_coinActiveLocks.Count >= MaxGlobalOpenPositions)
-                        {
-                            Interlocked.Increment(ref _hourlyTelemetry.SkipLock);
-                            return;
-                        }
-                        if (_coinActiveLocks.ContainsKey(sym))
                         {
                             Interlocked.Increment(ref _hourlyTelemetry.SkipLock);
                             return;
@@ -1140,9 +1165,8 @@ namespace CryptoSense.Worker
 
                             var signal = await engine.AnalyzeCoinAsync(sym, tf, isLiveScan: true);
 
-                            // Telemetriya: Confluence − DIAQNOSTIKA ÜÇÜN MÜVƏQQƏTİ 72% (əvvəl 75%)
-                            // sent=0 olan 19 saatlıq sükutu səbəbini müeyyən etmək üçün
-                            bool isTradeQualified = signal.Timeframe != "15m" && signal.Confidence >= 72 &&
+                            // Telemetriya: Confluence (≥ 75%)
+                            bool isTradeQualified = signal.Timeframe != "15m" && signal.Confidence >= 75 &&
                                                     signal.SignalType != null &&
                                                     (signal.SignalType.Contains("LONG") || signal.SignalType.Contains("SHORT"));
                             if (!isTradeQualified)
@@ -1207,8 +1231,7 @@ namespace CryptoSense.Worker
                             }
 
                             // HIGH-CONVICTION TRADE DISPATCH (Faza A: Live WebSocket Price, Emit Lag & Stale Filter, Atomic Send-Success Numbering)
-                            // MÜVƏQQƏTİ: 72% (diaqnostika bitdikdən sonra 75%-ə qaytar)
-                            if (signal.Timeframe != "15m" && signal.Confidence >= 72 && signal.SignalType != null && (signal.SignalType.Contains("LONG") || signal.SignalType.Contains("SHORT")))
+                            if (signal.Timeframe != "15m" && signal.Confidence >= 75 && signal.SignalType != null && (signal.SignalType.Contains("LONG") || signal.SignalType.Contains("SHORT")))
                             {
                                 var candleDuration = signal.Timeframe switch
                                 {
@@ -1449,6 +1472,20 @@ namespace CryptoSense.Worker
                                         Interlocked.Increment(ref _hourlyTelemetry.TelegramFail);
                                         Console.WriteLine($"[MarketScanner] TELEGRAM_FAIL: {signal.Symbol} {signal.Timeframe} — SendSignalAlert false (DataAge? R:R? UserFilter?)");
                                         _coinActiveLocks.TryRemove(sym, out _);
+
+                                        // Clean up unsent signal from DB so it never remains as an open #0 position!
+                                        try
+                                        {
+                                            signal.IsClosed = true;
+                                            signal.ClosedAt = DateTime.UtcNow;
+                                            signal.Status = SignalStatus.Neutral;
+                                            signal.CloseReason = "ALERT_NEVER_SENT_FAILED";
+                                            await uow.SaveChangesAsync(ct);
+                                        }
+                                        catch (Exception cleanEx)
+                                        {
+                                            Console.WriteLine($"[MarketScanner] Failed to clean unsent signal {signal.Id}: {cleanEx.Message}");
+                                        }
                                     }
                                 }
                                 finally
@@ -1460,7 +1497,11 @@ namespace CryptoSense.Worker
                     }
                     catch (Exception ex)
                     {
-                        Console.WriteLine($"[BackgroundMarketScanner] Heartbeat send error: {ex.Message}");
+                        Console.WriteLine($"[BackgroundMarketScanner] Error scanning {sym}: {ex.Message}");
+                    }
+                    finally
+                    {
+                        _scanningCoins.TryRemove(sym, out _);
                     }
                 });
             }

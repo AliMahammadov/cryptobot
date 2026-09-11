@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
@@ -44,13 +44,13 @@ namespace CryptoSense.Infrastructure.Persistence.Repositories
         public async Task<bool> HasActiveSignalForSymbolAsync(string symbol)
         {
             return await _context.Signals
-                .AnyAsync(s => s.Symbol == symbol && s.Status == SignalStatus.Open && !s.IsClosed && s.SignalAlertSent);
+                .AnyAsync(s => s.Symbol == symbol && s.Status == SignalStatus.Open && !s.IsClosed && s.SignalAlertSent && s.SignalNumber > 0);
         }
 
         public async Task<int> GetActiveSignalsCountAsync()
         {
             return await _context.Signals
-                .CountAsync(s => s.Status == SignalStatus.Open && !s.IsClosed && s.SignalAlertSent);
+                .CountAsync(s => s.Status == SignalStatus.Open && !s.IsClosed && s.SignalAlertSent && s.SignalNumber > 0);
         }
 
         public async Task<List<FuturesSignal>> GetRecentSignalsAsync(int count = 25)
@@ -369,8 +369,13 @@ namespace CryptoSense.Infrastructure.Persistence.Repositories
                 .Select(d => d.SignalId)
                 .ToListAsync();
 
+            if (deliveredSignalIds.Count == 0)
+            {
+                return 0;
+            }
+
             return await _context.Signals
-                .CountAsync(s => deliveredSignalIds.Contains(s.Id) && s.Status == SignalStatus.Open && !s.IsClosed);
+                .CountAsync(s => deliveredSignalIds.Contains(s.Id) && s.Status == SignalStatus.Open && !s.IsClosed && s.SignalAlertSent && s.SignalNumber > 0);
         }
 
         public async Task RecordDeliveryAsync(int signalId, string chatId, int userSignalNumber)
@@ -421,14 +426,11 @@ namespace CryptoSense.Infrastructure.Persistence.Repositories
 
             if (deliveredSignalIds.Count == 0)
             {
-                return await _context.Signals
-                    .Where(s => s.Status == SignalStatus.Open && !s.IsClosed)
-                    .OrderByDescending(s => s.GeneratedAt)
-                    .ToListAsync();
+                return new List<FuturesSignal>();
             }
 
             return await _context.Signals
-                .Where(s => deliveredSignalIds.Contains(s.Id) && s.Status == SignalStatus.Open && !s.IsClosed)
+                .Where(s => deliveredSignalIds.Contains(s.Id) && s.Status == SignalStatus.Open && !s.IsClosed && s.SignalAlertSent && s.SignalNumber > 0)
                 .OrderByDescending(s => s.GeneratedAt)
                 .ToListAsync();
         }
@@ -528,6 +530,27 @@ namespace CryptoSense.Infrastructure.Persistence.Repositories
             stats.TimeExpiredRatePercent = decisiveTrades > 0 ? Math.Round(((decimal)stats.TimeExpiredCount / decisiveTrades) * 100, 1) : 0m;
 
             return stats;
+        }
+
+        public async Task<int> CleanupOrphanedSignalsAsync()
+        {
+            var orphans = await _context.Signals
+                .Where(s => !s.IsClosed && (!s.SignalAlertSent || s.SignalNumber <= 0))
+                .ToListAsync();
+
+            if (orphans.Count > 0)
+            {
+                foreach (var s in orphans)
+                {
+                    s.IsClosed = true;
+                    s.ClosedAt = DateTime.UtcNow;
+                    s.Status = SignalStatus.Neutral;
+                    s.CloseReason = "ALERT_NEVER_SENT_CLEANUP";
+                }
+                await _context.SaveChangesAsync();
+                Console.WriteLine($"[STARTUP_CLEANUP] Closed {orphans.Count} orphaned signals (SignalAlertSent=false / SignalNumber<=0)");
+            }
+            return orphans.Count;
         }
     }
 }

@@ -33,5 +33,6 @@ namespace CryptoSense.Domain.Interfaces
         Task ResetClosedSignalsAsync();
         Task<int> GetActiveSignalsCountAsync();
         Task ClearAllSignalsAsync();
+        Task<int> CleanupOrphanedSignalsAsync();
     }
 }
