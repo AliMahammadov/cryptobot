@@ -33,13 +33,13 @@ namespace CryptoSense.Infrastructure.Persistence.Repositories
         {
             if (!string.IsNullOrEmpty(chatId))
             {
-                var userByChat = await _context.Users.FirstOrDefaultAsync(u => u.IsActive && u.TelegramChatId == chatId);
+                var userByChat = await _context.Users.FirstOrDefaultAsync(u => u.TelegramChatId == chatId);
                 if (userByChat != null) return userByChat;
             }
 
             if (telegramUserId.HasValue && telegramUserId.Value > 0)
             {
-                return await _context.Users.FirstOrDefaultAsync(u => u.IsActive && u.TelegramUserId == telegramUserId.Value);
+                return await _context.Users.FirstOrDefaultAsync(u => u.TelegramUserId == telegramUserId.Value);
             }
 
             return null;

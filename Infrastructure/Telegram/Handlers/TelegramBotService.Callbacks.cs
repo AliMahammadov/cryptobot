@@ -106,6 +106,17 @@ namespace CryptoSense.Infrastructure.Telegram
                 }
                 userSettings.IsActive = !userSettings.IsActive;
                 SaveSettings();
+                try
+                {
+                    var dbUser = await unitOfWork.Users.GetByChatIdOrTelegramUserIdAsync(chatId, null);
+                    if (dbUser != null)
+                    {
+                        dbUser.IsActive = userSettings.IsActive;
+                        await unitOfWork.Users.UpdateAsync(dbUser);
+                        await unitOfWork.SaveChangesAsync();
+                    }
+                }
+                catch { }
                 var activeCount = await unitOfWork.Signals.GetActiveSignalsCountAsync();
                 var lastDeliveredUtc = await unitOfWork.Signals.GetLastDeliveredSignalTimeUtcAsync(chatId);
                 var lastTime = lastDeliveredUtc.HasValue ? Domain.Common.TimeHelper.FormatAz(lastDeliveredUtc.Value) : "";
@@ -397,12 +408,7 @@ namespace CryptoSense.Infrastructure.Telegram
             }
             else if (data == "cb_admin_export_db")
             {
-                var volumeEnv = Environment.GetEnvironmentVariable("RAILWAY_VOLUME_MOUNT_PATH");
-                var currentDataDir = !string.IsNullOrEmpty(volumeEnv) && Directory.Exists(volumeEnv)
-                    ? volumeEnv
-                    : (Directory.Exists("/app/data") ? "/app/data" : Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "data"));
-                var currentDbPath = Path.Combine(currentDataDir, "cryptosense.db");
-                if (!File.Exists(currentDbPath)) currentDbPath = "cryptosense.db";
+                var currentDbPath = CryptoSense.Domain.Common.AppPaths.DatabasePath;
 
                 if (File.Exists(currentDbPath))
                 {

@@ -219,9 +219,7 @@ namespace CryptoSense.Application.Services
             public DateTime SentAtUtc { get; set; }
         }
 
-        private static readonly string DataDirectory = !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("RAILWAY_VOLUME_MOUNT_PATH")) && Directory.Exists(Environment.GetEnvironmentVariable("RAILWAY_VOLUME_MOUNT_PATH"))
-            ? Environment.GetEnvironmentVariable("RAILWAY_VOLUME_MOUNT_PATH")!
-            : (Directory.Exists("/app/data") ? "/app/data" : Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "data"));
+        private static readonly string DataDirectory = CryptoSense.Domain.Common.AppPaths.DataDirectory;
         private static readonly string SentNewsFilePath = Path.Combine(DataDirectory, "sent_news_history.json");
         private static readonly object _sentNewsLock = new();
         private static List<SentNewsRecord> _sentNewsRecords = new();

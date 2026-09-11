@@ -223,6 +223,7 @@ namespace CryptoSense.Infrastructure.Telegram
                 UserPreferences.TryRemove(chatId, out _);
                 _userStates.TryRemove(chatId, out _);
                 if (SuperAdminChatId == chatId) SuperAdminChatId = null;
+                SaveSettings();
 
                 await userManager.LogoutAsync(chatId, userId);
                 await userManager.ClearChatBindingAsync(chatId, userId);
@@ -814,11 +815,7 @@ namespace CryptoSense.Infrastructure.Telegram
             if (isAdmin && (text == "/db" || text == "/getdb" || text == "/backup_db" || text == "📥 Bazanı Yüklə" || text.Contains("Bazanı Yüklə") || text.Contains("Bazani Yukle")))
             {
                 _userStates.TryRemove(chatId, out _);
-                var volumeEnv = Environment.GetEnvironmentVariable("RAILWAY_VOLUME_MOUNT_PATH");
-                var currentDataDir = !string.IsNullOrEmpty(volumeEnv) && Directory.Exists(volumeEnv)
-                    ? volumeEnv
-                    : (Directory.Exists("/app/data") ? "/app/data" : Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "data"));
-                var currentDbPath = Path.Combine(currentDataDir, "cryptosense.db");
+                var currentDbPath = CryptoSense.Domain.Common.AppPaths.DatabasePath;
 
                 if (File.Exists(currentDbPath))
                 {

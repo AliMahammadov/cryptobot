@@ -41,11 +41,9 @@ namespace CryptoSense.Infrastructure.Telegram
         private static readonly SemaphoreSlim _sendNumberLock = new(1, 1);
         private static readonly ConcurrentDictionary<string, DateTime> _lastPortfolioSummarySent = new();
         private static readonly ConcurrentDictionary<string, (string Content, DateTime CachedAt)> _portfolioSummaryCache = new();
-        private static readonly string DataDirectory = !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("RAILWAY_VOLUME_MOUNT_PATH")) && Directory.Exists(Environment.GetEnvironmentVariable("RAILWAY_VOLUME_MOUNT_PATH"))
-            ? Environment.GetEnvironmentVariable("RAILWAY_VOLUME_MOUNT_PATH")!
-            : (Directory.Exists("/app/data") ? "/app/data" : Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "data"));
-        private static readonly string SettingsFilePath = Path.Combine(DataDirectory, "user_preferences.json");
-        private static readonly string SignalMapFilePath = Path.Combine(DataDirectory, "signal_user_numbers.json");
+        private static readonly string DataDirectory = CryptoSense.Domain.Common.AppPaths.DataDirectory;
+        private static readonly string SettingsFilePath = CryptoSense.Domain.Common.AppPaths.SettingsFilePath;
+        private static readonly string SignalMapFilePath = CryptoSense.Domain.Common.AppPaths.SignalMapFilePath;
 
         public static readonly List<string> Default40Coins = new()
         {
@@ -184,31 +182,42 @@ namespace CryptoSense.Infrastructure.Telegram
                 SuperAdminChatId = _config.SuperAdminChatId;
             }
 
-            // Hydrate active users from database into UserPreferences so preferences and scanning never stall
+            // Hydrate active users from database into UserPreferences and _authenticatedSessions so preferences and scanning never stall
             try
             {
                 using var scope = _serviceProvider.CreateScope();
                 var userManager = scope.ServiceProvider.GetRequiredService<IUserManagerService>();
-                var activeUsers = userManager.GetAllUsersAsync().GetAwaiter().GetResult();
+                var activeUsers = userManager.GetAllLoggedInActiveUsersAsync().GetAwaiter().GetResult();
                 foreach (var u in activeUsers)
                 {
-                    if (!string.IsNullOrEmpty(u.TelegramChatId) && u.IsActive)
+                    if (!string.IsNullOrEmpty(u.TelegramChatId) && u.IsActive && u.IsLoggedIn)
                     {
+                        _authenticatedSessions[u.TelegramChatId] = u.Username;
+                        _loggedOutChats.TryRemove(u.TelegramChatId, out _);
+                        if (u.Role == Domain.Enums.UserRole.Admin)
+                        {
+                            SuperAdminChatId = u.TelegramChatId;
+                        }
+
                         var s = UserPreferences.GetOrAdd(u.TelegramChatId, _ => new UserSettings
                         {
                             Username = u.Username,
                             TelegramUserId = u.TelegramUserId,
-                            IsActive = false,
-                            Timeframe = "Təyin olunmayıb",
-                            PortfolioMode = "Təyin olunmayıb",
-                            Coins = new List<string>()
+                            IsActive = true,
+                            Timeframe = "1h",
+                            PortfolioMode = "Standard40",
+                            Coins = new List<string>(Default40Coins)
                         });
                         s.Username = u.Username;
                         s.TelegramUserId = u.TelegramUserId;
+                        s.IsActive = true;
                     }
                 }
             }
-            catch { }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[TelegramBotService] Startup hydration error: {ex.Message}");
+            }
         }
 
         public bool IsSuperAdmin(string chatId, long? userId, string telegramUsername)
@@ -260,34 +269,42 @@ namespace CryptoSense.Infrastructure.Telegram
             if (string.IsNullOrWhiteSpace(chatId)) return false;
             if (_loggedOutChats.ContainsKey(chatId)) return false;
 
-            if (UserPreferences.TryGetValue(chatId, out var pref) && !pref.IsActive)
+            // 1. Session check: user must have active session in memory
+            if (!_authenticatedSessions.ContainsKey(chatId))
             {
                 return false;
             }
 
-            // SuperAdmin is ALWAYS authorized to receive alerts & heartbeat
-            if (chatId == "1219998176" || (!string.IsNullOrEmpty(SuperAdminChatId) && chatId == SuperAdminChatId))
+            // 2. UserPreferences check: must exist and be active
+            if (!UserPreferences.TryGetValue(chatId, out var pref) || !pref.IsActive)
             {
-                return true;
+                return false;
             }
 
+            // 3. Database check: IsLoggedIn==true AND TelegramChatId dolu & matches AND IsActive==true
+            // TƏK QAPI: İstisna YOX (SuperAdmin də yalnız öz chatId və aktiv sessiyası ilə keçir)
             try
             {
                 using var scope = _serviceProvider.CreateScope();
                 var uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
                 var user = await uow.Users.GetByChatIdOrTelegramUserIdAsync(chatId, null);
 
-                if (user != null)
+                if (user == null)
                 {
-                    return user.IsActive;
+                    return false;
                 }
 
-                // If user doesn't have a record in Users table, check active state in UserPreferences
-                return pref != null && pref.IsActive;
+                if (!user.IsLoggedIn || string.IsNullOrWhiteSpace(user.TelegramChatId) || user.TelegramChatId != chatId || !user.IsActive)
+                {
+                    return false;
+                }
+
+                return true;
             }
-            catch
+            catch (Exception ex)
             {
-                return pref != null && pref.IsActive;
+                Console.WriteLine($"[CanReceivePushAsync] DB check error for {chatId}: {ex.Message}");
+                return false;
             }
         }
 
@@ -300,10 +317,12 @@ namespace CryptoSense.Infrastructure.Telegram
                 UserPreferences.TryRemove(chatId, out _);
                 _userStates.TryRemove(chatId, out _);
                 if (SuperAdminChatId == chatId) SuperAdminChatId = null;
+                SaveSettings();
 
                 using var scope = _serviceProvider.CreateScope();
                 var userManager = scope.ServiceProvider.GetRequiredService<IUserManagerService>();
                 await userManager.LogoutAsync(chatId);
+                await userManager.ClearChatBindingAsync(chatId, null);
             }
             catch { }
         }
@@ -752,13 +771,6 @@ namespace CryptoSense.Infrastructure.Telegram
                         targetChatIds.Add(user.TelegramChatId);
                     }
                 }
-                foreach (var kvp in UserPreferences)
-                {
-                    if (kvp.Value.IsActive && !string.IsNullOrEmpty(kvp.Key) && !_loggedOutChats.ContainsKey(kvp.Key))
-                    {
-                        targetChatIds.Add(kvp.Key);
-                    }
-                }
 
                 bool anyDelivered = false;
 
@@ -967,13 +979,6 @@ namespace CryptoSense.Infrastructure.Telegram
                     targetChatIds.Add(user.TelegramChatId);
                 }
             }
-            foreach (var kvp in UserPreferences)
-            {
-                if (kvp.Value.IsActive && !string.IsNullOrEmpty(kvp.Key) && !_loggedOutChats.ContainsKey(kvp.Key))
-                {
-                    targetChatIds.Add(kvp.Key);
-                }
-            }
 
             foreach (var chatId in targetChatIds)
             {
@@ -1002,13 +1007,6 @@ namespace CryptoSense.Infrastructure.Telegram
                     targetChatIds.Add(user.TelegramChatId);
                 }
             }
-            foreach (var kvp in UserPreferences)
-            {
-                if (kvp.Value.IsActive && !string.IsNullOrEmpty(kvp.Key) && !_loggedOutChats.ContainsKey(kvp.Key))
-                {
-                    targetChatIds.Add(kvp.Key);
-                }
-            }
 
             foreach (var chatId in targetChatIds)
             {
@@ -1031,13 +1029,6 @@ namespace CryptoSense.Infrastructure.Telegram
                 if (!string.IsNullOrEmpty(user.TelegramChatId) && user.IsActive && user.IsLoggedIn)
                 {
                     targetChatIds.Add(user.TelegramChatId);
-                }
-            }
-            foreach (var kvp in UserPreferences)
-            {
-                if (kvp.Value.IsActive && !string.IsNullOrEmpty(kvp.Key) && !_loggedOutChats.ContainsKey(kvp.Key))
-                {
-                    targetChatIds.Add(kvp.Key);
                 }
             }
 
@@ -1091,18 +1082,22 @@ namespace CryptoSense.Infrastructure.Telegram
             // 1. Send global report to SuperAdmin
             if (!string.IsNullOrEmpty(SuperAdminChatId))
             {
-                var globalStats = await uow.Signals.GetPerformanceStatsAsync();
-                var adminMsg = TelegramMessageFormatter.FormatDailyReport(globalStats, globalCoinsEntered, defaultReasons, isSuperAdmin: true);
-                await SendMessageAsync(adminMsg, SuperAdminChatId);
+                if (await CanReceivePushAsync(SuperAdminChatId))
+                {
+                    var globalStats = await uow.Signals.GetPerformanceStatsAsync();
+                    var adminMsg = TelegramMessageFormatter.FormatDailyReport(globalStats, globalCoinsEntered, defaultReasons, isSuperAdmin: true);
+                    await SendMessageAsync(adminMsg, SuperAdminChatId);
+                }
             }
 
             // 2. Send personal daily report to each active user
-            foreach (var kvp in UserPreferences)
+            var userManager = scope.ServiceProvider.GetRequiredService<IUserManagerService>();
+            var activeUsers = await userManager.GetAllLoggedInActiveUsersAsync();
+            foreach (var user in activeUsers)
             {
-                var chatId = kvp.Key;
+                var chatId = user.TelegramChatId;
+                if (string.IsNullOrEmpty(chatId)) continue;
                 if (!await CanReceivePushAsync(chatId)) continue;
-                var settings = kvp.Value;
-                if (!settings.IsActive) continue;
                 if (chatId == SuperAdminChatId) continue;
 
                 var userStats = await uow.Signals.GetUserPerformanceStatsAsync(chatId);

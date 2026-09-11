@@ -52,30 +52,8 @@ builder.Services.PostConfigure<AppConfig>(cfg =>
 
 
 // 2. Persistence Layer (SQLite with EF Core)
-var volumeEnv = Environment.GetEnvironmentVariable("RAILWAY_VOLUME_MOUNT_PATH");
-var dataDir = !string.IsNullOrEmpty(volumeEnv) && Directory.Exists(volumeEnv)
-    ? volumeEnv
-    : (Directory.Exists("/app/data") ? "/app/data" : Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "data"));
-
-if (!Directory.Exists(dataDir))
-{
-    Directory.CreateDirectory(dataDir);
-}
-
-var dbPath = Path.Combine(dataDir, "cryptosense.db");
-
-if (!File.Exists(dbPath))
-{
-    if (File.Exists("cryptosense.db"))
-    {
-        try { File.Copy("cryptosense.db", dbPath); Console.WriteLine($"[Persistence] Migrated root cryptosense.db -> {dbPath}"); } catch { }
-    }
-    else if (File.Exists(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "cryptosense.db")))
-    {
-        try { File.Copy(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "cryptosense.db"), dbPath); Console.WriteLine($"[Persistence] Migrated base cryptosense.db -> {dbPath}"); } catch { }
-    }
-}
-
+var dbPath = CryptoSense.Domain.Common.AppPaths.DatabasePath;
+Console.WriteLine($"[Persistence] Active Database Path: {dbPath}");
 var connectionString = $"Data Source={dbPath};Mode=ReadWriteCreate;Cache=Shared;Default Timeout=30;";
 
 builder.Services.AddDbContext<AppDbContext>(options =>

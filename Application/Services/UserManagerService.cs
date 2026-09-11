@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
 using CryptoSense.Application.Interfaces;
@@ -21,14 +21,9 @@ namespace CryptoSense.Application.Services
         private static bool _superAdminInitialized = false;
         private static readonly object _initLock = new();
 
-        private static readonly string VolumeEnv = Environment.GetEnvironmentVariable("RAILWAY_VOLUME_MOUNT_PATH") ?? "";
-        private static readonly string DataDir = !string.IsNullOrEmpty(VolumeEnv) && Directory.Exists(VolumeEnv)
-            ? VolumeEnv
-            : (Directory.Exists("/app/data") ? "/app/data" : Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "data"));
-
         private static readonly string[] BackupFilePaths = new[]
         {
-            Path.Combine(DataDir, "users_backup.json"),
+            CryptoSense.Domain.Common.AppPaths.UserBackupFilePath,
             Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "users_backup.json"),
             Path.Combine(Directory.GetCurrentDirectory(), "users_backup.json")
         };
@@ -137,15 +132,6 @@ namespace CryptoSense.Application.Services
                                                 LastLoginAt = bu.LastLoginAt == default ? DateTime.UtcNow : bu.LastLoginAt
                                             };
                                             _unitOfWork.Users.AddAsync(toAdd).GetAwaiter().GetResult();
-                                        }
-                                        else
-                                        {
-                                            existing.IsActive = bu.IsActive;
-                                            if (!string.IsNullOrEmpty(bu.PasswordHash) && existing.PasswordHash != bu.PasswordHash)
-                                            {
-                                                existing.PasswordHash = bu.PasswordHash;
-                                            }
-                                            _unitOfWork.Users.UpdateAsync(existing).GetAwaiter().GetResult();
                                         }
                                     }
                                 }
@@ -296,6 +282,7 @@ namespace CryptoSense.Application.Services
                 user.IsLoggedIn = false;
                 user.TelegramChatId = "";
                 user.TelegramUserId = null;
+                user.IsActive = false;
                 await _unitOfWork.Users.UpdateAsync(user);
                 await _unitOfWork.SaveChangesAsync();
                 SaveBackupUsers();
@@ -308,6 +295,9 @@ namespace CryptoSense.Application.Services
             if (user != null)
             {
                 user.IsLoggedIn = false;
+                user.TelegramChatId = "";
+                user.TelegramUserId = null;
+                user.IsActive = false;
                 await _unitOfWork.Users.UpdateAsync(user);
                 await _unitOfWork.SaveChangesAsync();
                 SaveBackupUsers();
