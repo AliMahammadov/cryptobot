@@ -552,5 +552,35 @@ namespace CryptoSense.Infrastructure.Persistence.Repositories
             }
             return orphans.Count;
         }
+
+        public async Task<DateTime?> GetLastDeliveredSignalTimeUtcAsync(string chatId)
+        {
+            var deliveredSignalIds = await _context.UserSignalDeliveries
+                .Where(d => d.TelegramChatId == chatId)
+                .Select(d => d.SignalId)
+                .ToListAsync();
+
+            if (deliveredSignalIds.Count > 0)
+            {
+                var dt = await _context.Signals
+                    .Where(s => deliveredSignalIds.Contains(s.Id) && s.SignalAlertSent && s.SignalNumber > 0 && !s.Symbol.StartsWith("TESTCOIN"))
+                    .OrderByDescending(s => s.GeneratedAt)
+                    .Select(s => (DateTime?)s.GeneratedAt)
+                    .FirstOrDefaultAsync();
+
+                if (dt.HasValue) return dt;
+            }
+
+            if (chatId == "1219998176" || (!string.IsNullOrEmpty(TelegramBotService.SuperAdminChatId) && chatId == TelegramBotService.SuperAdminChatId))
+            {
+                return await _context.Signals
+                    .Where(s => s.SignalAlertSent && s.SignalNumber > 0 && !s.Symbol.StartsWith("TESTCOIN"))
+                    .OrderByDescending(s => s.GeneratedAt)
+                    .Select(s => (DateTime?)s.GeneratedAt)
+                    .FirstOrDefaultAsync();
+            }
+
+            return null;
+        }
     }
 }

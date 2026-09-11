@@ -32,8 +32,8 @@ namespace CryptoSense.Application.DTOs
         public long? LastAdminMessageId { get; set; }
         public bool IsAdminOpen { get; set; } = false;
         public System.DateTime LastResumeTime { get; set; } = System.DateTime.UtcNow;
-        public System.DateTime LastSignalSentUtc { get; set; } = System.DateTime.UtcNow;
-        public System.DateTime LastHeartbeatSentUtc { get; set; } = System.DateTime.UtcNow;
+        public System.DateTime LastSignalSentUtc { get; set; } = default;
+        public System.DateTime LastHeartbeatSentUtc { get; set; } = default;
         public long? LastHeartbeatMessageId { get; set; }
         public long? LastPortfolioSummaryMessageId { get; set; }
         public string Username { get; set; } = "";

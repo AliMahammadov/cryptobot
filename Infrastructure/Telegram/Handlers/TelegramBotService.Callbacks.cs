@@ -46,7 +46,8 @@ namespace CryptoSense.Infrastructure.Telegram
                 }
 
                 var activeCount = await unitOfWork.Signals.GetActiveSignalsCountAsync();
-                var lastTime = userSettings.LastSignalSentUtc == default ? "" : Domain.Common.TimeHelper.FormatAz(userSettings.LastSignalSentUtc);
+                var lastDeliveredUtc = await unitOfWork.Signals.GetLastDeliveredSignalTimeUtcAsync(chatId);
+                var lastTime = lastDeliveredUtc.HasValue ? Domain.Common.TimeHelper.FormatAz(lastDeliveredUtc.Value) : "";
                 var dashText = TelegramMessageFormatter.FormatTerminalDashboard(userSettings, activeCount, lastTime);
                 var inlineKb = TelegramKeyboards.BuildTerminalInlineKeyboard(userSettings, _testModeChats.ContainsKey(chatId), isCallerAdmin);
 
@@ -72,7 +73,8 @@ namespace CryptoSense.Infrastructure.Telegram
             else if (data == "cb_refresh")
             {
                 var activeCount = await unitOfWork.Signals.GetActiveSignalsCountAsync();
-                var lastTime = userSettings.LastSignalSentUtc == default ? "" : Domain.Common.TimeHelper.FormatAz(userSettings.LastSignalSentUtc);
+                var lastDeliveredUtc = await unitOfWork.Signals.GetLastDeliveredSignalTimeUtcAsync(chatId);
+                var lastTime = lastDeliveredUtc.HasValue ? Domain.Common.TimeHelper.FormatAz(lastDeliveredUtc.Value) : "";
                 var dashText = TelegramMessageFormatter.FormatTerminalDashboard(userSettings, activeCount, lastTime);
                 var inlineKb = TelegramKeyboards.BuildTerminalInlineKeyboard(userSettings, _testModeChats.ContainsKey(chatId), isCallerAdmin);
                 bool edited = await EditMessageTextAsync(chatId, messageId, dashText, inlineKb);
@@ -105,7 +107,8 @@ namespace CryptoSense.Infrastructure.Telegram
                 userSettings.IsActive = !userSettings.IsActive;
                 SaveSettings();
                 var activeCount = await unitOfWork.Signals.GetActiveSignalsCountAsync();
-                var lastTime = userSettings.LastSignalSentUtc == default ? "" : Domain.Common.TimeHelper.FormatAz(userSettings.LastSignalSentUtc);
+                var lastDeliveredUtc = await unitOfWork.Signals.GetLastDeliveredSignalTimeUtcAsync(chatId);
+                var lastTime = lastDeliveredUtc.HasValue ? Domain.Common.TimeHelper.FormatAz(lastDeliveredUtc.Value) : "";
                 var dashText = TelegramMessageFormatter.FormatTerminalDashboard(userSettings, activeCount, lastTime);
                 var inlineKb = TelegramKeyboards.BuildTerminalInlineKeyboard(userSettings, _testModeChats.ContainsKey(chatId), isCallerAdmin);
                 bool edited = await EditMessageTextAsync(chatId, messageId, dashText, inlineKb);
@@ -124,7 +127,8 @@ namespace CryptoSense.Infrastructure.Telegram
                 {
                     _testModeChats[chatId] = true;
                     var activeCount = await unitOfWork.Signals.GetActiveSignalsCountAsync();
-                    var lastTime = userSettings.LastSignalSentUtc == default ? "" : Domain.Common.TimeHelper.FormatAz(userSettings.LastSignalSentUtc);
+                    var lastDeliveredUtc = await unitOfWork.Signals.GetLastDeliveredSignalTimeUtcAsync(chatId);
+                    var lastTime = lastDeliveredUtc.HasValue ? Domain.Common.TimeHelper.FormatAz(lastDeliveredUtc.Value) : "";
                     var dashText = TelegramMessageFormatter.FormatTerminalDashboard(userSettings, activeCount, lastTime);
                     await EditMessageTextAsync(chatId, messageId, dashText, TelegramKeyboards.BuildTerminalInlineKeyboard(userSettings, isTestMode: true, isAdmin: true));
 
@@ -139,7 +143,8 @@ namespace CryptoSense.Infrastructure.Telegram
                 {
                     _testModeChats.TryRemove(chatId, out _);
                     var activeCount = await unitOfWork.Signals.GetActiveSignalsCountAsync();
-                    var lastTime = userSettings.LastSignalSentUtc == default ? "" : Domain.Common.TimeHelper.FormatAz(userSettings.LastSignalSentUtc);
+                    var lastDeliveredUtc = await unitOfWork.Signals.GetLastDeliveredSignalTimeUtcAsync(chatId);
+                    var lastTime = lastDeliveredUtc.HasValue ? Domain.Common.TimeHelper.FormatAz(lastDeliveredUtc.Value) : "";
                     var dashText = TelegramMessageFormatter.FormatTerminalDashboard(userSettings, activeCount, lastTime);
                     await EditMessageTextAsync(chatId, messageId, dashText, TelegramKeyboards.BuildTerminalInlineKeyboard(userSettings, isTestMode: false, isAdmin: true));
 
@@ -289,7 +294,8 @@ namespace CryptoSense.Infrastructure.Telegram
             else if (data == "cb_status")
             {
                 var activeCount = await unitOfWork.Signals.GetActiveSignalsCountAsync();
-                var lastTime = userSettings.LastSignalSentUtc == default ? "" : Domain.Common.TimeHelper.FormatAz(userSettings.LastSignalSentUtc);
+                var lastDeliveredUtc = await unitOfWork.Signals.GetLastDeliveredSignalTimeUtcAsync(chatId);
+                var lastTime = lastDeliveredUtc.HasValue ? Domain.Common.TimeHelper.FormatAz(lastDeliveredUtc.Value) : "";
                 var statusMsg = TelegramMessageFormatter.FormatBotStatus(userSettings, activeCount, lastTime);
                 if (_testModeChats.ContainsKey(chatId))
                 {

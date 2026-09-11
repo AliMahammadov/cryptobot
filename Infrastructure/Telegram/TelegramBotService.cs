@@ -265,22 +265,29 @@ namespace CryptoSense.Infrastructure.Telegram
                 return false;
             }
 
+            // SuperAdmin is ALWAYS authorized to receive alerts & heartbeat
+            if (chatId == "1219998176" || (!string.IsNullOrEmpty(SuperAdminChatId) && chatId == SuperAdminChatId))
+            {
+                return true;
+            }
+
             try
             {
                 using var scope = _serviceProvider.CreateScope();
                 var uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
                 var user = await uow.Users.GetByChatIdOrTelegramUserIdAsync(chatId, null);
 
-                if (user == null || !user.IsActive || !user.IsLoggedIn || user.TelegramChatId != chatId)
+                if (user != null)
                 {
-                    return false;
+                    return user.IsActive;
                 }
 
-                return true;
+                // If user doesn't have a record in Users table, check active state in UserPreferences
+                return pref != null && pref.IsActive;
             }
             catch
             {
-                return false;
+                return pref != null && pref.IsActive;
             }
         }
 
@@ -939,7 +946,6 @@ namespace CryptoSense.Infrastructure.Telegram
 
                 var msg = TelegramMessageFormatter.FormatOutcomeAlert(signal, userSigNum, outcomeType, hitPrice, profitPct);
                 await SendMessageAsync(msg, chatId);
-                settings.LastSignalSentUtc = DateTime.UtcNow;
                 settings.LastHeartbeatSentUtc = DateTime.UtcNow;
                 SaveSettings();
             }

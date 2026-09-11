@@ -48,7 +48,6 @@ namespace CryptoSense.Worker
         private static readonly ConcurrentDictionary<string, DateTime> _lastVolatilityAlertSent = new();
         private static readonly ConcurrentDictionary<string, DateTime> _lastSymbolAlertTime = new();
         private static readonly object _heartbeatLock = new();
-        private static bool _initialHeartbeatSent = false;
         private static readonly SemaphoreSlim _signalDispatchLock = new(1, 1);
         private static string _lastDailyReportDateBaku = "";
 
@@ -185,7 +184,6 @@ namespace CryptoSense.Worker
                 foreach (var pref in TelegramBotService.UserPreferences.Values)
                 {
                     pref.LastHeartbeatSentUtc = DateTime.UtcNow.AddMinutes(-31);
-                    pref.LastSignalSentUtc = DateTime.UtcNow.AddMinutes(-31);
                 }
                 TelegramBotService.SaveSettings();
             }
@@ -1578,6 +1576,7 @@ namespace CryptoSense.Worker
             }
 
             // 1) Anti-Spam Heartbeat (Minimum once per 30 minutes per chat with lock, real reason, persisted LastHeartbeatSentUtc)
+            // 1) Anti-Spam Heartbeat (Mütləq 30 dəqiqə sükut olduqda aktiv istifadəçiyə YENİ ℹ️ Heartbeat)
             var nowUtc = DateTime.UtcNow;
             foreach (var kvp in TelegramBotService.UserPreferences)
             {
@@ -1585,59 +1584,31 @@ namespace CryptoSense.Worker
                 var s = kvp.Value;
                 if (!s.IsActive) continue;
 
-                // BUG 6 & BUG 2: Skip logged-out users strictly via database & session gate
                 if (!await _telegramService.CanReceivePushAsync(chatId)) continue;
 
-                if (_initialHeartbeatSent)
+                var lastDeliveredUtc = await unitOfWork.Signals.GetLastDeliveredSignalTimeUtcAsync(chatId);
+                var minutesSinceSignal = lastDeliveredUtc.HasValue 
+                    ? (nowUtc - lastDeliveredUtc.Value).TotalMinutes 
+                    : 99999;
+
+                var minutesSinceHeartbeat = s.LastHeartbeatSentUtc == default 
+                    ? 99999 
+                    : (nowUtc - s.LastHeartbeatSentUtc).TotalMinutes;
+
+                // Son 30 dəqiqədə real siqnal kartı göndərilibsə və ya son 30 dəqiqədə artıq heartbeat göndərilibsə → gözlə
+                if (minutesSinceSignal < 30 || minutesSinceHeartbeat < 30)
                 {
-                    if (s.LastHeartbeatSentUtc == default)
-                    {
-                        s.LastHeartbeatSentUtc = nowUtc;
-                        TelegramBotService.SaveSettings();
-                        continue;
-                    }
-
-                    var minutesSinceSignal = (nowUtc - s.LastSignalSentUtc).TotalMinutes;
-                    var minutesSinceHeartbeat = (nowUtc - s.LastHeartbeatSentUtc).TotalMinutes;
-
-                    // Son 30 dəq-də siqnal gedibsə heartbeat yox.
-                    // 30 dəq dolmayıbsa İKİNCİ yox.
-                    if (minutesSinceSignal < 30 || minutesSinceHeartbeat < 30)
-                    {
-                        continue;
-                    }
-
-                    // DB-də son 30 dəq-də hər hansı siqnal və ya nəticə (TP/SL/BE) varsa heartbeat YOX
-                    try
-                    {
-                        var recentSignals = await unitOfWork.Signals.GetRecentSignalsAsync(10);
-                        bool hasRecentActivityIn30m = recentSignals.Any(sig =>
-                            (sig.ClosedAt.HasValue && (nowUtc - sig.ClosedAt.Value).TotalMinutes < 30) ||
-                            (sig.GeneratedAt != default && (nowUtc - sig.GeneratedAt).TotalMinutes < 30 && sig.SignalAlertSent));
-                        if (hasRecentActivityIn30m)
-                        {
-                            continue;
-                        }
-                    }
-                    catch (Exception _ex) { Console.WriteLine($"[BackgroundMarketScanner] Swallowed exception: {_ex.Message}"); }
-
-                    lock (_heartbeatLock)
-                    {
-                        if ((DateTime.UtcNow - s.LastHeartbeatSentUtc).TotalMinutes < 30)
-                        {
-                            continue;
-                        }
-                        s.LastHeartbeatSentUtc = DateTime.UtcNow;
-                        TelegramBotService.SaveSettings();
-                    }
+                    continue;
                 }
-                else
+
+                lock (_heartbeatLock)
                 {
-                    lock (_heartbeatLock)
+                    if (s.LastHeartbeatSentUtc != default && (DateTime.UtcNow - s.LastHeartbeatSentUtc).TotalMinutes < 30)
                     {
-                        s.LastHeartbeatSentUtc = DateTime.UtcNow;
-                        TelegramBotService.SaveSettings();
+                        continue;
                     }
+                    s.LastHeartbeatSentUtc = DateTime.UtcNow;
+                    TelegramBotService.SaveSettings();
                 }
 
                 var snapTelemetry = LatestTelemetrySnapshot ?? new ScanTelemetry();
@@ -1675,7 +1646,6 @@ namespace CryptoSense.Worker
                     TelegramBotService.SaveSettings();
                 }
             }
-            _initialHeartbeatSent = true;
 
             // QIZIL QAYDA: Gündəlik hesabat (Günün sonu - Bakı vaxtı ilə 00:00 - 00:30 pəncərəsi)
             var bakuNow = DateTime.UtcNow.AddHours(4);

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
@@ -643,9 +643,10 @@ namespace CryptoSense.Infrastructure.Telegram
 
                 var unitOfWork = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
                 var openCount = await unitOfWork.Signals.GetActiveSignalsCountAsync();
-                var lastTime = userSettings.LastSignalSentUtc == default 
-                    ? "" 
-                    : Domain.Common.TimeHelper.FormatAz(userSettings.LastSignalSentUtc);
+                var lastDeliveredUtc = await unitOfWork.Signals.GetLastDeliveredSignalTimeUtcAsync(chatId);
+                var lastTime = lastDeliveredUtc.HasValue 
+                    ? Domain.Common.TimeHelper.FormatAz(lastDeliveredUtc.Value) 
+                    : "";
 
                 var dashText = TelegramMessageFormatter.FormatTerminalDashboard(userSettings, openCount, lastTime);
                 var inlineKb = TelegramKeyboards.BuildTerminalInlineKeyboard(userSettings, _testModeChats.ContainsKey(chatId), isAdmin);
@@ -705,7 +706,8 @@ namespace CryptoSense.Infrastructure.Telegram
                 _userStates.TryRemove(chatId, out _);
                 var unitOfWork = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
                 var openCount = await unitOfWork.Signals.GetActiveSignalsCountAsync();
-                var lastTime = userSettings.LastSignalSentUtc == default ? "" : Domain.Common.TimeHelper.FormatAz(userSettings.LastSignalSentUtc);
+                var lastDeliveredUtc = await unitOfWork.Signals.GetLastDeliveredSignalTimeUtcAsync(chatId);
+                var lastTime = lastDeliveredUtc.HasValue ? Domain.Common.TimeHelper.FormatAz(lastDeliveredUtc.Value) : "";
                 var dashText = TelegramMessageFormatter.FormatTerminalDashboard(userSettings, openCount, lastTime);
                 await SendMessageAsync(dashText, chatId, TelegramKeyboards.BuildTerminalInlineKeyboard(userSettings, _testModeChats.ContainsKey(chatId), isAdmin));
                 _ = BuildAndSendPortfolioSummaryAsync(chatId, userSettings, forceRefresh: false);
@@ -1347,9 +1349,10 @@ namespace CryptoSense.Infrastructure.Telegram
                 }
                 catch { }
 
-                string? lastTime = userSettings.LastSignalSentUtc == default 
-                    ? null 
-                    : CryptoSense.Domain.Common.TimeHelper.FormatAz(userSettings.LastSignalSentUtc);
+                var lastDeliveredUtc = await uow.Signals.GetLastDeliveredSignalTimeUtcAsync(chatId);
+                string? lastTime = lastDeliveredUtc.HasValue 
+                    ? Domain.Common.TimeHelper.FormatAz(lastDeliveredUtc.Value) 
+                    : null;
                 var statusMsg = TelegramMessageFormatter.FormatBotStatus(userSettings, openCount, lastTime);
                 await SendMessageAsync(statusMsg, chatId, TelegramKeyboards.BuildUserKeyboard(userSettings, isAdmin));
                 return;
@@ -1375,9 +1378,10 @@ namespace CryptoSense.Infrastructure.Telegram
 
                 var unitOfWork = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
                 var openCount = await unitOfWork.Signals.GetActiveSignalsCountAsync();
-                var lastTime = userSettings.LastSignalSentUtc == default 
-                    ? "" 
-                    : Domain.Common.TimeHelper.FormatAz(userSettings.LastSignalSentUtc);
+                var lastDeliveredUtc = await unitOfWork.Signals.GetLastDeliveredSignalTimeUtcAsync(chatId);
+                var lastTime = lastDeliveredUtc.HasValue 
+                    ? Domain.Common.TimeHelper.FormatAz(lastDeliveredUtc.Value) 
+                    : "";
 
                 var dashText = TelegramMessageFormatter.FormatTerminalDashboard(userSettings, openCount, lastTime);
                 var inlineKb = TelegramKeyboards.BuildTerminalInlineKeyboard(userSettings, _testModeChats.ContainsKey(chatId), isAdmin);
@@ -1483,7 +1487,8 @@ namespace CryptoSense.Infrastructure.Telegram
             {
                 var unitOfWork = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
                 var openCount = await unitOfWork.Signals.GetActiveSignalsCountAsync();
-                var lastTime = userSettings.LastSignalSentUtc == default ? "" : Domain.Common.TimeHelper.FormatAz(userSettings.LastSignalSentUtc);
+                var lastDeliveredUtc = await unitOfWork.Signals.GetLastDeliveredSignalTimeUtcAsync(chatId);
+                var lastTime = lastDeliveredUtc.HasValue ? Domain.Common.TimeHelper.FormatAz(lastDeliveredUtc.Value) : "";
                 var dashText = TelegramMessageFormatter.FormatTerminalDashboard(userSettings, openCount, lastTime);
                 await SendMessageAsync(dashText, chatId, TelegramKeyboards.BuildTerminalInlineKeyboard(userSettings, _testModeChats.ContainsKey(chatId), isAdmin));
                 return;
