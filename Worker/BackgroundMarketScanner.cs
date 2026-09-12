@@ -901,7 +901,10 @@ namespace CryptoSense.Worker
 
                 if (sig.IsClosed)
                 {
-                    if (sig.Status == SignalStatus.Failed)
+                    // Yalnız real Stop Loss streak-i breaker-ə düşür.
+                    // TIME / NO_EDGE / BE / ALERT_NEVER_SENT Failed sayılsa belə breaker-ə GETMƏSİN.
+                    bool isHardStopLoss = sig.CloseReason == "SL" || sig.CloseReason == "SL_RESTART_CATCHUP";
+                    if (sig.Status == SignalStatus.Failed && isHardStopLoss)
                     {
                         int losses = Interlocked.Increment(ref _consecutiveLosses);
                         if (losses >= 3)
@@ -1022,14 +1025,30 @@ namespace CryptoSense.Worker
                 ? (sig.TakeProfit1 > 0 && currentLast >= (sig.TakeProfit1 - (5 * tickSize)))
                 : (sig.TakeProfit1 > 0 && currentLast <= (sig.TakeProfit1 + (5 * tickSize)));
 
-            bool isPositiveR = grossPnl > 0;
-
-            bool canTriggerNoEdge = sig.CandlesObserved >= requiredNoEdgeCandles
-                                 && sig.MfePercent < (0.4m * riskRPct)
-                                 && !sig.Tp1Notified
-                                 && !sig.IsPartial1Closed
-                                 && !isNearTpA
-                                 && !isPositiveR;
+            bool canTriggerNoEdge;
+            if (sig.Timeframe == "1h")
+            {
+                decimal hoursOpen = (decimal)(DateTime.UtcNow - sig.GeneratedAt).TotalHours;
+                decimal absMove = sig.EntryPrice > 0 ? (Math.Abs(currentLast - sig.EntryPrice) / sig.EntryPrice) : 1m;
+                canTriggerNoEdge = !sig.Tp1Notified
+                                && !sig.OutcomeAlertSent
+                                && !sig.IsClosed
+                                && sig.EntryPrice > 0
+                                && sig.InitialRiskR > 0
+                                && hoursOpen >= 3.0m
+                                && sig.MfePercent < (0.40m * riskRPct)
+                                && absMove <= 0.0035m;
+            }
+            else
+            {
+                bool isPositiveR = grossPnl > 0;
+                canTriggerNoEdge = sig.CandlesObserved >= requiredNoEdgeCandles
+                                && sig.MfePercent < (0.4m * riskRPct)
+                                && !sig.Tp1Notified
+                                && !sig.IsPartial1Closed
+                                && !isNearTpA
+                                && !isPositiveR;
+            }
 
             if (canTriggerNoEdge)
             {
@@ -1037,14 +1056,22 @@ namespace CryptoSense.Worker
                 sig.IsClosed = true;
                 sig.ClosePrice = exitPrice;
                 sig.ClosedAt = DateTime.UtcNow;
-                sig.Status = SignalStatus.Neutral;
+                sig.ResultPercent = Math.Round(netPnl, 2);
+                if (Math.Abs(netPnl) <= 0.20m)
+                {
+                    sig.Status = SignalStatus.Neutral;
+                    sig.OutcomeStatus = $"{sig.Timeframe} Hərəkətsiz (NO_EDGE Neytral: {netPnl}%) ⚪";
+                }
+                else
+                {
+                    sig.Status = SignalStatus.Failed;
+                    sig.OutcomeStatus = $"{sig.Timeframe} Hərəkətsiz (NO_EDGE Donma çıxışı: {netPnl}%) ❌";
+                }
                 sig.CloseReason = "NO_EDGE";
-                sig.ResultPercent = netPnl;
-                sig.OutcomeStatus = $"{sig.Timeframe} {requiredNoEdgeCandles} Şam Hərəkətsiz (NO_EDGE) ⚪";
 
                 await unitOfWork.Signals.UpdateAsync(sig);
                 await unitOfWork.SaveChangesAsync(stoppingToken);
-                if (sig.SignalAlertSent) await _telegramService.SendOutcomeAlertAsync(sig, $"NO_EDGE ({requiredNoEdgeCandles} Şam Ərzində Hərəkətsiz)", exitPrice, netPnl);
+                if (sig.SignalAlertSent) await _telegramService.SendOutcomeAlertAsync(sig, "NO_EDGE (Donma çıxışı)", exitPrice, netPnl);
                 return;
             }
 

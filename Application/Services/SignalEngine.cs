@@ -752,7 +752,8 @@ namespace CryptoSense.Application.Services
                 "1m" => 25m,
                 "3m" => 20m,
                 "5m" => 18m,
-                _ => 16m
+                "4h" => CryptoSense.Domain.Common.BotConstants.Thresholds.MinAdx4h, // 16 QALSIN
+                _    => CryptoSense.Domain.Common.BotConstants.Thresholds.MinAdx1h  // 22
             };
             bool hasValidMarketRegime = indicators.Adx >= minAdxRequired;
 
@@ -843,6 +844,55 @@ namespace CryptoSense.Application.Services
                     }
                 }
                 catch (Exception _ex) { Console.WriteLine($"[SignalEngine] Swallowed exception: {_ex.Message}"); }
+            }
+
+            // --- ADDITIVE GATE A: BTC 1h Ranging → 1h alt trend yoxdur ---
+            if (isLiveScan
+                && timeframe == "1h"
+                && isAltcoin
+                && (determinedType.Contains("LONG") || determinedType.Contains("SHORT"))
+                && btcCompass.Regime == BtcMarketRegime.Ranging)
+            {
+                determinedType = "GÖZLƏMƏ ⚪";  // mövcud waiting label-i istifadə et, yeni enum YOX
+                confidence = 50;
+                reasons.Add("SKIP_BTC_RANGE: BTC 1h kompası Ranging — 1h alt siqnalı bloklandı");
+            }
+
+            // --- ADDITIVE GATE B: BTC 4h güclü əks istiqamət ---
+            if (isLiveScan
+                && timeframe == "1h"
+                && isAltcoin
+                && (determinedType.Contains("LONG") || determinedType.Contains("SHORT")))
+            {
+                try
+                {
+                    var btc4hK = await _marketData.GetKlinesAsync("BTCUSDT", "4h", 40);
+                    if (btc4hK.Count >= 20)
+                    {
+                        var closedBtc4h = btc4hK.Count >= 2 ? btc4hK.Take(btc4hK.Count - 1).ToList() : btc4hK;
+                        var indBtc4h = _indicatorEngine.CalculateIndicators(closedBtc4h);
+                        bool btc4hStrongShort =
+                            indBtc4h.SuperTrendVote == IndicatorVote.Bearish &&
+                            (indBtc4h.ConfluenceScore <= 40m || (indBtc4h.Ema20 < indBtc4h.Ema50 && closedBtc4h.Last().Close < indBtc4h.Ema50));
+                        bool btc4hStrongLong =
+                            indBtc4h.SuperTrendVote == IndicatorVote.Bullish &&
+                            (indBtc4h.ConfluenceScore >= 60m || (indBtc4h.Ema20 > indBtc4h.Ema50 && closedBtc4h.Last().Close > indBtc4h.Ema50));
+
+                        if (determinedType.Contains("LONG") && btc4hStrongShort)
+                        {
+                            determinedType = "GÖZLƏMƏ ⚪";
+                            confidence = 50;
+                            reasons.Add("SKIP_BTC_4H_OPPOSE: BTC 4h güclü SHORT — 1h alt LONG bloklandı");
+                        }
+                        else if (determinedType.Contains("SHORT") && btc4hStrongLong)
+                        {
+                            determinedType = "GÖZLƏMƏ ⚪";
+                            confidence = 50;
+                            reasons.Add("SKIP_BTC_4H_OPPOSE: BTC 4h güclü LONG — 1h alt SHORT bloklandı");
+                        }
+                    }
+                }
+                catch (Exception _ex) { Console.WriteLine($"[SignalEngine] BTC4h gate swallowed: {_ex.Message}"); }
             }
 
             decimal directionalConfluence = direction == SignalDirection.Sell 

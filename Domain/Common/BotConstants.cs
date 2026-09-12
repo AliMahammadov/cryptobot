@@ -1,4 +1,4 @@
-﻿namespace CryptoSense.Domain.Common
+namespace CryptoSense.Domain.Common
 {
     /// <summary>
     /// Central constants eliminating magic strings across the codebase.
@@ -63,6 +63,10 @@
             public const int     HeartbeatIntervalMinutes = 30;
             /// <summary>ATR multiplier for stop-loss</summary>
             public const decimal AtrMultiplierSl          = 1.50m;
+            /// <summary>Min ADX for 1h signals</summary>
+            public const decimal MinAdx1h                 = 22m;
+            /// <summary>Min ADX for 4h signals</summary>
+            public const decimal MinAdx4h                 = 16m;
         }
 
         // Super Admin identifiers — never hardcode inline
