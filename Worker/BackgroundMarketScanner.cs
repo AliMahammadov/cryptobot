@@ -259,6 +259,7 @@ namespace CryptoSense.Worker
             var marketData = scope.ServiceProvider.GetRequiredService<IMarketDataProvider>();
             var unitOfWork = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
             var indicatorEngine = scope.ServiceProvider.GetRequiredService<IIndicatorEngine>();
+            var signalEngine = scope.ServiceProvider.GetRequiredService<ISignalEngine>();
 
             var activeSignals = await unitOfWork.Signals.GetOpenTrackedSignalsAsync();
 
@@ -300,27 +301,24 @@ namespace CryptoSense.Worker
                 var snap = _livePriceCache.GetSnapshot(sig.Symbol);
                 var nowUtc = DateTime.UtcNow;
 
-                // 3s loop safety: WS down -> GetLastAggTrade only for 1-3 open symbols, interval >= 2s, log REST_FALLBACK
+                // DataAge > 3500: REST last götür, skip etmə — SL buraxılmasın
                 if (snap == null || snap.DataAgeMs > 3500)
                 {
-                    if (!_lastRestFallbackTime.TryGetValue(sig.Symbol, out var lastFallback) || (nowUtc - lastFallback).TotalMilliseconds >= 2000)
+                    _lastRestFallbackTime[sig.Symbol] = nowUtc;
+                    try
                     {
-                        _lastRestFallbackTime[sig.Symbol] = nowUtc;
-                        try
+                        var lastAgg = await marketData.GetLastAggTradeAsync(sig.Symbol);
+                        if (lastAgg.HasValue)
                         {
-                            var lastAgg = await marketData.GetLastAggTradeAsync(sig.Symbol);
-                            if (lastAgg.HasValue)
-                            {
-                                var age = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() - lastAgg.Value.ExchangeTsMs;
-                                Console.WriteLine($"[REST_FALLBACK] {sig.Symbol} {lastAgg.Value.Price} age={age}ms");
-                                _livePriceCache.UpdateFromAggTrade(sig.Symbol, lastAgg.Value.Price, lastAgg.Value.ExchangeTsMs, isRestFallback: true);
-                                snap = _livePriceCache.GetSnapshot(sig.Symbol);
-                            }
+                            var age = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() - lastAgg.Value.ExchangeTsMs;
+                            Console.WriteLine($"[REST_FALLBACK] {sig.Symbol} {lastAgg.Value.Price} age={age}ms");
+                            _livePriceCache.UpdateFromAggTrade(sig.Symbol, lastAgg.Value.Price, lastAgg.Value.ExchangeTsMs, isRestFallback: true);
+                            snap = _livePriceCache.GetSnapshot(sig.Symbol);
                         }
-                        catch (Exception ex)
-                        {
-                            Console.WriteLine($"[OutcomeTracker] REST_FALLBACK error for {sig.Symbol}: {ex.Message}");
-                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"[OutcomeTracker] REST_FALLBACK error for {sig.Symbol}: {ex.Message}");
                     }
                 }
 
@@ -329,7 +327,7 @@ namespace CryptoSense.Worker
                 await ProcessSignalOutcomeAsync(sig, snap, unitOfWork, stoppingToken);
                 if (!sig.IsClosed && !sig.OutcomeAlertSent)
                 {
-                    await CheckCandleInvalidationAndTrailingAsync(sig, marketData, indicatorEngine, unitOfWork, snap.Last, stoppingToken);
+                    await CheckCandleInvalidationAndTrailingAsync(sig, marketData, indicatorEngine, unitOfWork, signalEngine, snap.Last, stoppingToken);
                 }
             }
         }
@@ -621,7 +619,7 @@ namespace CryptoSense.Worker
                         }
                     }
                     // 3. Long Breakeven Hit (YALNIZ TP1-dən sonra qalan 50% BE stopuna dəyərsə)
-                    else if (sig.Tp1Notified && !sig.OutcomeAlertSent && snap.Last <= sig.StopLoss)
+                    else if (sig.Tp1Notified && !sig.OutcomeAlertSent && !sig.IsClosed && (snap.Last <= sig.StopLoss || snap.SessionLow <= sig.StopLoss))
                     {
                         sig.OutcomeAlertSent = true;
                         sig.IsClosed = true;
@@ -651,7 +649,7 @@ namespace CryptoSense.Worker
                         }
                     }
                     // 4. Long Initial Stop Loss Hit (TP1 vurulmadan əvvəl)
-                    else if (!sig.Tp1Notified && !sig.OutcomeAlertSent && (snap.SessionLow <= sig.StopLoss || snap.Last <= sig.StopLoss))
+                    else if (!sig.Tp1Notified && !sig.OutcomeAlertSent && !sig.IsClosed && (snap.SessionLow <= sig.StopLoss || snap.Last <= sig.StopLoss))
                     {
                         sig.OutcomeAlertSent = true;
                         sig.IsClosed = true;
@@ -798,7 +796,7 @@ namespace CryptoSense.Worker
                         }
                     }
                     // 3. Short Breakeven Hit (YALNIZ TP1-dən sonra qalan 50% BE stopuna dəyərsə)
-                    else if (sig.Tp1Notified && !sig.OutcomeAlertSent && snap.Last >= sig.StopLoss)
+                    else if (sig.Tp1Notified && !sig.OutcomeAlertSent && !sig.IsClosed && (snap.Last >= sig.StopLoss || snap.SessionHigh >= sig.StopLoss))
                     {
                         sig.OutcomeAlertSent = true;
                         sig.IsClosed = true;
@@ -828,7 +826,7 @@ namespace CryptoSense.Worker
                         }
                     }
                     // 4. Short Initial Stop Loss Hit (TP1 vurulmadan əvvəl)
-                    else if (!sig.Tp1Notified && !sig.OutcomeAlertSent && (snap.SessionHigh >= sig.StopLoss || snap.Last >= sig.StopLoss))
+                    else if (!sig.Tp1Notified && !sig.OutcomeAlertSent && !sig.IsClosed && (snap.SessionHigh >= sig.StopLoss || snap.Last >= sig.StopLoss))
                     {
                         sig.OutcomeAlertSent = true;
                         sig.IsClosed = true;
@@ -907,10 +905,9 @@ namespace CryptoSense.Worker
                     if (sig.Status == SignalStatus.Failed && isHardStopLoss)
                     {
                         int losses = Interlocked.Increment(ref _consecutiveLosses);
-                        if (losses >= 3)
+                        if (losses >= 2)
                         {
-                            _circuitBreakerUntil = DateTime.UtcNow.AddHours(2);
-                            Interlocked.Exchange(ref _consecutiveLosses, 0);
+                            _circuitBreakerUntil = DateTime.UtcNow.AddHours(4);
 
                             if ((DateTime.UtcNow - _lastCircuitBreakerAlertSent).TotalMinutes >= 60)
                             {
@@ -920,14 +917,14 @@ namespace CryptoSense.Worker
                                     try
                                     {
                                         await _telegramService.BroadcastSystemAlertAsync("⚠️ <b>RISK CIRCUIT BREAKER AKTİVLƏŞDİ:</b>\n\n" +
-                                            "Ardıcıl 3 uğursuz əməliyyat (Stop Loss) qeydə alındı. Bazar skaneri kapitalı qorumaq üçün <b>2 saatlıq</b> müşahidə rejiminə keçdi.");
+                                            "Ardıcıl 2 uğursuz əməliyyat (Stop Loss) qeydə alındı. Bazar skaneri kapitalı qorumaq üçün <b>4 saatlıq</b> müşahidə rejiminə keçdi.");
                                     }
                                     catch (Exception _ex) { Console.WriteLine($"[BackgroundMarketScanner] Swallowed exception: {_ex.Message}"); }
                                 });
                             }
                         }
                     }
-                    else if (sig.Status == SignalStatus.Success)
+                    else if (sig.CloseReason == "TP_B" || sig.CloseReason == "TP3")
                     {
                         Interlocked.Exchange(ref _consecutiveLosses, 0);
                     }
@@ -963,10 +960,50 @@ namespace CryptoSense.Worker
             IMarketDataProvider marketData,
             IIndicatorEngine indicatorEngine,
             IUnitOfWork unitOfWork,
+            ISignalEngine signalEngine,
             decimal currentLast,
             CancellationToken stoppingToken)
         {
             if (sig.IsClosed || sig.OutcomeAlertSent) return;
+
+            var isLong = sig.Direction == SignalDirection.Buy || sig.SignalType.Contains("LONG");
+            decimal exitPrice = currentLast;
+            decimal grossPnl = isLong
+                ? Math.Round(((exitPrice - sig.EntryPrice) / sig.EntryPrice) * 100, 2)
+                : Math.Round(((sig.EntryPrice - exitPrice) / sig.EntryPrice) * 100, 2);
+            decimal netPnl = Math.Round(grossPnl - 0.10m, 2);
+
+            // BƏND E: Alt LONG üçün BTC əks rejimi aşkarlananda dərhal çıxış (ETH daxil, BTCUSDT istisna)
+            if (isLong && !sig.Symbol.Equals("BTCUSDT", StringComparison.OrdinalIgnoreCase))
+            {
+                try
+                {
+                    var btcCompass = await signalEngine.GetBtcCompassAsync();
+                    if (btcCompass != null && btcCompass.Regime == BtcMarketRegime.Bearish && !btcCompass.IsBtc4hSuperTrendBullish)
+                    {
+                        sig.OutcomeAlertSent = true;
+                        sig.IsClosed = true;
+                        sig.ClosePrice = exitPrice;
+                        sig.ClosedAt = DateTime.UtcNow;
+                        sig.CloseReason = "INVALIDATION";
+                        sig.ResultPercent = netPnl;
+                        sig.Status = (Math.Abs(netPnl) <= 0.20m) ? SignalStatus.Neutral : SignalStatus.Failed;
+                        sig.OutcomeStatus = "BTC əks rejim (INVALIDATION) ❌";
+
+                        await unitOfWork.Signals.UpdateAsync(sig);
+                        await unitOfWork.SaveChangesAsync(stoppingToken);
+                        if (sig.SignalAlertSent)
+                        {
+                            await _telegramService.SendOutcomeAlertAsync(sig, "BTC əks — çıxış", exitPrice, netPnl);
+                        }
+                        return;
+                    }
+                }
+                catch (Exception btcEx)
+                {
+                    Console.WriteLine($"[EarlyExit] Error checking BTC compass for {sig.Symbol}: {btcEx.Message}");
+                }
+            }
 
             // Simvol başına max 1 kline / 15m throttle
             // Yalnız 15m şam qapanışında və ya ən tez 30s-dən bir yoxla
@@ -1003,13 +1040,6 @@ namespace CryptoSense.Worker
 
             sig.LastObservedCandleTime = lastCandleTime;
             sig.CandlesObserved++;
-
-            var isLong = sig.Direction == SignalDirection.Buy || sig.SignalType.Contains("LONG");
-            decimal exitPrice = currentLast;
-            decimal grossPnl = isLong
-                ? Math.Round(((exitPrice - sig.EntryPrice) / sig.EntryPrice) * 100, 2)
-                : Math.Round(((sig.EntryPrice - exitPrice) / sig.EntryPrice) * 100, 2);
-            decimal netPnl = Math.Round(grossPnl - 0.10m, 2);
 
             // NO_EDGE (ölü edge) — timeframe-nisbi: (1h: 4 şam = 4 saat) və ya (4h: 3 şam = 12 saat)
             // YALNIZ: MFE < 0.4R VƏ TP_A hit olmayıb.
@@ -1207,6 +1237,11 @@ namespace CryptoSense.Worker
             {
                 Console.WriteLine($"[SCAN_CYCLE_SKIP] CircuitBreaker aktiv, yeni skan yoxdur. cbUntil={_circuitBreakerUntil:HH:mm:ss}UTC");
                 return;
+            }
+            else if (_circuitBreakerUntil != DateTime.MinValue)
+            {
+                Interlocked.Exchange(ref _consecutiveLosses, 0);
+                _circuitBreakerUntil = DateTime.MinValue;
             }
 
             using var scope = _serviceProvider.CreateScope();
@@ -1655,6 +1690,15 @@ namespace CryptoSense.Worker
                                         break;
                                     }
 
+                                    // Check active signal in DB for symbol (HasActive)
+                                    if (await uow.Signals.HasActiveSignalForSymbolAsync(signal.Symbol))
+                                    {
+                                        _lastAlertSent[alertKey] = DateTime.UtcNow;
+                                        _lastSymbolAlertTime[signal.Symbol] = DateTime.UtcNow;
+                                        _coinActiveLocks.TryAdd(sym, 1);
+                                        break;
+                                    }
+
                                     // Check database explicitly for existing candle signal that was already delivered
                                     var existingCandle = await uow.Signals.GetExistingCandleSignalAsync(signal.Symbol, signal.Timeframe, signal.SourceCandleOpenTimeUtc);
                                     if (existingCandle != null && (existingCandle.SignalAlertSent || existingCandle.Id > 0))
@@ -1670,8 +1714,19 @@ namespace CryptoSense.Worker
                                     // Persist immediately to SQLite DB so it gets an ID before dispatching
                                     if (signal.Id == 0)
                                     {
-                                        await uow.Signals.AddAsync(signal);
-                                        await uow.SaveChangesAsync(ct);
+                                        try
+                                        {
+                                            await uow.Signals.AddAsync(signal);
+                                            await uow.SaveChangesAsync(ct);
+                                        }
+                                        catch (Exception dbEx)
+                                        {
+                                            Console.WriteLine($"[MarketScanner] Suppressed duplicate signal insert for {signal.Symbol}: {dbEx.Message}");
+                                            _lastAlertSent[alertKey] = DateTime.UtcNow;
+                                            _lastSymbolAlertTime[signal.Symbol] = DateTime.UtcNow;
+                                            _coinActiveLocks.TryAdd(sym, 1);
+                                            break;
+                                        }
                                     }
 
                                     bool ok = false;

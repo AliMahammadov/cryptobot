@@ -1147,7 +1147,7 @@ namespace CryptoSense.Infrastructure.Testing
                 }
 
                 // Sell test
-                var sellRes = SignalEngine.CalculateSrTargetsAndStops(klines, SignalDirection.Sell, basePrice, 0.03m, basePrice);
+                var sellRes = SignalEngine.CalculateSrTargetsAndStops(klines, SignalDirection.Sell, basePrice, 0.05m, basePrice);
                 if (sellRes.Success)
                 {
                     decimal tp1Dist = ((basePrice - sellRes.TakeProfit1) / basePrice) * 100m;
