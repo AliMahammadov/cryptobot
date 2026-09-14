@@ -483,8 +483,6 @@ namespace CryptoSense.Worker
             var existingCandle = await uow.Signals.GetExistingCandleSignalAsync(signal.Symbol, signal.Timeframe, signal.SourceCandleOpenTimeUtc);
             if (existingCandle != null && existingCandle.SignalAlertSent)
             {
-                lastAlertSent[alertKey] = DateTime.UtcNow;
-                coinLocks.TryAdd(sym, 1);
                 return (Success: false, ShouldBreak: true, InvalidateArmed: false);
             }
 
@@ -495,6 +493,7 @@ namespace CryptoSense.Worker
                 signal.Id = unsentDraft.Id;
                 signal.GeneratedAt = unsentDraft.GeneratedAt;
                 Console.WriteLine($"[MarketScanner] Reusing existing unsent DB signal Id={unsentDraft.Id} for {signal.Symbol} {signal.Timeframe}");
+                Console.WriteLine($"[EMIT_RETRY_ARMED] {signal.Symbol} {signal.Timeframe} candle={signal.SourceCandleOpenTimeUtc:yyyy-MM-dd HH:mm} reason=TELEGRAM_FAIL_DB_REUSE");
                 return (Success: true, ShouldBreak: false, InvalidateArmed: false);
             }
 
@@ -509,27 +508,24 @@ namespace CryptoSense.Worker
                 catch (Exception dbEx)
                 {
                     Console.WriteLine($"[MarketScanner] Duplicate signal insert collision for {signal.Symbol}: {dbEx.Message}");
-                    // Attempt recovery of unsent row
+                    
                     var recoveredUnsent = await uow.Signals.GetUnsentSignalForCandleAsync(signal.Symbol, signal.Timeframe, signal.SourceCandleOpenTimeUtc, signal.Direction);
                     if (recoveredUnsent != null)
                     {
                         signal.Id = recoveredUnsent.Id;
                         Console.WriteLine($"[MarketScanner] Recovered unsent signal Id={recoveredUnsent.Id} after collision");
+                        Console.WriteLine($"[EMIT_RETRY_ARMED] {signal.Symbol} {signal.Timeframe} candle={signal.SourceCandleOpenTimeUtc:yyyy-MM-dd HH:mm} reason=TELEGRAM_FAIL_DB_REUSE");
                         return (Success: true, ShouldBreak: false, InvalidateArmed: false);
                     }
 
-                    // Check if delivered exists
-                    var delivered = await uow.Signals.GetExistingCandleSignalAsync(signal.Symbol, signal.Timeframe, signal.SourceCandleOpenTimeUtc);
-                    if (delivered != null && delivered.SignalAlertSent)
+                    var delivered2 = await uow.Signals.GetExistingCandleSignalAsync(signal.Symbol, signal.Timeframe, signal.SourceCandleOpenTimeUtc);
+                    if (delivered2 != null && delivered2.SignalAlertSent)
                     {
-                        lastAlertSent[alertKey] = DateTime.UtcNow;
-                        coinLocks.TryAdd(sym, 1);
                         return (Success: false, ShouldBreak: true, InvalidateArmed: false);
                     }
 
-                    // QƏTİYYƏN _lastAlertSent yazma və coin lock qoyma!
                     SignalEngine.InvalidateCandleCache(signal.Symbol, signal.Timeframe, signal.SourceCandleOpenTimeUtc);
-                    Console.WriteLine($"[EMIT_RETRY_ARMED] {signal.Symbol} {signal.Timeframe} candle={signal.SourceCandleOpenTimeUtc:yyyy-MM-dd HH:mm} reason=TELEGRAM_FAIL_DB_REUSE");
+                    Console.WriteLine($"[EMIT_RETRY_ARMED] {signal.Symbol} {signal.Timeframe} candle={signal.SourceCandleOpenTimeUtc:yyyy-MM-dd HH:mm} reason=UNIQUE_COLLISION_NO_ROW");
                     return (Success: false, ShouldBreak: true, InvalidateArmed: true);
                 }
             }

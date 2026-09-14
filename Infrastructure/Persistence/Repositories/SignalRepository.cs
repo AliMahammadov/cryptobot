@@ -550,21 +550,32 @@ namespace CryptoSense.Infrastructure.Persistence.Repositories
         public async Task<int> CleanupOrphanedSignalsAsync()
         {
             var orphans = await _context.Signals
-                .Where(s => !s.IsClosed && (!s.SignalAlertSent || s.SignalNumber <= 0))
+                .Where(s => !s.SignalAlertSent && s.SignalNumber <= 0)
                 .ToListAsync();
 
-            if (orphans.Count > 0)
+            if (orphans.Count == 0) return 0;
+
+            var orphanIds = orphans.Select(s => s.Id).ToList();
+            try
             {
-                foreach (var s in orphans)
+                var orphanDeliveries = await _context.UserSignalDeliveries
+                    .Where(d => orphanIds.Contains(d.SignalId))
+                    .ToListAsync();
+
+                if (orphanDeliveries.Count > 0)
                 {
-                    s.IsClosed = true;
-                    s.ClosedAt = DateTime.UtcNow;
-                    s.Status = SignalStatus.Neutral;
-                    s.CloseReason = "ALERT_NEVER_SENT_CLEANUP";
+                    _context.UserSignalDeliveries.RemoveRange(orphanDeliveries);
                 }
-                await _context.SaveChangesAsync();
-                Console.WriteLine($"[STARTUP_CLEANUP] Closed {orphans.Count} orphaned signals (SignalAlertSent=false / SignalNumber<=0)");
             }
+            catch
+            {
+                // Defensive: in case UserSignalDeliveries table does not exist in local SQLite schema
+            }
+
+            _context.Signals.RemoveRange(orphans);
+            await _context.SaveChangesAsync();
+
+            Console.WriteLine($"[STARTUP_CLEANUP] Deleted {orphans.Count} orphaned unsent signals (unique index freed)");
             return orphans.Count;
         }
 
