@@ -60,7 +60,7 @@ namespace CryptoSense.Domain.Common
             /// <summary>Minimum R:R ratio for signal dispatch</summary>
             public const decimal MinRiskReward            = 1.30m;
             /// <summary>No-signal heartbeat interval (minutes)</summary>
-            public const int     HeartbeatIntervalMinutes = 30;
+            public const int     HeartbeatIntervalMinutes = 60;
             /// <summary>ATR multiplier for stop-loss</summary>
             public const decimal AtrMultiplierSl          = 1.50m;
             /// <summary>Min ADX for 1h signals</summary>

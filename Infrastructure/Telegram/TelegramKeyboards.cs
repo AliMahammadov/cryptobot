@@ -77,6 +77,25 @@ namespace CryptoSense.Infrastructure.Telegram
             };
         }
 
+        public static object BuildStatsKeyboard(bool isAllTime = false)
+        {
+            var toggleBtn = isAllTime
+                ? new { text = "📅 Yalnız Bugünkü", callback_data = "cb_stats_today" }
+                : new { text = "🌐 Hamısı (All-Time)", callback_data = "cb_stats_alltime" };
+
+            return new
+            {
+                inline_keyboard = new[]
+                {
+                    new[]
+                    {
+                        toggleBtn,
+                        new { text = "⬅️ Terminala Qayıt", callback_data = "cb_menu" }
+                    }
+                }
+            };
+        }
+
         public static object BuildPortfolioSummaryKeyboard()
         {
             return new

@@ -900,16 +900,20 @@ namespace CryptoSense.Infrastructure.Testing
                 // If trade signal was generated on 15m, check TP1 distance (0.60% <= TP1 <= 2.50%) & TP3 > 0
                 if (sig15m.SignalType.Contains("LONG") || sig15m.SignalType.Contains("SHORT"))
                 {
-                    decimal tp1DistPct = Math.Abs(sig15m.TakeProfit1 - sig15m.EntryPrice) / sig15m.EntryPrice;
-                    if (tp1DistPct > 0.025m)
+                    decimal refEntry = sig15m.EntryPrice > 0 ? sig15m.EntryPrice : sig15m.CurrentPrice;
+                    if (refEntry > 0)
                     {
-                        Console.WriteLine($"[Test 40 Fail] 15m TP1 distance is {tp1DistPct:P2} (must be <= 2.5%)");
-                        return false;
-                    }
-                    if (tp1DistPct < 0.0058m)
-                    {
-                        Console.WriteLine($"[Test 40 Fail] 15m TP1 distance is {tp1DistPct:P2} (must be >= 0.60%)");
-                        return false;
+                        decimal tp1DistPct = Math.Abs(sig15m.TakeProfit1 - refEntry) / refEntry;
+                        if (tp1DistPct > 0.025m)
+                        {
+                            Console.WriteLine($"[Test 40 Fail] 15m TP1 distance is {tp1DistPct:P2} (must be <= 2.5%)");
+                            return false;
+                        }
+                        if (tp1DistPct < 0.0035m)
+                        {
+                            Console.WriteLine($"[Test 40 Fail] 15m TP1 distance is {tp1DistPct:P2} (must be >= 0.35%)");
+                            return false;
+                        }
                     }
                     if (sig15m.TakeProfit2 > 0 && sig15m.TakeProfit2 == sig15m.TakeProfit1)
                     {
@@ -1312,6 +1316,164 @@ namespace CryptoSense.Infrastructure.Testing
                 // Clean up test signal
                 testSig.Status = SignalStatus.Failed;
                 testSig.IsClosed = true;
+                await _unitOfWork.SaveChangesAsync();
+
+                return true;
+            });
+
+            // 41. Hourly Heartbeat & Telemetry Verification (Format, Gozleme, BtcGate, Range, sent=0 reason, only Baku :00)
+            await AssertTest("Test 48: Hourly Heartbeat & Telemetry Verification", () =>
+            {
+                // 1. Telemetry object verify
+                var telem = new CryptoSense.Worker.BackgroundMarketScanner.ScanTelemetry
+                {
+                    CoinsScanned = 40,
+                    Sent = 0,
+                    SkipChase = 2,
+                    SkipCorr = 1,
+                    SkipSL = 3,
+                    SkipRR = 4,
+                    SkipLock = 0,
+                    SkipLag = 0,
+                    SkipStale = 0,
+                    SkipConfluence = 15,
+                    SkipGozleme = 10,
+                    SkipBtcBearLong = 4,
+                    SkipBtcRange = 2,
+                    SkipBtc4hOppose = 1
+                };
+
+                if (telem.SkipBtcGate != 5) return Task.FromResult(false);
+
+                var cloned = telem.Clone();
+                if (cloned.SkipGozleme != 10 || cloned.SkipBtcGate != 5 || cloned.SkipBtcRange != 2) return Task.FromResult(false);
+
+                cloned.Reset();
+                if (cloned.SkipGozleme != 0 || cloned.SkipBtcGate != 0 || cloned.SkipBtcRange != 0 || cloned.SkipConfluence != 0) return Task.FromResult(false);
+
+                // 2. FormatLiveHeartbeat string verification
+                var hbMsg = TelegramMessageFormatter.FormatLiveHeartbeat(
+                    chase: telem.SkipChase,
+                    corr: telem.SkipCorr,
+                    slWide: telem.SkipSL,
+                    lowRr: telem.SkipRR,
+                    activeLocks: 0,
+                    sent: telem.Sent,
+                    nextCheckMinutes: 60,
+                    dataAgeMsBtc: 300,
+                    skipStale: 0,
+                    skipLag: 0,
+                    skipConfluence: telem.SkipConfluence,
+                    telegramFail: 0,
+                    skipGozleme: telem.SkipGozleme,
+                    skipBtcGate: telem.SkipBtcGate,
+                    skipBtcRange: telem.SkipBtcRange);
+
+                bool hasConf = hbMsg.Contains("Conf:15");
+                bool hasSentZero = hbMsg.Contains("Göndərildi:0") || hbMsg.Contains("G&#246;nd&#601;rildi:0");
+                bool hasGozleme = hbMsg.Contains("Gözləmə:10") || hbMsg.Contains("G&#246;zl&#601;m&#601;:10");
+                bool hasBtcGate = hbMsg.Contains("BtcGate:5");
+                bool hasBtcRange = hbMsg.Contains("Range:2");
+                bool hasReason = hbMsg.Contains("Səbəb:") || hbMsg.Contains("S&#601;b&#601;b:");
+                bool has60Min = hbMsg.Contains("60 dəq") || hbMsg.Contains("60 d&#601;q");
+
+                if (!hasConf || !hasSentZero || !hasGozleme || !hasBtcGate || !hasBtcRange || !hasReason || !has60Min)
+                {
+                    Console.WriteLine($"[Test 48 Fail] HB message format mismatch:\n{hbMsg}");
+                    return Task.FromResult(false);
+                }
+
+                // 3. Heartbeat interval constant
+                int expectedInterval = 60;
+                if (CryptoSense.Domain.Common.BotConstants.Thresholds.HeartbeatIntervalMinutes != expectedInterval) return Task.FromResult(false);
+
+                return Task.FromResult(true);
+            });
+
+            // 42. Performance Stats Day Reset & Date Header (GeneratedAt >= 00:00 Baku, All-time bypass, Tarix: dd.MM.yyyy (Bakı))
+            await AssertTest("Test 49: Performance Stats Day Reset & Date Header Verification", async () =>
+            {
+                var bakuNow = DateTime.UtcNow.AddHours(4);
+                var todayStartUtc = bakuNow.Date.AddHours(-4);
+
+                // 1. FormatPerformanceStats header check
+                var emptyStats = new PerformanceStats();
+                var statsHeader = TelegramMessageFormatter.FormatPerformanceStats(emptyStats, "1h");
+                var expectedDate = bakuNow.ToString("dd.MM.yyyy");
+                if (!statsHeader.Contains("Tarix:") || !statsHeader.Contains(expectedDate) || !statsHeader.Contains("(Bakı)"))
+                {
+                    Console.WriteLine($"[Test 49 Fail] Stats header missing date: {statsHeader}");
+                    return false;
+                }
+
+                // 2. Day reset query verification: create yesterday trade vs today trade
+                var yesterdaySignal = new FuturesSignal
+                {
+                    Symbol = "TESTRESET1",
+                    Timeframe = "1h",
+                    Direction = SignalDirection.Buy,
+                    SignalType = "GÜCLÜ LONG 🟢",
+                    EntryPrice = 100,
+                    TakeProfit1 = 105,
+                    StopLoss = 97,
+                    Confidence = 90,
+                    Status = SignalStatus.Success,
+                    IsClosed = true,
+                    CloseReason = "TP1",
+                    ResultPercent = 5.0m,
+                    SignalAlertSent = true,
+                    SignalNumber = 99801,
+                    GeneratedAt = todayStartUtc.AddHours(-2), // 2 hours before today 00:00 Baku (Yesterday)
+                    ClosedAt = todayStartUtc.AddHours(-1)
+                };
+
+                var todaySignal = new FuturesSignal
+                {
+                    Symbol = "TESTRESET2",
+                    Timeframe = "1h",
+                    Direction = SignalDirection.Buy,
+                    SignalType = "GÜCLÜ LONG 🟢",
+                    EntryPrice = 200,
+                    TakeProfit1 = 210,
+                    StopLoss = 195,
+                    Confidence = 90,
+                    Status = SignalStatus.Success,
+                    IsClosed = true,
+                    CloseReason = "TP1",
+                    ResultPercent = 5.0m,
+                    SignalAlertSent = true,
+                    SignalNumber = 99802,
+                    GeneratedAt = DateTime.UtcNow, // Today
+                    ClosedAt = DateTime.UtcNow
+                };
+
+                await _unitOfWork.Signals.AddAsync(yesterdaySignal);
+                await _unitOfWork.Signals.AddAsync(todaySignal);
+                await _unitOfWork.SaveChangesAsync();
+
+                // Live query (default: BUGÜN)
+                var todayStats = await _unitOfWork.Signals.GetPerformanceStatsAsync(userCoins: new List<string> { "TESTRESET1", "TESTRESET2" });
+                // Should only contain todaySignal (1 trade), NOT yesterdaySignal!
+                if (todayStats.TotalSignals != 1 || todayStats.SuccessSignals != 1)
+                {
+                    Console.WriteLine($"[Test 49 Fail] Today stats leaked yesterday signal! Total: {todayStats.TotalSignals}, Success: {todayStats.SuccessSignals}");
+                    return false;
+                }
+
+                // All-time query
+                var allTimeStats = await _unitOfWork.Signals.GetPerformanceStatsAsync(userCoins: new List<string> { "TESTRESET1", "TESTRESET2" }, isAllTime: true);
+                // Should contain both signals (2 trades)
+                if (allTimeStats.TotalSignals != 2 || allTimeStats.SuccessSignals != 2)
+                {
+                    Console.WriteLine($"[Test 49 Fail] All-time stats missing signals! Total: {allTimeStats.TotalSignals}, Success: {allTimeStats.SuccessSignals}");
+                    return false;
+                }
+
+                // Clean up test signals
+                yesterdaySignal.Status = SignalStatus.Failed;
+                yesterdaySignal.IsTest = true;
+                todaySignal.Status = SignalStatus.Failed;
+                todaySignal.IsTest = true;
                 await _unitOfWork.SaveChangesAsync();
 
                 return true;

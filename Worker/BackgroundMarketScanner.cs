@@ -70,8 +70,14 @@ namespace CryptoSense.Worker
             public int SkipLag;
             public int SkipStale;
             public int SkipConfluence;  // Confluence < 75 (BLOCK, not PASS)
+            public int SkipGozleme;     // GÖZLƏMƏ ⚪ (market neutral, ADX < 16, no setup)
+            public int SkipBtcBearLong; // SKIP_BTC_BEAR_LONG
+            public int SkipBtcRange;    // SKIP_BTC_RANGE
+            public int SkipBtc4hOppose; // SKIP_BTC_4H_OPPOSE
             public int SkipHourCap;     // morningCap >=1 OR hourCap >=2
             public int TelegramFail;    // SendSignalAlertAsync returned false
+
+            public int SkipBtcGate => SkipBtcBearLong + SkipBtc4hOppose;
 
             public ScanTelemetry Clone() => new ScanTelemetry
             {
@@ -85,6 +91,10 @@ namespace CryptoSense.Worker
                 SkipLag = this.SkipLag,
                 SkipStale = this.SkipStale,
                 SkipConfluence = this.SkipConfluence,
+                SkipGozleme = this.SkipGozleme,
+                SkipBtcBearLong = this.SkipBtcBearLong,
+                SkipBtcRange = this.SkipBtcRange,
+                SkipBtc4hOppose = this.SkipBtc4hOppose,
                 SkipHourCap = this.SkipHourCap,
                 TelegramFail = this.TelegramFail
             };
@@ -101,6 +111,10 @@ namespace CryptoSense.Worker
                 SkipLag = 0;
                 SkipStale = 0;
                 SkipConfluence = 0;
+                SkipGozleme = 0;
+                SkipBtcBearLong = 0;
+                SkipBtcRange = 0;
+                SkipBtc4hOppose = 0;
                 SkipHourCap = 0;
                 TelegramFail = 0;
             }
@@ -181,19 +195,7 @@ namespace CryptoSense.Worker
                 }
             }
 
-            // Reset heartbeat timers on startup so active users receive an immediate live heartbeat on the first scan cycle
-            try
-            {
-                foreach (var pref in TelegramBotService.UserPreferences.Values)
-                {
-                    pref.LastHeartbeatSentUtc = DateTime.UtcNow.AddMinutes(-31);
-                }
-                TelegramBotService.SaveSettings();
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"[BackgroundMarketScanner] Error resetting heartbeat timers on startup: {ex.Message}");
-            }
+            // Heartbeat timers are preserved from persisted settings on startup (never reset to avoid duplicate heartbeats on restart)
 
             // Pre-subscribe Default 40 institutional coins and active portfolio coins to WebSocket stream on startup
             foreach (var coin in TelegramBotService.Default40Coins)
@@ -1434,13 +1436,42 @@ namespace CryptoSense.Worker
 
                             var signal = await engine.AnalyzeCoinAsync(sym, tf, isLiveScan: true);
 
-                            // Telemetriya: Confluence (≥ 75%)
+                            // Telemetriya: Confluence, GÖZLƏMƏ, BTC Gate, Range ayrı sayğaclar (indiki Conf-un içində itməsin)
                             bool isTradeQualified = signal.Timeframe != "15m" && signal.Confidence >= 75 &&
                                                     signal.SignalType != null &&
                                                     (signal.SignalType.Contains("LONG") || signal.SignalType.Contains("SHORT"));
                             if (!isTradeQualified)
                             {
-                                Interlocked.Increment(ref _hourlyTelemetry.SkipConfluence);
+                                bool hasBtcBearLong = signal.AnalysisReasons != null && signal.AnalysisReasons.Any(r => r.Contains("SKIP_BTC_BEAR_LONG"));
+                                bool hasBtcRange = signal.AnalysisReasons != null && signal.AnalysisReasons.Any(r => r.Contains("SKIP_BTC_RANGE"));
+                                bool hasBtc4hOppose = signal.AnalysisReasons != null && signal.AnalysisReasons.Any(r => r.Contains("SKIP_BTC_4H_OPPOSE"));
+                                bool hasPureConfluence = signal.AnalysisReasons != null && signal.AnalysisReasons.Any(r => r.Contains("Confluence Filtri") || r.Contains("< 75.0%"));
+
+                                if (hasBtcBearLong)
+                                {
+                                    Interlocked.Increment(ref _hourlyTelemetry.SkipBtcBearLong);
+                                }
+                                if (hasBtcRange)
+                                {
+                                    Interlocked.Increment(ref _hourlyTelemetry.SkipBtcRange);
+                                }
+                                if (hasBtc4hOppose)
+                                {
+                                    Interlocked.Increment(ref _hourlyTelemetry.SkipBtc4hOppose);
+                                }
+
+                                if (hasPureConfluence && !hasBtcBearLong && !hasBtcRange && !hasBtc4hOppose)
+                                {
+                                    Interlocked.Increment(ref _hourlyTelemetry.SkipConfluence);
+                                }
+                                else if (!hasBtcBearLong && !hasBtcRange && !hasBtc4hOppose)
+                                {
+                                    Interlocked.Increment(ref _hourlyTelemetry.SkipGozleme);
+                                }
+                                else if (signal.SignalType != null && signal.SignalType.Contains("GÖZLƏMƏ"))
+                                {
+                                    Interlocked.Increment(ref _hourlyTelemetry.SkipGozleme);
+                                }
                             }
 
                             // Telemetriya: S/R və Chase filtrlərini sayğaca əlavə et
@@ -1828,6 +1859,10 @@ namespace CryptoSense.Worker
                     skipLag = _hourlyTelemetry.SkipLag,
                     skipStale = _hourlyTelemetry.SkipStale,
                     skipConfluence = _hourlyTelemetry.SkipConfluence,
+                    skipGozleme = _hourlyTelemetry.SkipGozleme,
+                    skipBtcBearLong = _hourlyTelemetry.SkipBtcBearLong,
+                    skipBtcRange = _hourlyTelemetry.SkipBtcRange,
+                    skipBtcGate = _hourlyTelemetry.SkipBtcGate,
                     skipHourCap = _hourlyTelemetry.SkipHourCap,
                     telegramFail = _hourlyTelemetry.TelegramFail,
                     dataAgeMsBtc = btcSnapForLog?.DataAgeMs ?? -1,
@@ -1836,8 +1871,10 @@ namespace CryptoSense.Worker
                 });
                 Console.WriteLine(jsonTelemetry);
 
-                // OVERFILTER DIAQNOSTIKA: sent=0 + coinsScanned>0 + skipConfluence≥90% → TOP5 BLOCK
-                int totalSkips = _hourlyTelemetry.SkipConfluence + _hourlyTelemetry.SkipChase +
+                // OVERFILTER DIAQNOSTIKA: sent=0 + coinsScanned>0 + skips > 0 → dominant skip
+                int totalSkips = _hourlyTelemetry.SkipConfluence + _hourlyTelemetry.SkipGozleme +
+                                 _hourlyTelemetry.SkipBtcBearLong + _hourlyTelemetry.SkipBtcRange +
+                                 _hourlyTelemetry.SkipBtc4hOppose + _hourlyTelemetry.SkipChase +
                                  _hourlyTelemetry.SkipSL + _hourlyTelemetry.SkipRR +
                                  _hourlyTelemetry.SkipLag + _hourlyTelemetry.SkipStale + _hourlyTelemetry.SkipHourCap;
                 if (_hourlyTelemetry.Sent == 0 && _hourlyTelemetry.CoinsScanned > 0 && totalSkips > 0)
@@ -1845,6 +1882,9 @@ namespace CryptoSense.Worker
                     // dominant skip növü
                     var skipCounts = new[]
                     {
+                        ("BtcGate", _hourlyTelemetry.SkipBtcGate),
+                        ("BtcRange", _hourlyTelemetry.SkipBtcRange),
+                        ("Gozleme", _hourlyTelemetry.SkipGozleme),
                         ("Confluence", _hourlyTelemetry.SkipConfluence),
                         ("Chase", _hourlyTelemetry.SkipChase),
                         ("SL", _hourlyTelemetry.SkipSL),
@@ -1877,75 +1917,83 @@ namespace CryptoSense.Worker
                 LatestTelemetrySnapshot = _hourlyTelemetry.Clone();
             }
 
-            // 1) Anti-Spam Heartbeat (Minimum once per 30 minutes per chat with lock, real reason, persisted LastHeartbeatSentUtc)
-            // 1) Anti-Spam Heartbeat (Mütləq 30 dəqiqə sükut olduqda aktiv istifadəçiyə YENİ ℹ️ Heartbeat)
+            // 1) HEARTBEAT: Saat başı, 1 ədəd. Yalnız Bakı dəqiqə 0–2 (00:00, 01:00, ...). 30 dəq intervalı SİLİNDİ.
             var nowUtc = DateTime.UtcNow;
-            foreach (var kvp in TelegramBotService.UserPreferences)
+            var bakuNowHb = nowUtc.AddHours(4);
+            bool isHourlyWindow = bakuNowHb.Minute >= 0 && bakuNowHb.Minute <= 2;
+
+            if (isHourlyWindow)
             {
-                var chatId = kvp.Key;
-                var s = kvp.Value;
-                if (!s.IsActive) continue;
-
-                if (!await _telegramService.CanReceivePushAsync(chatId)) continue;
-
-                var lastDeliveredUtc = await unitOfWork.Signals.GetLastDeliveredSignalTimeUtcAsync(chatId);
-                var minutesSinceSignal = lastDeliveredUtc.HasValue 
-                    ? (nowUtc - lastDeliveredUtc.Value).TotalMinutes 
-                    : 99999;
-
-                var minutesSinceHeartbeat = s.LastHeartbeatSentUtc == default 
-                    ? 99999 
-                    : (nowUtc - s.LastHeartbeatSentUtc).TotalMinutes;
-
-                // Son 30 dəqiqədə real siqnal kartı göndərilibsə və ya son 30 dəqiqədə artıq heartbeat göndərilibsə → gözlə
-                if (minutesSinceSignal < 30 || minutesSinceHeartbeat < 30)
+                foreach (var kvp in TelegramBotService.UserPreferences)
                 {
-                    continue;
-                }
+                    var chatId = kvp.Key;
+                    var s = kvp.Value;
+                    if (!s.IsActive) continue;
 
-                lock (_heartbeatLock)
-                {
-                    if (s.LastHeartbeatSentUtc != default && (DateTime.UtcNow - s.LastHeartbeatSentUtc).TotalMinutes < 30)
+                    // Başqa user-in heartbeat-i SuperAdmin çatına GETMƏSİN — Tək qapı ilə yoxlanılır və yalnız bu chatId-yə göndərilir
+                    if (!await _telegramService.CanReceivePushAsync(chatId)) continue;
+
+                    // Eyni chatId-yə saatda 1 heartbeat. Cari Bakı saatında artıq göndərilibsə ötür
+                    if (s.LastHeartbeatSentUtc != default)
                     {
-                        continue;
+                        var lastSentBaku = s.LastHeartbeatSentUtc.AddHours(4);
+                        if (lastSentBaku.Date == bakuNowHb.Date && lastSentBaku.Hour == bakuNowHb.Hour)
+                        {
+                            continue;
+                        }
                     }
-                    s.LastHeartbeatSentUtc = DateTime.UtcNow;
-                    TelegramBotService.SaveSettings();
-                }
 
-                var snapTelemetry = LatestTelemetrySnapshot ?? new ScanTelemetry();
-                int activeLocksCount = Math.Max(snapTelemetry.SkipLock, _coinActiveLocks.Count);
-                var btcSnapHb = _livePriceCache.GetSnapshot("BTCUSDT");
-                var heartbeatMsg = TelegramMessageFormatter.FormatLiveHeartbeat(
-                    snapTelemetry.SkipChase,
-                    snapTelemetry.SkipCorr,
-                    snapTelemetry.SkipSL,
-                    snapTelemetry.SkipRR,
-                    activeLocksCount,
-                    snapTelemetry.Sent,
-                    nextCheckMinutes: 30,
-                    dataAgeMsBtc: btcSnapHb?.DataAgeMs ?? -1,
-                    skipStale: snapTelemetry.SkipStale,
-                    skipLag: snapTelemetry.SkipLag,
-                    skipConfluence: snapTelemetry.SkipConfluence,
-                    telegramFail: snapTelemetry.TelegramFail);
-
-                // 1) HEARTBEAT: EditMessage ilə köhnə ℹ️-ni gizlin yeniləmə YOXDUR.
-                // Hər 30 dəq-də YENİ mesaj. Telefon bildirişi gəlsin.
-                if (s.LastHeartbeatMessageId.HasValue)
-                {
-                    try
+                    lock (_heartbeatLock)
                     {
-                        await _telegramService.DeleteMessageAsync(chatId, s.LastHeartbeatMessageId.Value);
+                        if (s.LastHeartbeatSentUtc != default)
+                        {
+                            var lastSentBaku = s.LastHeartbeatSentUtc.AddHours(4);
+                            if (lastSentBaku.Date == bakuNowHb.Date && lastSentBaku.Hour == bakuNowHb.Hour)
+                            {
+                                continue;
+                            }
+                        }
+                        s.LastHeartbeatSentUtc = DateTime.UtcNow;
+                        TelegramBotService.SaveSettings();
                     }
-                    catch { /* Köhnə mesaj silinə bilməsə belə yeni mesaj mütləq getməlidir */ }
-                }
 
-                var newMsgId = await _telegramService.SendMessageReturnIdAsync(heartbeatMsg, chatId);
-                if (newMsgId.HasValue)
-                {
-                    s.LastHeartbeatMessageId = newMsgId;
-                    TelegramBotService.SaveSettings();
+                    var snapTelemetry = LatestTelemetrySnapshot ?? new ScanTelemetry();
+                    int activeLocksCount = Math.Max(snapTelemetry.SkipLock, _coinActiveLocks.Count);
+                    var btcSnapHb = _livePriceCache.GetSnapshot("BTCUSDT");
+                    var heartbeatMsg = TelegramMessageFormatter.FormatLiveHeartbeat(
+                        chase: snapTelemetry.SkipChase,
+                        corr: snapTelemetry.SkipCorr,
+                        slWide: snapTelemetry.SkipSL,
+                        lowRr: snapTelemetry.SkipRR,
+                        activeLocks: activeLocksCount,
+                        sent: snapTelemetry.Sent,
+                        nextCheckMinutes: 60,
+                        dataAgeMsBtc: btcSnapHb?.DataAgeMs ?? -1,
+                        skipStale: snapTelemetry.SkipStale,
+                        skipLag: snapTelemetry.SkipLag,
+                        skipConfluence: snapTelemetry.SkipConfluence,
+                        telegramFail: snapTelemetry.TelegramFail,
+                        skipGozleme: snapTelemetry.SkipGozleme,
+                        skipBtcGate: snapTelemetry.SkipBtcGate,
+                        skipBtcRange: snapTelemetry.SkipBtcRange);
+
+                    // 1) HEARTBEAT: EditMessage ilə köhnə ℹ️-ni gizlin yeniləmə YOXDUR.
+                    // Saat başı YENİ mesaj. Telefon bildirişi gəlsin.
+                    if (s.LastHeartbeatMessageId.HasValue)
+                    {
+                        try
+                        {
+                            await _telegramService.DeleteMessageAsync(chatId, s.LastHeartbeatMessageId.Value);
+                        }
+                        catch { /* Köhnə mesaj silinə bilməsə belə yeni mesaj mütləq getməlidir */ }
+                    }
+
+                    var newMsgId = await _telegramService.SendMessageReturnIdAsync(heartbeatMsg, chatId);
+                    if (newMsgId.HasValue)
+                    {
+                        s.LastHeartbeatMessageId = newMsgId;
+                        TelegramBotService.SaveSettings();
+                    }
                 }
             }
 

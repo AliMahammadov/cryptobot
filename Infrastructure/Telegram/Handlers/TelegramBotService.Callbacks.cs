@@ -293,14 +293,15 @@ namespace CryptoSense.Infrastructure.Telegram
                 var compassMsg = TelegramMessageFormatter.FormatBtcCompass(compass);
                 await EditMessageTextAsync(chatId, messageId, compassMsg, TelegramKeyboards.BuildBackToTerminalKeyboard());
             }
-            else if (data == "cb_stats")
+            else if (data == "cb_stats" || data == "cb_stats_today" || data == "cb_stats_alltime")
             {
+                bool isAllTime = (data == "cb_stats_alltime");
                 var stats = (isCallerAdmin || chatId == SuperAdminChatId)
-                    ? await unitOfWork.Signals.GetPerformanceStatsAsync(userSettings.Timeframe)
-                    : await signalEngine.GetUserPerformanceStatsAsync(chatId, userSettings.Timeframe, userSettings.Coins);
+                    ? await unitOfWork.Signals.GetPerformanceStatsAsync(userSettings.Timeframe, userCoins: null, isAllTime: isAllTime)
+                    : await signalEngine.GetUserPerformanceStatsAsync(chatId, userSettings.Timeframe, userSettings.Coins, isAllTime: isAllTime);
                 var tfLabel = (string.IsNullOrWhiteSpace(userSettings.Timeframe) || userSettings.Timeframe == "Təyin olunmayıb" || userSettings.Timeframe == "Hamısı" || userSettings.Timeframe == "Hamisi") ? "1h, 4h" : userSettings.Timeframe;
-                var statsMsg = TelegramMessageFormatter.FormatPerformanceStats(stats, tfLabel);
-                await EditMessageTextAsync(chatId, messageId, statsMsg, TelegramKeyboards.BuildBackToTerminalKeyboard());
+                var statsMsg = TelegramMessageFormatter.FormatPerformanceStats(stats, tfLabel, isAllTime: isAllTime);
+                await EditMessageTextAsync(chatId, messageId, statsMsg, TelegramKeyboards.BuildStatsKeyboard(isAllTime: isAllTime));
             }
             else if (data == "cb_status")
             {

@@ -187,12 +187,36 @@ namespace CryptoSense.Infrastructure.Persistence.Repositories
             await _context.SaveChangesAsync();
         }
 
-        public async Task<PerformanceStats> GetPerformanceStatsAsync(string? specificTimeframe = null, List<string>? userCoins = null)
+        public async Task<PerformanceStats> GetPerformanceStatsAsync(
+            string? specificTimeframe = null, 
+            List<string>? userCoins = null, 
+            DateTime? sinceUtc = null, 
+            DateTime? untilUtc = null, 
+            bool isAllTime = false)
         {
             var query = _context.Signals
                 .Where(s => !s.IsTest && (s.SignalType.Contains("LONG") || s.SignalType.Contains("SHORT")) && (s.SignalAlertSent || s.IsClosed || s.Status != SignalStatus.Open));
 
-            if (!string.IsNullOrEmpty(specificTimeframe) && specificTimeframe != "Hamısı" && specificTimeframe != "Hamisi")
+            // Default: BUGÜN 00:00 Bakı (UtcNow+4). All-time rejimində süzgəc tətbiq edilmir.
+            if (!isAllTime && specificTimeframe != "AllTime" && specificTimeframe != "Hamısı (Bütün Tarix)")
+            {
+                if (sinceUtc.HasValue)
+                {
+                    query = query.Where(s => s.GeneratedAt >= sinceUtc.Value);
+                    if (untilUtc.HasValue)
+                    {
+                        query = query.Where(s => s.GeneratedAt < untilUtc.Value);
+                    }
+                }
+                else
+                {
+                    var bakuNow = DateTime.UtcNow.AddHours(4);
+                    var todayStartUtc = bakuNow.Date.AddHours(-4); // Bugün 00:00 Bakı UTC-də
+                    query = query.Where(s => s.GeneratedAt >= todayStartUtc);
+                }
+            }
+
+            if (!string.IsNullOrEmpty(specificTimeframe) && specificTimeframe != "Hamısı" && specificTimeframe != "Hamisi" && specificTimeframe != "AllTime" && specificTimeframe != "Hamısı (Bütün Tarix)")
             {
                 query = query.Where(s => s.Timeframe == specificTimeframe);
             }
@@ -459,10 +483,16 @@ namespace CryptoSense.Infrastructure.Persistence.Repositories
                 .ToListAsync();
         }
 
-        public async Task<PerformanceStats> GetUserPerformanceStatsAsync(string chatId, string? specificTimeframe = null, List<string>? userCoins = null)
+        public async Task<PerformanceStats> GetUserPerformanceStatsAsync(
+            string chatId, 
+            string? specificTimeframe = null, 
+            List<string>? userCoins = null, 
+            DateTime? sinceUtc = null, 
+            DateTime? untilUtc = null, 
+            bool isAllTime = false)
         {
             // User panel və admin eyni DB sorğusu
-            return await GetPerformanceStatsAsync(specificTimeframe, userCoins);
+            return await GetPerformanceStatsAsync(specificTimeframe, userCoins, sinceUtc, untilUtc, isAllTime);
         }
 
         public async Task<int> CleanupOrphanedSignalsAsync()

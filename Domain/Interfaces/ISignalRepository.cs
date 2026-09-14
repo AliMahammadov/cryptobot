@@ -16,10 +16,10 @@ namespace CryptoSense.Domain.Interfaces
         Task<int> GetMaxSignalNumberAsync();
         Task AddAsync(FuturesSignal signal);
         Task UpdateAsync(FuturesSignal signal);
-        Task<PerformanceStats> GetPerformanceStatsAsync(string? specificTimeframe = null, List<string>? userCoins = null);
+        Task<PerformanceStats> GetPerformanceStatsAsync(string? specificTimeframe = null, List<string>? userCoins = null, DateTime? sinceUtc = null, DateTime? untilUtc = null, bool isAllTime = false);
         Task<int> GetUserTodaySignalsCountAsync(string chatId);
         Task<int> GetUserOpenSignalsCountAsync(string chatId);
-        Task<PerformanceStats> GetUserPerformanceStatsAsync(string chatId, string? specificTimeframe = null, List<string>? userCoins = null);
+        Task<PerformanceStats> GetUserPerformanceStatsAsync(string chatId, string? specificTimeframe = null, List<string>? userCoins = null, DateTime? sinceUtc = null, DateTime? untilUtc = null, bool isAllTime = false);
         Task<List<FuturesSignal>> GetUserOpenSignalsAsync(string chatId);
         Task RecordDeliveryAsync(int signalId, string chatId, int userSignalNumber);
         Task<List<string>> GetDeliveredChatIdsAsync(int signalId);

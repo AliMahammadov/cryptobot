@@ -1043,14 +1043,25 @@ namespace CryptoSense.Application.Services
             return await _unitOfWork.Signals.GetRecentSignalsAsync(count);
         }
 
-        public async Task<PerformanceStats> GetPerformanceStatsAsync(string? specificTimeframe = null, List<string>? userCoins = null)
+        public async Task<PerformanceStats> GetPerformanceStatsAsync(
+            string? specificTimeframe = null, 
+            List<string>? userCoins = null, 
+            DateTime? sinceUtc = null, 
+            DateTime? untilUtc = null, 
+            bool isAllTime = false)
         {
-            return await _unitOfWork.Signals.GetPerformanceStatsAsync(specificTimeframe, userCoins);
+            return await _unitOfWork.Signals.GetPerformanceStatsAsync(specificTimeframe, userCoins, sinceUtc, untilUtc, isAllTime);
         }
 
-        public async Task<PerformanceStats> GetUserPerformanceStatsAsync(string chatId, string? specificTimeframe = null, List<string>? userCoins = null)
+        public async Task<PerformanceStats> GetUserPerformanceStatsAsync(
+            string chatId, 
+            string? specificTimeframe = null, 
+            List<string>? userCoins = null, 
+            DateTime? sinceUtc = null, 
+            DateTime? untilUtc = null, 
+            bool isAllTime = false)
         {
-            return await _unitOfWork.Signals.GetUserPerformanceStatsAsync(chatId, specificTimeframe, userCoins);
+            return await _unitOfWork.Signals.GetUserPerformanceStatsAsync(chatId, specificTimeframe, userCoins, sinceUtc, untilUtc, isAllTime);
         }
 
         public async Task<List<FuturesSignal>> GetUserOpenSignalsAsync(string chatId)

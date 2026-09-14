@@ -1065,8 +1065,13 @@ namespace CryptoSense.Infrastructure.Telegram
             // Dərhal bazaya qeyd edilir ki, paralel və ya ardıcıl deploy çağırışları təkrar göndərə bilməsin
             await uow.AuditLogs.RecordDailyReportSentAsync(bakuDateStr);
 
-            var sinceUtc = DateTime.UtcNow.AddHours(-24);
-            var todaySignals = await uow.Signals.GetSignalsSinceAsync(sinceUtc);
+            var bakuNowReport = DateTime.UtcNow.AddHours(4);
+            var reportDayBaku = bakuNowReport.Hour == 0 ? bakuNowReport.Date.AddDays(-1) : bakuNowReport.Date;
+            var reportStartUtc = reportDayBaku.AddHours(-4);
+            var reportEndUtc = reportStartUtc.AddDays(1);
+
+            var todaySignalsRaw = await uow.Signals.GetSignalsSinceAsync(reportStartUtc);
+            var todaySignals = todaySignalsRaw.Where(s => s.GeneratedAt < reportEndUtc).ToList();
             var globalCoinsEntered = todaySignals.Select(s => s.Symbol.Replace("USDT", "")).Distinct().ToList();
             var defaultReasons = new List<string>
             {
@@ -1080,7 +1085,7 @@ namespace CryptoSense.Infrastructure.Telegram
             {
                 if (await CanReceivePushAsync(SuperAdminChatId))
                 {
-                    var globalStats = await uow.Signals.GetPerformanceStatsAsync();
+                    var globalStats = await uow.Signals.GetPerformanceStatsAsync(sinceUtc: reportStartUtc, untilUtc: reportEndUtc);
                     var adminMsg = TelegramMessageFormatter.FormatDailyReport(globalStats, globalCoinsEntered, defaultReasons, isSuperAdmin: true);
                     await SendMessageAsync(adminMsg, SuperAdminChatId);
                 }
@@ -1096,7 +1101,7 @@ namespace CryptoSense.Infrastructure.Telegram
                 if (!await CanReceivePushAsync(chatId)) continue;
                 if (chatId == SuperAdminChatId) continue;
 
-                var userStats = await uow.Signals.GetUserPerformanceStatsAsync(chatId);
+                var userStats = await uow.Signals.GetUserPerformanceStatsAsync(chatId, sinceUtc: reportStartUtc, untilUtc: reportEndUtc);
                 var userOpenSignals = await uow.Signals.GetUserOpenSignalsAsync(chatId);
                 var userCoinsEntered = userOpenSignals.Select(s => s.Symbol.Replace("USDT", "")).Distinct().ToList();
 

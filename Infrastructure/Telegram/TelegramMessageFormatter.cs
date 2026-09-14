@@ -290,10 +290,22 @@ namespace CryptoSense.Infrastructure.Telegram
             return sb.ToString();
         }
 
-        public static string FormatPerformanceStats(PerformanceStats stats, string? activeTimeframe = null)
+        public static string FormatPerformanceStats(PerformanceStats stats, string? activeTimeframe = null, bool isAllTime = false)
         {
             var sb = new StringBuilder();
             sb.AppendLine("📊 <b>Canlı Statistik Performans:</b>");
+            var bakuNow = DateTime.UtcNow.AddHours(4);
+            var bakuDateStr = bakuNow.ToString("dd.MM.yyyy");
+            sb.AppendLine($"🕒 <b>Tarix:</b> <code>{bakuDateStr} (Bakı)</code>");
+            if (isAllTime)
+            {
+                sb.AppendLine("📅 <b>Dövr:</b> <code>Bütün Tarix (All-Time)</code>");
+            }
+            else
+            {
+                sb.AppendLine("📅 <b>Dövr:</b> <code>Bugünkü (00:00-dan etibarən)</code>");
+            }
+
             if (!string.IsNullOrEmpty(activeTimeframe) && activeTimeframe != "Hamısı" && activeTimeframe != "Hamisi")
             {
                 sb.AppendLine($"⏱ <b>Seçilmiş Rejim:</b> <code>{activeTimeframe}</code>");
@@ -627,11 +639,50 @@ namespace CryptoSense.Infrastructure.Telegram
             return sb.ToString();
         }
 
-        public static string FormatLiveHeartbeat(int chase, int corr, int slWide, int lowRr, int activeLocks, int sent, int nextCheckMinutes = 30, long dataAgeMsBtc = -1, int skipStale = 0, int skipLag = 0, int skipConfluence = 0, int telegramFail = 0)
+        public static string FormatLiveHeartbeat(
+            int chase, 
+            int corr, 
+            int slWide, 
+            int lowRr, 
+            int activeLocks, 
+            int sent, 
+            int nextCheckMinutes = 60, 
+            long dataAgeMsBtc = -1, 
+            int skipStale = 0, 
+            int skipLag = 0, 
+            int skipConfluence = 0, 
+            int telegramFail = 0,
+            int skipGozleme = 0,
+            int skipBtcGate = 0,
+            int skipBtcRange = 0)
         {
             var sb = new StringBuilder();
             sb.AppendLine("&#8505;&#65039; <b>Bazar N&#601;zar&#601;ti (Heartbeat)</b>");
-            sb.AppendLine($"A+ yoxdur | Chase:{chase} Corr:{corr} SL:{slWide} RR:{lowRr} Lag:{skipLag} Stale:{skipStale} Conf:{skipConfluence} G&#246;nd&#601;rildi:{sent}");
+            sb.AppendLine($"A+ yoxdur | Chase:{chase} Corr:{corr} SL:{slWide} RR:{lowRr} Lag:{skipLag} Stale:{skipStale} Conf:{skipConfluence} G&#246;nd&#601;rildi:{sent} | G&#246;zl&#601;m&#601;:{skipGozleme} BtcGate:{skipBtcGate} Range:{skipBtcRange}");
+
+            if (sent == 0)
+            {
+                var reasonsList = new List<(string Name, int Count, string Description)>
+                {
+                    ("BtcGate", skipBtcGate, "BTC Ayı (Bearish) rejimindədir — Alt LONG-lar bloklandı"),
+                    ("Range", skipBtcRange, "BTC 1h Kompası Ranging (qeyri-müəyyən) rejimindədir"),
+                    ("Gözləmə", skipGozleme, "Bazar zəif konsolidasiyadadır (Gözləmə rejimi / ADX zəif)"),
+                    ("Confluence", skipConfluence, "Confluence balı tələb olunan 75%-dən aşağıdır"),
+                    ("SL", slWide, "Stop-Loss məsafəsi çox genişdir (> 2.8%)"),
+                    ("RR", lowRr, "Risk/Reward nisbəti qeyri-qənaətbəxşdir (< 1.30)"),
+                    ("Chase", chase, "Qiymət giriş zonasından uzaqlaşıb (Chase filtri)"),
+                    ("Lock", activeLocks, "Aktiv mövqe limitinə çatılıb"),
+                    ("Lag", skipLag, "Şam bağlanış gecikməsi (Lag filtri)"),
+                    ("Stale", skipStale, "Qiymət məlumatı köhnədir (Stale WebSocket)")
+                };
+                var dominant = reasonsList.OrderByDescending(r => r.Count).FirstOrDefault(r => r.Count > 0);
+                string reasonText = dominant.Count > 0 
+                    ? $"{dominant.Description} ({dominant.Name}: {dominant.Count})"
+                    : "Bazar konyukturası A+ siqnal meyarlarına uyğun gəlmir";
+
+                sb.AppendLine($"📌 <b>Səbəb:</b> {reasonText}");
+            }
+
             if (telegramFail > 0)
                 sb.AppendLine($"&#9888;&#65039; <b>TELEGRAM_FAIL={telegramFail}</b> &#8212; signal haz&#305;rland&#305;, lakin g&#246;nd&#601;rilm&#601;di!");
             if (dataAgeMsBtc < 0)
@@ -644,7 +695,7 @@ namespace CryptoSense.Infrastructure.Telegram
             return sb.ToString();
         }
 
-        public static string FormatNoSignalReason(string reason, int nextCheckMinutes = 30)
+        public static string FormatNoSignalReason(string reason, int nextCheckMinutes = 60)
         {
             var sb = new StringBuilder();
             sb.AppendLine("ℹ️ <b>A+ siqnal yoxdur</b>");
