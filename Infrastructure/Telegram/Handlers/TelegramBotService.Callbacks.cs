@@ -211,7 +211,7 @@ namespace CryptoSense.Infrastructure.Telegram
                 else
                 {
                     _testModeChats.TryRemove(chatId, out _);
-                    var activeCount = await unitOfWork.Signals.GetActiveSignalsCountAsync();
+                    var activeCount = await unitOfWork.Signals.GetUserOpenSignalsCountAsync(chatId);
                     var lastDeliveredUtc = await unitOfWork.Signals.GetLastDeliveredSignalTimeUtcAsync(chatId);
                     var lastTime = lastDeliveredUtc.HasValue ? Domain.Common.TimeHelper.FormatAz(lastDeliveredUtc.Value) : "";
                     var dashText = TelegramMessageFormatter.FormatTerminalDashboard(userSettings, activeCount, lastTime);

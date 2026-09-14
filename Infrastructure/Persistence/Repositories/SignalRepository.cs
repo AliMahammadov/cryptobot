@@ -234,17 +234,20 @@ namespace CryptoSense.Infrastructure.Persistence.Repositories
             // BE ayrı, TIME ayrı, SL = CloseReason SL
             // User panel və admin eyni DB sorğusu. TP_A-dan sonra BE olan UNI/TIA TP>0 göstərsin.
 
-            var timeSignals = closed.Where(s => s.CloseReason == "TIME" || 
-                                                (s.OutcomeStatus != null && s.OutcomeStatus.Contains("Müddəti"))).ToList();
+            var timeSignals = closed.Where(s =>
+                !s.IsPartial1Closed
+                && s.CloseReason != "TP_A" && s.CloseReason != "TP_B"
+                && s.CloseReason != "TP1" && s.CloseReason != "TP2" && s.CloseReason != "TP3"
+                && (s.CloseReason == "TIME" || (s.OutcomeStatus != null && s.OutcomeStatus.Contains("Müddəti")))
+            ).ToList();
 
-            var tpSignals = closed.Where(s => !timeSignals.Contains(s) && 
-                                              s.CloseReason != "TIME" && (
-                                              s.IsPartial1Closed || 
-                                              s.CloseReason == "TP_A" || 
-                                              s.CloseReason == "TP_B" || 
-                                              s.CloseReason == "TP1" || 
-                                              s.CloseReason == "TP2" || 
-                                              s.CloseReason == "TP3" || 
+            var tpSignals = closed.Where(s => !timeSignals.Contains(s) && (
+                                              s.IsPartial1Closed ||
+                                              s.CloseReason == "TP_A" ||
+                                              s.CloseReason == "TP_B" ||
+                                              s.CloseReason == "TP1" ||
+                                              s.CloseReason == "TP2" ||
+                                              s.CloseReason == "TP3" ||
                                               s.Status == SignalStatus.Success)).ToList();
 
             var slSignals = closed.Where(s => !timeSignals.Contains(s) && !tpSignals.Contains(s) && (s.CloseReason == "SL" || s.CloseReason == "SL_RESTART_CATCHUP")).ToList();
@@ -385,7 +388,7 @@ namespace CryptoSense.Infrastructure.Persistence.Repositories
                 if (groupedByCoin.TryGetValue(normCoin, out var list) && list.Count > 0)
                 {
                     dto.TotalTrades = list.Count;
-                    dto.SuccessTrades = list.Count(s => s.CloseReason != "TIME" && (s.IsPartial1Closed || s.CloseReason == "TP_A" || s.CloseReason == "TP_B" || s.CloseReason == "TP1" || s.CloseReason == "TP2" || s.CloseReason == "TP3" || (s.Status == SignalStatus.Success && (s.ResultPercent == null || s.ResultPercent >= 0))));
+                    dto.SuccessTrades = list.Count(s => s.IsPartial1Closed || (s.CloseReason != "TIME" && (s.CloseReason == "TP_A" || s.CloseReason == "TP_B" || s.CloseReason == "TP1" || s.CloseReason == "TP2" || s.CloseReason == "TP3" || (s.Status == SignalStatus.Success && (s.ResultPercent == null || s.ResultPercent >= 0)))));
                     dto.FailedTrades = list.Count(s => (s.CloseReason == "SL" || s.CloseReason == "SL_RESTART_CATCHUP") && !s.IsPartial1Closed);
                     int decisive = dto.SuccessTrades + dto.FailedTrades;
                     dto.OverallWinRate = decisive > 0 ? Math.Round(((decimal)dto.SuccessTrades / decisive) * 100, 1) : (dto.SuccessTrades > 0 ? 100m : 0m);
@@ -395,7 +398,7 @@ namespace CryptoSense.Infrastructure.Persistence.Repositories
                     foreach (var tfGroup in tfGroups)
                     {
                         var tfTotal = tfGroup.Count();
-                        var tfSuccess = tfGroup.Count(s => s.CloseReason != "TIME" && (s.IsPartial1Closed || s.CloseReason == "TP_A" || s.CloseReason == "TP_B" || s.CloseReason == "TP1" || s.CloseReason == "TP2" || s.CloseReason == "TP3" || (s.Status == SignalStatus.Success && (s.ResultPercent == null || s.ResultPercent >= 0))));
+                        var tfSuccess = tfGroup.Count(s => s.IsPartial1Closed || (s.CloseReason != "TIME" && (s.CloseReason == "TP_A" || s.CloseReason == "TP_B" || s.CloseReason == "TP1" || s.CloseReason == "TP2" || s.CloseReason == "TP3" || (s.Status == SignalStatus.Success && (s.ResultPercent == null || s.ResultPercent >= 0)))));
                         var tfFailed = tfGroup.Count(s => (s.CloseReason == "SL" || s.CloseReason == "SL_RESTART_CATCHUP") && !s.IsPartial1Closed);
                         int tfDecisive = tfSuccess + tfFailed;
                         var tfWinRate = tfDecisive > 0 ? Math.Round(((decimal)tfSuccess / tfDecisive) * 100, 1) : (tfSuccess > 0 ? 100m : 0m);

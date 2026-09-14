@@ -661,7 +661,7 @@ namespace CryptoSense.Infrastructure.Telegram
                 }
 
                 var unitOfWork = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
-                var openCount = await unitOfWork.Signals.GetActiveSignalsCountAsync();
+                var openCount = await unitOfWork.Signals.GetUserOpenSignalsCountAsync(chatId);
                 var lastDeliveredUtc = await unitOfWork.Signals.GetLastDeliveredSignalTimeUtcAsync(chatId);
                 var lastTime = lastDeliveredUtc.HasValue 
                     ? Domain.Common.TimeHelper.FormatAz(lastDeliveredUtc.Value) 
@@ -724,7 +724,7 @@ namespace CryptoSense.Infrastructure.Telegram
             {
                 _userStates.TryRemove(chatId, out _);
                 var unitOfWork = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
-                var openCount = await unitOfWork.Signals.GetActiveSignalsCountAsync();
+                var openCount = await unitOfWork.Signals.GetUserOpenSignalsCountAsync(chatId);
                 var lastDeliveredUtc = await unitOfWork.Signals.GetLastDeliveredSignalTimeUtcAsync(chatId);
                 var lastTime = lastDeliveredUtc.HasValue ? Domain.Common.TimeHelper.FormatAz(lastDeliveredUtc.Value) : "";
                 var dashText = TelegramMessageFormatter.FormatTerminalDashboard(userSettings, openCount, lastTime);
@@ -1491,7 +1491,7 @@ namespace CryptoSense.Infrastructure.Telegram
                 }
 
                 var unitOfWork = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
-                var openCount = await unitOfWork.Signals.GetActiveSignalsCountAsync();
+                var openCount = await unitOfWork.Signals.GetUserOpenSignalsCountAsync(chatId);
                 var lastDeliveredUtc = await unitOfWork.Signals.GetLastDeliveredSignalTimeUtcAsync(chatId);
                 var lastTime = lastDeliveredUtc.HasValue 
                     ? Domain.Common.TimeHelper.FormatAz(lastDeliveredUtc.Value) 
