@@ -862,25 +862,25 @@ namespace CryptoSense.Infrastructure.Testing
                 return true;
             });
 
-            // 32. Signal Quality: 76.7% Confluence Strictly Rejected (Min 78.0% Required)
-            await AssertTest("Test 39: Signal Quality - 76.7% Confluence Strictly Blocked", async () =>
+            // 32. Signal Quality: 74.0% Confluence Strictly Rejected (Min 75.0% Required)
+            await AssertTest("Test 39: Signal Quality - 74.0% Confluence Strictly Blocked", async () =>
             {
-                // Force confluence to 76.7%
-                decimal testConfluence = 76.7m;
-                bool shouldPass = testConfluence >= 78.0m;
+                // Force confluence to 74.0%
+                decimal testConfluence = 74.0m;
+                bool shouldPass = testConfluence >= 75.0m;
                 if (shouldPass)
                 {
-                    Console.WriteLine("[Test 39 Fail] 76.7% was evaluated as passing!");
+                    Console.WriteLine("[Test 39 Fail] 74.0% was evaluated as passing!");
                     return false;
                 }
 
-                // Test live analysis returns neutral or has score >= 78
+                // Test live analysis returns neutral or has score >= 75
                 var sig = await _signalEngine.AnalyzeCoinAsync("XRPUSDT", "15m", isLiveScan: false);
                 if (sig.SignalType.Contains("LONG") || sig.SignalType.Contains("SHORT"))
                 {
-                    if (sig.ConfluenceScore < 78.0m)
+                    if (sig.ConfluenceScore < 75.0m)
                     {
-                        Console.WriteLine($"[Test 39 Fail] Active signal generated with < 78% confluence: {sig.ConfluenceScore}%");
+                        Console.WriteLine($"[Test 39 Fail] Active signal generated with < 75% confluence: {sig.ConfluenceScore}%");
                         return false;
                     }
                 }
@@ -1369,7 +1369,8 @@ namespace CryptoSense.Infrastructure.Testing
                     telegramFail: 0,
                     skipGozleme: telem.SkipGozleme,
                     skipBtcGate: telem.SkipBtcGate,
-                    skipBtcRange: telem.SkipBtcRange);
+                    skipBtcRange: telem.SkipBtcRange,
+                    maxConfluenceSeen: 0);
 
                 bool hasConf = hbMsg.Contains("Conf:15");
                 bool hasSentZero = hbMsg.Contains("Göndərildi:0") || hbMsg.Contains("G&#246;nd&#601;rildi:0");
@@ -1378,8 +1379,9 @@ namespace CryptoSense.Infrastructure.Testing
                 bool hasBtcRange = hbMsg.Contains("Range:2");
                 bool hasReason = hbMsg.Contains("Səbəb:") || hbMsg.Contains("S&#601;b&#601;b:");
                 bool has60Min = hbMsg.Contains("60 dəq") || hbMsg.Contains("60 d&#601;q");
+                bool hasBuFaizDeyil = hbMsg.Contains("bu faiz deyil") || hbMsg.Contains("bu faiz DEYİL");
 
-                if (!hasConf || !hasSentZero || !hasGozleme || !hasBtcGate || !hasBtcRange || !hasReason || !has60Min)
+                if (!hasConf || !hasSentZero || !hasGozleme || !hasBtcGate || !hasBtcRange || !hasReason || !has60Min || !hasBuFaizDeyil)
                 {
                     Console.WriteLine($"[Test 48 Fail] HB message format mismatch:\n{hbMsg}");
                     return Task.FromResult(false);

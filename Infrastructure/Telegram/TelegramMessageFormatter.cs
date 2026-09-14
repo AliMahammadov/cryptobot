@@ -668,7 +668,8 @@ namespace CryptoSense.Infrastructure.Telegram
             int skipBtcRange = 0,
             int skipCircuitBreaker = 0,
             int skipMaxOpen = 0,
-            int skipDailyLoss = 0)
+            int skipDailyLoss = 0,
+            decimal maxConfluenceSeen = -1)
         {
             var sb = new StringBuilder();
             sb.AppendLine("&#8505;&#65039; <b>Bazar N&#601;zar&#601;ti (Heartbeat)</b>");
@@ -695,7 +696,7 @@ namespace CryptoSense.Infrastructure.Telegram
                         ("BtcGate", skipBtcGate, "BTC Ayı (Bearish) rejimindədir — Alt LONG-lar bloklandı"),
                         ("Range", skipBtcRange, "BTC 1h Kompası Ranging (qeyri-müəyyən) rejimindədir"),
                         ("Gözləmə", skipGozleme, "Bazar zəif konsolidasiyadadır (Gözləmə rejimi / ADX zəif)"),
-                        ("Confluence", skipConfluence, "Confluence balı tələb olunan 75%-dən aşağıdır"),
+                        ("Conf", skipConfluence, "Confluence balı 75%-dən aşağıdır"),
                         ("SL", slWide, "Stop-Loss məsafəsi çox genişdir (> 2.8%)"),
                         ("RR", lowRr, "Risk/Reward nisbəti qeyri-qənaətbəxşdir (< 1.30)"),
                         ("Chase", chase, "Qiymət giriş zonasından uzaqlaşıb (Chase filtri)"),
@@ -705,11 +706,16 @@ namespace CryptoSense.Infrastructure.Telegram
                     };
                     var dominant = reasonsList.OrderByDescending(r => r.Count).FirstOrDefault(r => r.Count > 0);
                     string reasonText = dominant.Count > 0 
-                        ? $"{dominant.Description} ({dominant.Name}: {dominant.Count})"
+                        ? $"{dominant.Description} ({dominant.Name} skip: {dominant.Count} dəfə — bu faiz deyil)"
                         : "Bazar konyukturası A+ siqnal meyarlarına uyğun gəlmir";
 
                     sb.AppendLine($"📌 <b>Səbəb:</b> {reasonText}");
                 }
+            }
+
+            if (maxConfluenceSeen >= 0)
+            {
+                sb.AppendLine($"📊 Bu saat ən yüksək istiqamətli confluence: {maxConfluenceSeen:F1}%");
             }
 
             if (telegramFail > 0)

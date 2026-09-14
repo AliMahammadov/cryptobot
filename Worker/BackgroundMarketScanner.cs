@@ -79,6 +79,7 @@ namespace CryptoSense.Worker
             public int SkipCircuitBreaker;
             public int SkipMaxOpen;
             public int SkipDailyLoss;
+            public decimal MaxConfluenceSeen;
 
             public int SkipBtcGate => SkipBtcBearLong + SkipBtc4hOppose;
 
@@ -102,7 +103,8 @@ namespace CryptoSense.Worker
                 TelegramFail = this.TelegramFail,
                 SkipCircuitBreaker = this.SkipCircuitBreaker,
                 SkipMaxOpen = this.SkipMaxOpen,
-                SkipDailyLoss = this.SkipDailyLoss
+                SkipDailyLoss = this.SkipDailyLoss,
+                MaxConfluenceSeen = this.MaxConfluenceSeen
             };
 
             public void Reset()
@@ -126,6 +128,7 @@ namespace CryptoSense.Worker
                 SkipCircuitBreaker = 0;
                 SkipMaxOpen = 0;
                 SkipDailyLoss = 0;
+                MaxConfluenceSeen = 0;
             }
         }
 
@@ -1902,6 +1905,10 @@ namespace CryptoSense.Worker
 
                             var signal = await engine.AnalyzeCoinAsync(sym, tf, isLiveScan: true);
 
+                            var confNow = signal.ConfluenceScore;
+                            if (confNow > _hourlyTelemetry.MaxConfluenceSeen)
+                                _hourlyTelemetry.MaxConfluenceSeen = confNow;
+
                             // Telemetriya: Confluence, GÖZLƏMƏ, BTC Gate, Range ayrı sayğaclar (indiki Conf-un içində itməsin)
                             bool isTradeQualified = signal.Timeframe != "15m" && signal.Confidence >= 75 &&
                                                     signal.SignalType != null &&
@@ -2331,6 +2338,7 @@ namespace CryptoSense.Worker
                     skipCircuitBreaker = _hourlyTelemetry.SkipCircuitBreaker,
                     skipMaxOpen = _hourlyTelemetry.SkipMaxOpen,
                     skipDailyLoss = _hourlyTelemetry.SkipDailyLoss,
+                    maxConfluenceSeen = _hourlyTelemetry.MaxConfluenceSeen,
                     dataAgeMsBtc = btcSnapForLog?.DataAgeMs ?? -1,
                     btcSource = btcSnapForLog?.Source ?? "no_snap",
                     cbActive = DateTime.UtcNow < _circuitBreakerUntil
@@ -2472,7 +2480,8 @@ namespace CryptoSense.Worker
                     skipBtcRange: snapTelemetry.SkipBtcRange,
                     skipCircuitBreaker: snapTelemetry.SkipCircuitBreaker,
                     skipMaxOpen: snapTelemetry.SkipMaxOpen,
-                    skipDailyLoss: snapTelemetry.SkipDailyLoss);
+                    skipDailyLoss: snapTelemetry.SkipDailyLoss,
+                    maxConfluenceSeen: snapTelemetry.MaxConfluenceSeen);
 
                 // 1) HEARTBEAT: EditMessage ilə köhnə ℹ️-ni gizlin yeniləmə YOXDUR.
                 // Saat başı YENİ mesaj. Telefon bildirişi gəlsin.

@@ -715,7 +715,7 @@ namespace CryptoSense.Infrastructure.Telegram
                 _testModeChats.TryRemove(chatId, out _);
                 var stopMsg = "🏁 <b>Test Rejimi Dayandırıldı! 🔴</b>\n\n" +
                               "✅ Sistem 100% rəsmi 24/7 canlı real bazar skanerinə qayıtdı 🟢.\n" +
-                              "Artıq yalnız real bazar qaydalarına (Confluence >= 78%, R:R >= 1.30) cavab verən real siqnallar göndəriləcək.";
+                              "Artıq yalnız real bazar qaydalarına (Confluence >= 75%, R:R >= 1.30) cavab verən real siqnallar göndəriləcək.";
                 await SendMessageAsync(stopMsg, chatId, TelegramKeyboards.BuildUserKeyboard(userSettings, isAdmin));
                 return;
             }
@@ -922,7 +922,7 @@ namespace CryptoSense.Infrastructure.Telegram
                           "• <b>1 Saat (1h)</b> — Orta müddətli güclü dalğa\n" +
                           "• <b>4 Saat (4h)</b> — Əsas makro trend və güclü səviyyələr\n\n" +
                           "🔍 <b>Skan Mexanizmi:</b>\n" +
-                          $"Sistem arxa fonda hər 10 saniyədən bir bu {cleanCoins.Count} coinin hər birini aktiv zaman kəsiyində (EMA, MACD, RSI, ATR, Confluence və BTC Kompası) analiz edir və Confluence >= 78% olanda şam kilidi ilə istifadəçilərə çatdırır.";
+                          $"Sistem arxa fonda hər 10 saniyədən bir bu {cleanCoins.Count} coinin hər birini aktiv zaman kəsiyində (EMA, MACD, RSI, ATR, Confluence və BTC Kompası) analiz edir və Confluence >= 75% olanda şam kilidi ilə istifadəçilərə çatdırır.";
 
                 await SendMessageAsync(msg, chatId, TelegramKeyboards.BuildAdminTerminalInlineKeyboard());
                 return;
