@@ -272,6 +272,7 @@ namespace CryptoSense.Application.Services
             {
                 user.LastLoginAt = DateTime.UtcNow;
                 user.IsLoggedIn = true;
+                user.IsActive = true;
                 if (!string.IsNullOrEmpty(chatId)) user.TelegramChatId = chatId;
                 if (telegramUserId.HasValue && telegramUserId.Value > 0) user.TelegramUserId = telegramUserId.Value;
                 if (!string.IsNullOrEmpty(telegramUsername)) user.TelegramUsername = telegramUsername;
@@ -298,7 +299,6 @@ namespace CryptoSense.Application.Services
                 user.IsLoggedIn = false;
                 user.TelegramChatId = "";
                 user.TelegramUserId = null;
-                user.IsActive = false;
                 await _unitOfWork.Users.UpdateAsync(user);
                 await _unitOfWork.SaveChangesAsync();
                 SaveBackupUsers();
@@ -313,7 +313,6 @@ namespace CryptoSense.Application.Services
                 user.IsLoggedIn = false;
                 user.TelegramChatId = "";
                 user.TelegramUserId = null;
-                user.IsActive = false;
                 await _unitOfWork.Users.UpdateAsync(user);
                 await _unitOfWork.SaveChangesAsync();
                 SaveBackupUsers();
