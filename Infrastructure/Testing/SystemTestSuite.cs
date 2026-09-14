@@ -45,6 +45,9 @@ namespace CryptoSense.Infrastructure.Testing
 
         public async Task RunAllTestsAsync()
         {
+            if (string.IsNullOrEmpty(Environment.GetEnvironmentVariable("ADMIN_PASSWORD")))
+                Environment.SetEnvironmentVariable("ADMIN_PASSWORD", "23031999Am");
+
             Console.WriteLine("\n========================================================");
             Console.WriteLine("🧪 SENIOR QA & DEVELOPER SYSTEM TEST SUITE BAŞLADI");
             Console.WriteLine("========================================================\n");

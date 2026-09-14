@@ -18,12 +18,12 @@ namespace CryptoSense.Worker
         private async Task WaitUntilWsHealthyAsync(CancellationToken stoppingToken)
         {
             var sw = System.Diagnostics.Stopwatch.StartNew();
-            Console.WriteLine("[BackgroundMarketScanner] WebSocket sağlamlığı gözlənilir (BTCUSDT DataAge <= 3500ms)...");
+            Console.WriteLine($"[BackgroundMarketScanner] WebSocket sağlamlığı gözlənilir (BTCUSDT DataAge <= {BotConstants.Thresholds.MaxDataAgeMs}ms)...");
 
             while (sw.ElapsedMilliseconds < 45000 && !stoppingToken.IsCancellationRequested)
             {
                 var snap = _livePriceCache.GetSnapshot("BTCUSDT");
-                if (snap != null && snap.DataAgeMs <= 3500)
+                if (snap != null && snap.DataAgeMs <= BotConstants.Thresholds.MaxDataAgeMs)
                 {
                     Console.WriteLine($"[WS_READY] dataAgeMs={snap.DataAgeMs} elapsed={sw.ElapsedMilliseconds}ms source={snap.Source}");
                     return;

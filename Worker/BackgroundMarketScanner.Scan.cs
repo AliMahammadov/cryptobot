@@ -185,7 +185,7 @@ namespace CryptoSense.Worker
                     {
                         if (_coinActiveLocks.Count >= MaxGlobalOpenPositions)
                         {
-                            Interlocked.Increment(ref _hourlyTelemetry.SkipLock);
+                            Interlocked.Increment(ref _hourlyTelemetry.SkipMaxOpen);
                             return;
                         }
 
@@ -230,7 +230,7 @@ namespace CryptoSense.Worker
                             }
                             if (_coinActiveLocks.Count >= MaxGlobalOpenPositions)
                             {
-                                Interlocked.Increment(ref _hourlyTelemetry.SkipLock);
+                                Interlocked.Increment(ref _hourlyTelemetry.SkipMaxOpen);
                                 break;
                             }
 
@@ -346,11 +346,7 @@ namespace CryptoSense.Worker
                                 };
                                 var candleCloseUtc = signal.SourceCandleOpenTimeUtc + candleDuration;
 
-                                var maxAllowedLagMs = signal.Timeframe switch
-                                {
-                                    "4h" => 10800000, // 3 saat
-                                    _ => isBootWindow ? 5400000 : 3000000 // 90 dəqiqə (boot) / 50 dəqiqə
-                                };
+                                var maxAllowedLagMs = SignalEngine.GetMaxLiveDelayMs(signal.Timeframe);
                                 var emitLagMs = (DateTime.UtcNow - candleCloseUtc).TotalMilliseconds;
                                 if (emitLagMs > maxAllowedLagMs)
                                 {

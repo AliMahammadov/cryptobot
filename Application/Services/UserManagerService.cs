@@ -68,22 +68,29 @@ namespace CryptoSense.Application.Services
 
                     if (superAdmin == null)
                     {
-                        var seedPwd = Environment.GetEnvironmentVariable("ADMIN_PASSWORD") ?? "23031999Am";
-                        var hash = BCrypt.Net.BCrypt.HashPassword(seedPwd);
-                        var newAdmin = new UserAccount
+                        var seedPwd = Environment.GetEnvironmentVariable("ADMIN_PASSWORD");
+                        if (string.IsNullOrEmpty(seedPwd))
                         {
-                            Username = "Ali",
-                            PasswordHash = hash,
-                            Role = UserRole.Admin,
-                            TelegramUsername = "Ali_Mahammadov",
-                            TelegramUserId = 1219998176,
-                            TelegramChatId = "1219998176",
-                            IsActive = true,
-                            IsLoggedIn = false,
-                            CreatedAtUtc = DateTime.UtcNow,
-                            LastLoginAt = DateTime.UtcNow
-                        };
-                        _unitOfWork.Users.AddAsync(newAdmin).GetAwaiter().GetResult();
+                            // UnitOfWork seeds Ali from AppConfig:AdminSeedPassword / ADMIN_PASSWORD. Do not hash an empty or hardcoded password here.
+                        }
+                        else
+                        {
+                            var hash = BCrypt.Net.BCrypt.HashPassword(seedPwd);
+                            var newAdmin = new UserAccount
+                            {
+                                Username = "Ali",
+                                PasswordHash = hash,
+                                Role = UserRole.Admin,
+                                TelegramUsername = "Ali_Mahammadov",
+                                TelegramUserId = 1219998176,
+                                TelegramChatId = "1219998176",
+                                IsActive = true,
+                                IsLoggedIn = false,
+                                CreatedAtUtc = DateTime.UtcNow,
+                                LastLoginAt = DateTime.UtcNow
+                            };
+                            _unitOfWork.Users.AddAsync(newAdmin).GetAwaiter().GetResult();
+                        }
                     }
 
                     // 2. Ensure Murad exists permanently
@@ -163,67 +170,73 @@ namespace CryptoSense.Application.Services
             // 1. Super Admin shortcut or database lookup
             if (username.Equals("Ali", StringComparison.OrdinalIgnoreCase))
             {
-                var adminSeed = Environment.GetEnvironmentVariable("ADMIN_PASSWORD") ?? "23031999Am";
-                if (password != adminSeed)
+                var adminSeed = Environment.GetEnvironmentVariable("ADMIN_PASSWORD");
+                if (string.IsNullOrEmpty(adminSeed))
+                {
+                    // no env password → fall through to the existing bcrypt DB path below (do not return false here)
+                }
+                else if (password != adminSeed)
                 {
                     return (false, null);
                 }
-
-                var adminUser = await _unitOfWork.Users.GetByUsernameAsync("Ali");
-                if (adminUser == null)
-                {
-                    adminUser = new UserAccount
-                    {
-                        Username = "Ali",
-                        PasswordHash = BCrypt.Net.BCrypt.HashPassword(adminSeed),
-                        Role = UserRole.Admin,
-                        TelegramUsername = "Ali_Mahammadov",
-                        IsActive = true,
-                        CreatedAtUtc = DateTime.UtcNow,
-                        LastLoginAt = DateTime.UtcNow
-                    };
-                    await _unitOfWork.Users.AddAsync(adminUser);
-                }
                 else
                 {
-                    adminUser.Username = "Ali";
-                    adminUser.Role = UserRole.Admin;
-                    adminUser.IsActive = true;
-                }
+                    var adminUser = await _unitOfWork.Users.GetByUsernameAsync("Ali");
+                    if (adminUser == null)
+                    {
+                        adminUser = new UserAccount
+                        {
+                            Username = "Ali",
+                            PasswordHash = BCrypt.Net.BCrypt.HashPassword(adminSeed),
+                            Role = UserRole.Admin,
+                            TelegramUsername = "Ali_Mahammadov",
+                            IsActive = true,
+                            CreatedAtUtc = DateTime.UtcNow,
+                            LastLoginAt = DateTime.UtcNow
+                        };
+                        await _unitOfWork.Users.AddAsync(adminUser);
+                    }
+                    else
+                    {
+                        adminUser.Username = "Ali";
+                        adminUser.Role = UserRole.Admin;
+                        adminUser.IsActive = true;
+                    }
 
-                adminUser.LastLoginAt = DateTime.UtcNow;
-                adminUser.IsLoggedIn = true;
-                if (!string.IsNullOrEmpty(chatId))
-                {
-                    adminUser.TelegramChatId = chatId;
-                }
-                else if (string.IsNullOrEmpty(adminUser.TelegramChatId))
-                {
-                    adminUser.TelegramChatId = "1219998176";
-                }
+                    adminUser.LastLoginAt = DateTime.UtcNow;
+                    adminUser.IsLoggedIn = true;
+                    if (!string.IsNullOrEmpty(chatId))
+                    {
+                        adminUser.TelegramChatId = chatId;
+                    }
+                    else if (string.IsNullOrEmpty(adminUser.TelegramChatId))
+                    {
+                        adminUser.TelegramChatId = "1219998176";
+                    }
 
-                if (telegramUserId.HasValue && telegramUserId.Value > 0)
-                {
-                    adminUser.TelegramUserId = telegramUserId.Value;
-                }
-                else if (!adminUser.TelegramUserId.HasValue || adminUser.TelegramUserId <= 0)
-                {
-                    adminUser.TelegramUserId = 1219998176;
-                }
+                    if (telegramUserId.HasValue && telegramUserId.Value > 0)
+                    {
+                        adminUser.TelegramUserId = telegramUserId.Value;
+                    }
+                    else if (!adminUser.TelegramUserId.HasValue || adminUser.TelegramUserId <= 0)
+                    {
+                        adminUser.TelegramUserId = 1219998176;
+                    }
 
-                if (!string.IsNullOrEmpty(telegramUsername))
-                {
-                    adminUser.TelegramUsername = telegramUsername;
-                }
-                else if (string.IsNullOrEmpty(adminUser.TelegramUsername))
-                {
-                    adminUser.TelegramUsername = "Ali_Mahammadov";
-                }
+                    if (!string.IsNullOrEmpty(telegramUsername))
+                    {
+                        adminUser.TelegramUsername = telegramUsername;
+                    }
+                    else if (string.IsNullOrEmpty(adminUser.TelegramUsername))
+                    {
+                        adminUser.TelegramUsername = "Ali_Mahammadov";
+                    }
 
-                await _unitOfWork.Users.UpdateAsync(adminUser);
-                await _unitOfWork.SaveChangesAsync();
-                SaveBackupUsers();
-                return (true, adminUser);
+                    await _unitOfWork.Users.UpdateAsync(adminUser);
+                    await _unitOfWork.SaveChangesAsync();
+                    SaveBackupUsers();
+                    return (true, adminUser);
+                }
             }
 
             // 2. Regular User match

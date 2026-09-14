@@ -223,7 +223,7 @@ app.MapGet("/version", () =>
             dataAgeMs = btcSnap?.DataAgeMs ?? -1,
             source = btcSnap?.Source ?? "no_snap",
             last = btcSnap?.Last ?? 0,
-            wsHealthy = (btcSnap != null && btcSnap.DataAgeMs <= 3500 && btcSnap.Source != "rest_fallback")
+            wsHealthy = (btcSnap != null && btcSnap.DataAgeMs <= CryptoSense.Domain.Common.BotConstants.Thresholds.MaxDataAgeMs && btcSnap.Source != "rest_fallback")
         }
     });
 });
@@ -282,7 +282,8 @@ app.MapGet("/api/news", async (INewsService newsService) =>
 // Minimum Admin Authorization check for /api/admin/*
 bool IsSuperAdmin(HttpContext ctx)
 {
-    var adminPwd = Environment.GetEnvironmentVariable("ADMIN_PASSWORD") ?? "23031999Am";
+    var adminPwd = Environment.GetEnvironmentVariable("ADMIN_PASSWORD");
+    if (string.IsNullOrEmpty(adminPwd)) return false;
     if (ctx.Request.Headers.TryGetValue("X-Admin-Password", out var pwd) && pwd == adminPwd) return true;
     if (ctx.Request.Headers.TryGetValue("Authorization", out var auth))
     {

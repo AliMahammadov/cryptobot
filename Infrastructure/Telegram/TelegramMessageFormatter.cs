@@ -4,6 +4,7 @@ using System.Globalization;
 using System.Linq;
 using System.Text;
 using CryptoSense.Application.DTOs;
+using CryptoSense.Domain.Common;
 using CryptoSense.Domain.Entities;
 using CryptoSense.Domain.Enums;
 
@@ -722,7 +723,7 @@ namespace CryptoSense.Infrastructure.Telegram
                 sb.AppendLine($"&#9888;&#65039; <b>TELEGRAM_FAIL={telegramFail}</b> &#8212; signal haz&#305;rland&#305;, lakin g&#246;nd&#601;rilm&#601;di!");
             if (dataAgeMsBtc < 0)
                 sb.AppendLine("&#128993; BTC DataAge: <code>&#246;l&#231;&#252;lm&#601;yib (snap yoxdur)</code>");
-            else if (dataAgeMsBtc > 3500)
+            else if (dataAgeMsBtc > BotConstants.Thresholds.MaxDataAgeMs)
                 sb.AppendLine($"&#128308; <b>WS GECİKİR DataAge:{dataAgeMsBtc}ms &gt; 3500ms</b>");
             else
                 sb.AppendLine($"&#128994; BTC DataAge: <code>{dataAgeMsBtc}ms</code> (WS sa&#287;lam)");
@@ -755,7 +756,7 @@ namespace CryptoSense.Infrastructure.Telegram
             sb.AppendLine("━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
             sb.AppendLine($"📌 <b>Deploy Versiyası:</b> <code>v2.0 ({commitHash})</code>");
             sb.AppendLine($"🕒 <b>Boot Vaxtı (AZT):</b> <code>{CryptoSense.Domain.Common.TimeHelper.NowFormatted}</code>");
-            string wsStatus = (dataAgeMsBtc >= 0 && dataAgeMsBtc <= 3500) ? "Sağlam 🟢" : "Gecikir 🔴";
+            string wsStatus = (dataAgeMsBtc >= 0 && dataAgeMsBtc <= BotConstants.Thresholds.MaxDataAgeMs) ? "Sağlam 🟢" : "Gecikir 🔴";
             string wsText = dataAgeMsBtc >= 0 ? $"{dataAgeMsBtc}ms ({wsStatus})" : "Ölçülməyib 🟡";
             sb.AppendLine($"⚡ <b>WebSocket Statusu:</b> <code>{wsText}</code>");
             sb.AppendLine("━━━━━━━━━━━━━━━━━━━━━━━━━━━━");

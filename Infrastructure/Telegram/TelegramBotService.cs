@@ -712,17 +712,6 @@ namespace CryptoSense.Infrastructure.Telegram
                 return false;
             }
 
-            decimal tp1DistCheck = Math.Abs(signal.TakeProfit1 - signal.EntryPrice);
-            decimal tp2DistCheck = signal.TakeProfit2 > 0 ? Math.Abs(signal.TakeProfit2 - signal.EntryPrice) : tp1DistCheck;
-            decimal weightedTpDistCheck = (0.50m * tp1DistCheck) + (0.50m * tp2DistCheck);
-            decimal slDistCheck = Math.Abs(signal.StopLoss - signal.EntryPrice);
-            decimal rrCheck = slDistCheck > 0 ? (weightedTpDistCheck / slDistCheck) : 0m;
-            if (rrCheck < CryptoSense.Domain.Common.BotConstants.Thresholds.MinRiskReward)
-            {
-                Console.WriteLine($"[TelegramBotService] R:R filter blocked (Weighted R:R {rrCheck:F2} < {CryptoSense.Domain.Common.BotConstants.Thresholds.MinRiskReward})");
-                return false;
-            }
-
             await _sendNumberLock.WaitAsync();
             try
             {

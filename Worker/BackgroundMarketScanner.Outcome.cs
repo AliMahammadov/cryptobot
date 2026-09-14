@@ -7,6 +7,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using CryptoSense.Application.Interfaces;
 using CryptoSense.Application.Services;
+using CryptoSense.Domain.Common;
 using CryptoSense.Domain.Entities;
 using CryptoSense.Domain.Enums;
 using CryptoSense.Domain.Interfaces;
@@ -66,7 +67,7 @@ namespace CryptoSense.Worker
                 var nowUtc = DateTime.UtcNow;
 
                 // DataAge > 3500: REST last gÃ¶tÃ¼r, skip etmÉ™ â€” SL buraxÄ±lmasÄ±n
-                if (snap == null || snap.DataAgeMs > 3500)
+                if (snap == null || snap.DataAgeMs > BotConstants.Thresholds.MaxDataAgeMs)
                 {
                     _lastRestFallbackTime[sig.Symbol] = nowUtc;
                     try

@@ -5,6 +5,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using CryptoSense.Application.DTOs;
 using CryptoSense.Application.Interfaces;
+using CryptoSense.Domain.Common;
 using CryptoSense.Domain.Entities;
 using CryptoSense.Domain.Enums;
 using CryptoSense.Domain.Interfaces;
@@ -253,16 +254,16 @@ namespace CryptoSense.Application.Services
             decimal slPct = calculationRefPrice > 0 ? (slDistance / calculationRefPrice) * 100m : 0m;
 
             // 1h SL məsafəsi > 2.8% → kart AÇMA (ölçünü sıxmaq yox, treydi keç)
-            if (timeframe == "1h" && slPct > 2.80m)
+            if (timeframe == "1h" && slPct > BotConstants.Thresholds.MaxSlPct1h)
             {
-                Console.WriteLine($"[SignalEngine] 1h SL too wide ({slPct:F2}% > 2.80%). Trade skipped.");
-                return fail with { SkipReason = $"SKIP_SL_TOO_WIDE (1h SL {slPct:F2}% > 2.80%)" };
+                Console.WriteLine($"[SignalEngine] 1h SL too wide ({slPct:F2}% > {BotConstants.Thresholds.MaxSlPct1h:F2}%). Trade skipped.");
+                return fail with { SkipReason = $"SKIP_SL_TOO_WIDE (1h SL {slPct:F2}% > {BotConstants.Thresholds.MaxSlPct1h:F2}%)" };
             }
             // 4h: eyni qayda, ATR(4h), swing 4–6 × 4h (4h AAVE 1.87 ATR / 2.40% saxla, max 4.0%)
-            if (timeframe == "4h" && slPct > 4.00m)
+            if (timeframe == "4h" && slPct > BotConstants.Thresholds.MaxSlPct4h)
             {
-                Console.WriteLine($"[SignalEngine] 4h SL too wide ({slPct:F2}% > 4.00%). Trade skipped.");
-                return fail with { SkipReason = $"SKIP_SL_TOO_WIDE (4h SL {slPct:F2}% > 4.00%)" };
+                Console.WriteLine($"[SignalEngine] 4h SL too wide ({slPct:F2}% > {BotConstants.Thresholds.MaxSlPct4h:F2}%). Trade skipped.");
+                return fail with { SkipReason = $"SKIP_SL_TOO_WIDE (4h SL {slPct:F2}% > {BotConstants.Thresholds.MaxSlPct4h:F2}%)" };
             }
 
             // BƏND 5: CHASE QADAĞA: son 3×1h şamda qiymət artıq TP istiqamətində ≥1.2% getmişsə 1h kart AçMA (XRP 03:00, AVAX/SOL 05:00).
@@ -348,10 +349,10 @@ namespace CryptoSense.Application.Services
             decimal weightedTpDist = (0.50m * tp1DistActual) + (0.50m * tp2DistActual);
             decimal rrRatio = riskR > 0 ? (weightedTpDist / riskR) : 0m;
 
-            if (rrRatio < 1.30m)
+            if (rrRatio < BotConstants.Thresholds.MinRiskReward)
             {
-                Console.WriteLine($"[SignalEngine] R:R filter blocked (Weighted R:R {rrRatio:F2} < 1.30)");
-                return fail with { SkipReason = $"SKIP_LOW_RR (Weighted R:R {rrRatio:F2} < 1.30)" };
+                Console.WriteLine($"[SignalEngine] R:R filter blocked (Weighted R:R {rrRatio:F2} < {BotConstants.Thresholds.MinRiskReward:F2})");
+                return fail with { SkipReason = $"SKIP_LOW_RR (Weighted R:R {rrRatio:F2} < {BotConstants.Thresholds.MinRiskReward:F2})" };
             }
 
             decimal tp3 = 0m;
@@ -1073,12 +1074,7 @@ namespace CryptoSense.Application.Services
                 newSignal.SignalSwingHigh = srResult.SignalSwingHigh;
             }
 
-            bool isTradeQualifiedPass = newSignal.Confidence >= 75 && newSignal.SignalType != null &&
-                (newSignal.SignalType.Contains("LONG") || newSignal.SignalType.Contains("SHORT"));
-
-            // BUG 1 Fix: Do NOT cache trade-qualified PASS before Telegram emission!
-            // Only cache neutral/gözləmə results, or signals that have already been sent.
-            if (!isTradeQualifiedPass || newSignal.SignalAlertSent)
+            if (newSignal.SignalAlertSent)
             {
                 _recentCandleSignals[candleKey] = newSignal;
             }
