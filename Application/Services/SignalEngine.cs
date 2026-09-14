@@ -710,20 +710,47 @@ namespace CryptoSense.Application.Services
             }
 
             // BTC QAPI: BTC özü kompas tərəfindən bloklanmır (öz SuperTrend/confluence saxlanılır).
-            // Alt LONG (ETH daxil, BTCUSDT istisna) YALNIZ: btcCompass.Regime == Bullish VƏ BTC 4h SuperTrend Bullish (GATE B-nin btc4hStrongLong).
             bool btc4hStrongLong = btcCompass.Btc4hStrongLong;
             bool btc4hStrongShort = btcCompass.Btc4hStrongShort;
-            bool btcConfirmsLong = !isAltcoin || (btcCompass.Regime == BtcMarketRegime.Bullish && btc4hStrongLong);
-            bool btcConfirmsShort = true;
+
+            bool rangingBullCandle = isAltcoin
+                && btcCompass.Regime == BtcMarketRegime.Ranging
+                && closedCandle.Close > closedCandle.Open;
+            bool rangingBearCandle = isAltcoin
+                && btcCompass.Regime == BtcMarketRegime.Ranging
+                && closedCandle.Close < closedCandle.Open;
+
+            // BTCUSDT heç vaxt kompasla bloklanmır.
+            // Bullish + 4h Strong Long → alt LONG olar.
+            // Ranging + yaşıl şam (close>open) → alt LONG olar.
+            // Bearish və ya Ranging qırmızı/doji → alt LONG YOX.
+            bool btcConfirmsLong = !isAltcoin
+                || (btcCompass.Regime == BtcMarketRegime.Bullish && btc4hStrongLong)
+                || rangingBullCandle;
+
+            // Bearish → SHORT olar.
+            // Ranging + qırmızı şam (close<open) → SHORT olar.
+            // Ranging yaşıl/doji → SHORT YOX.
+            // Bullish (ranging deyil) → SHORT-u burada kəsmə; GATE B 4h Strong Long-dursa SHORT-u kəsəcək.
+            bool btcConfirmsShort = !isAltcoin
+                || btcCompass.Regime == BtcMarketRegime.Bearish
+                || rangingBearCandle
+                || (btcCompass.Regime == BtcMarketRegime.Bullish && !btc4hStrongLong);
+
             bool ethConfirmsLong = true;
             bool ethConfirmsShort = true;
 
             if (isAltcoin)
             {
-                if (!btcConfirmsLong)
-                {
-                    reasons.Add("SKIP_BTC_BEAR_LONG: BTC 1h Bullish və BTC 4h SuperTrend Bullish tələb olunur — alt LONG bloklandı");
-                }
+                if (btcCompass.Regime == BtcMarketRegime.Bearish && !btcConfirmsLong)
+                    reasons.Add("SKIP_BTC_BEAR_LONG: BTC 1h Bearish — alt LONG bloklandı");
+                else if (btcCompass.Regime == BtcMarketRegime.Ranging && !btcConfirmsLong)
+                    reasons.Add("SKIP_BTC_RANGE: BTC 1h Ranging + qırmızı/doji şam — alt LONG bloklandı");
+                else if (!btcConfirmsLong)
+                    reasons.Add("SKIP_BTC_BEAR_LONG: BTC 1h Bullish VƏ BTC 4h SuperTrend Bullish tələb olunur — alt LONG bloklandı");
+
+                if (btcCompass.Regime == BtcMarketRegime.Ranging && !btcConfirmsShort)
+                    reasons.Add("SKIP_BTC_RANGE: BTC 1h Ranging + yaşıl/doji şam — alt SHORT bloklandı");
 
                 bool isHighCorr = altBtcCorr > 0.7m;
                 bool altRsPositive = altRs > 0m;
@@ -840,21 +867,19 @@ namespace CryptoSense.Application.Services
                 if (!hasValidMarketRegime) reasons.Add($"Rejim Filtri: ADX ({indicators.Adx:F1}) < {minAdxRequired:F1} (Bazar zəif/yan konsolidasiyadadır)");
                 if (indicators.SuperTrendVote != IndicatorVote.Bullish && isUptrend) reasons.Add("SuperTrend təsdiqi yoxdur (Trend ziddiyyətlidir)");
                 if (isAltcoin && !btcConfirmsShort && direction == SignalDirection.Sell) reasons.Add("BTC rejim struktur uyğunsuzluğu səbəbilə altcoin SHORT-u bloklandı");
-                if (isAltcoin && !btcConfirmsLong && direction == SignalDirection.Buy && !reasons.Any(r => r.Contains("SKIP_BTC_BEAR_LONG")))
+                if (isAltcoin && !btcConfirmsLong && direction == SignalDirection.Buy && !reasons.Any(r => r.Contains("SKIP_BTC_BEAR_LONG") || r.Contains("SKIP_BTC_RANGE")))
                 {
                     reasons.Add("SKIP_BTC_BEAR_LONG: BTC 1h Bullish və BTC 4h SuperTrend Bullish tələb olunur — alt LONG bloklandı");
                 }
             }
 
             // Alt LONG təhlükəsizlik baryeri: BTC 1h və ya 4h təsdiq etmirsə alt LONG qətiyyən buraxılmasın
-            if (isAltcoin && determinedType.Contains("LONG") && (!btcConfirmsLong || btcCompass.Regime != BtcMarketRegime.Bullish || !btc4hStrongLong))
+            if (isAltcoin && determinedType.Contains("LONG") && !btcConfirmsLong)
             {
                 determinedType = "GÖZLƏMƏ ⚪";
                 confidence = 50;
-                if (!reasons.Any(r => r.Contains("SKIP_BTC_BEAR_LONG")))
-                {
-                    reasons.Add("SKIP_BTC_BEAR_LONG: BTC 1h Bullish və BTC 4h SuperTrend Bullish tələb olunur — alt LONG bloklandı");
-                }
+                if (!reasons.Any(r => r.Contains("SKIP_BTC_BEAR_LONG") || r.Contains("SKIP_BTC_RANGE")))
+                    reasons.Add("SKIP_BTC_BEAR_LONG: alt LONG üçün BTC təsdiqi yoxdur");
             }
 
             if (timeframe == "1h" && direction == SignalDirection.Buy && determinedType.Contains("LONG"))
@@ -879,16 +904,12 @@ namespace CryptoSense.Application.Services
                 catch (Exception _ex) { Console.WriteLine($"[SignalEngine] Swallowed exception: {_ex.Message}"); }
             }
 
-            // --- ADDITIVE GATE A: BTC 1h Ranging → 1h və 4h alt trend yoxdur ---
-            if (isLiveScan
-                && (timeframe == "1h" || timeframe == "4h")
-                && isAltcoin
-                && (determinedType.Contains("LONG") || determinedType.Contains("SHORT"))
-                && btcCompass.Regime == BtcMarketRegime.Ranging)
+            if (isAltcoin && determinedType.Contains("SHORT") && !btcConfirmsShort)
             {
-                determinedType = "GÖZLƏMƏ ⚪";  // mövcud waiting label-i istifadə et, yeni enum YOX
+                determinedType = "GÖZLƏMƏ ⚪";
                 confidence = 50;
-                reasons.Add($"SKIP_BTC_RANGE: BTC 1h kompası Ranging — {timeframe} alt siqnalı bloklandı");
+                if (!reasons.Any(r => r.Contains("SKIP_BTC_RANGE") || r.Contains("SKIP_BTC_4H")))
+                    reasons.Add("SKIP_BTC_RANGE: alt SHORT üçün BTC təsdiqi yoxdur");
             }
 
             // --- ADDITIVE GATE B: BTC 4h güclü əks istiqamət (1h və 4h alt tətbiq olunur) ---
