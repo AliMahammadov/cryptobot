@@ -610,6 +610,19 @@ namespace CryptoSense.Infrastructure.Telegram
             return sb.ToString();
         }
 
+        public static string FormatStopConfirmPrompt()
+        {
+            var sb = new StringBuilder();
+            sb.AppendLine("⚠️ <b>Bildirişləri Dayandırmaq</b>");
+            sb.AppendLine("━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+            sb.AppendLine("Siqnal və bazar bildirişlərini dayandırmaq istədiyinizə əminsiniz?");
+            sb.AppendLine("• Bot sizin üçün yeni siqnal bildirişləri göndərməyəcək.");
+            sb.AppendLine("• Mövcud açıq mövqeləriniz izlənmədə qalacaq.");
+            sb.AppendLine("━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+            sb.AppendLine("Davam etmək istədiyinizə əminsiniz?");
+            return sb.ToString();
+        }
+
         public static string FormatResetConfirmationPrompt()
         {
             var sb = new StringBuilder();

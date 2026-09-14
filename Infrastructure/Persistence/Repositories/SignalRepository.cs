@@ -234,24 +234,26 @@ namespace CryptoSense.Infrastructure.Persistence.Repositories
             // BE ayrı, TIME ayrı, SL = CloseReason SL
             // User panel və admin eyni DB sorğusu. TP_A-dan sonra BE olan UNI/TIA TP>0 göstərsin.
 
-            var tpSignals = closed.Where(s => s.IsPartial1Closed || 
+            var timeSignals = closed.Where(s => s.CloseReason == "TIME" || 
+                                                (s.OutcomeStatus != null && s.OutcomeStatus.Contains("Müddəti"))).ToList();
+
+            var tpSignals = closed.Where(s => !timeSignals.Contains(s) && 
+                                              s.CloseReason != "TIME" && (
+                                              s.IsPartial1Closed || 
                                               s.CloseReason == "TP_A" || 
                                               s.CloseReason == "TP_B" || 
                                               s.CloseReason == "TP1" || 
                                               s.CloseReason == "TP2" || 
                                               s.CloseReason == "TP3" || 
-                                              s.Status == SignalStatus.Success).ToList();
+                                              s.Status == SignalStatus.Success)).ToList();
 
-            var slSignals = closed.Where(s => !tpSignals.Contains(s) && (s.CloseReason == "SL" || s.CloseReason == "SL_RESTART_CATCHUP")).ToList();
+            var slSignals = closed.Where(s => !timeSignals.Contains(s) && !tpSignals.Contains(s) && (s.CloseReason == "SL" || s.CloseReason == "SL_RESTART_CATCHUP")).ToList();
 
-            var beSignals = closed.Where(s => !tpSignals.Contains(s) && !slSignals.Contains(s) && 
+            var beSignals = closed.Where(s => !timeSignals.Contains(s) && !tpSignals.Contains(s) && !slSignals.Contains(s) && 
                                               (s.CloseReason == "BE" || s.CloseReason == "NO_EDGE" || s.Status == SignalStatus.Neutral || 
                                               (s.OutcomeStatus != null && s.OutcomeStatus.Contains("Breakeven")))).ToList();
 
-            var timeSignals = closed.Where(s => !tpSignals.Contains(s) && !slSignals.Contains(s) && 
-                                                (s.CloseReason == "TIME" || (s.OutcomeStatus != null && s.OutcomeStatus.Contains("Müddəti")))).ToList();
-
-            var otherFailed = closed.Where(s => !tpSignals.Contains(s) && !slSignals.Contains(s) && !beSignals.Contains(s) && !timeSignals.Contains(s) && 
+            var otherFailed = closed.Where(s => !timeSignals.Contains(s) && !tpSignals.Contains(s) && !slSignals.Contains(s) && !beSignals.Contains(s) && 
                                                 (s.Status == SignalStatus.Failed || (s.ResultPercent.HasValue && s.ResultPercent.Value < -0.20m))).ToList();
 
             int successCount = tpSignals.Count;
@@ -259,10 +261,24 @@ namespace CryptoSense.Infrastructure.Persistence.Repositories
             int beCount = beSignals.Count;
             int timeCount = timeSignals.Count;
 
+            bool hasSpecificTf = !string.IsNullOrEmpty(specificTimeframe) 
+                && specificTimeframe != "Hamısı" 
+                && specificTimeframe != "Hamisi" 
+                && specificTimeframe != "AllTime" 
+                && specificTimeframe != "Hamısı (Bütün Tarix)";
+
+            int openSignalsCount = await _context.Signals.CountAsync(s =>
+                !s.IsTest
+                && (s.SignalType.Contains("LONG") || s.SignalType.Contains("SHORT"))
+                && s.Status == SignalStatus.Open && !s.IsClosed
+                && s.SignalAlertSent && s.SignalNumber > 0
+                && (userCoins == null || userCoins.Count == 0 || userCoins.Contains(s.Symbol))
+                && (!hasSpecificTf || s.Timeframe == specificTimeframe));
+
             var stats = new PerformanceStats
             {
-                TotalSignals = all.Count,
-                OpenSignals = all.Count(s => s.Status == SignalStatus.Open && !s.IsClosed),
+                TotalSignals = closed.Count + openSignalsCount,
+                OpenSignals = openSignalsCount,
                 SuccessSignals = successCount,
                 FailedSignals = failedCount,
                 NeutralSignals = beCount,
@@ -369,7 +385,7 @@ namespace CryptoSense.Infrastructure.Persistence.Repositories
                 if (groupedByCoin.TryGetValue(normCoin, out var list) && list.Count > 0)
                 {
                     dto.TotalTrades = list.Count;
-                    dto.SuccessTrades = list.Count(s => s.IsPartial1Closed || s.CloseReason == "TP_A" || s.CloseReason == "TP_B" || s.CloseReason == "TP1" || s.CloseReason == "TP2" || s.CloseReason == "TP3" || (s.Status == SignalStatus.Success && (s.ResultPercent == null || s.ResultPercent >= 0)));
+                    dto.SuccessTrades = list.Count(s => s.CloseReason != "TIME" && (s.IsPartial1Closed || s.CloseReason == "TP_A" || s.CloseReason == "TP_B" || s.CloseReason == "TP1" || s.CloseReason == "TP2" || s.CloseReason == "TP3" || (s.Status == SignalStatus.Success && (s.ResultPercent == null || s.ResultPercent >= 0))));
                     dto.FailedTrades = list.Count(s => (s.CloseReason == "SL" || s.CloseReason == "SL_RESTART_CATCHUP") && !s.IsPartial1Closed);
                     int decisive = dto.SuccessTrades + dto.FailedTrades;
                     dto.OverallWinRate = decisive > 0 ? Math.Round(((decimal)dto.SuccessTrades / decisive) * 100, 1) : (dto.SuccessTrades > 0 ? 100m : 0m);
@@ -379,7 +395,7 @@ namespace CryptoSense.Infrastructure.Persistence.Repositories
                     foreach (var tfGroup in tfGroups)
                     {
                         var tfTotal = tfGroup.Count();
-                        var tfSuccess = tfGroup.Count(s => s.IsPartial1Closed || s.CloseReason == "TP_A" || s.CloseReason == "TP_B" || s.CloseReason == "TP1" || s.CloseReason == "TP2" || s.CloseReason == "TP3" || (s.Status == SignalStatus.Success && (s.ResultPercent == null || s.ResultPercent >= 0)));
+                        var tfSuccess = tfGroup.Count(s => s.CloseReason != "TIME" && (s.IsPartial1Closed || s.CloseReason == "TP_A" || s.CloseReason == "TP_B" || s.CloseReason == "TP1" || s.CloseReason == "TP2" || s.CloseReason == "TP3" || (s.Status == SignalStatus.Success && (s.ResultPercent == null || s.ResultPercent >= 0))));
                         var tfFailed = tfGroup.Count(s => (s.CloseReason == "SL" || s.CloseReason == "SL_RESTART_CATCHUP") && !s.IsPartial1Closed);
                         int tfDecisive = tfSuccess + tfFailed;
                         var tfWinRate = tfDecisive > 0 ? Math.Round(((decimal)tfSuccess / tfDecisive) * 100, 1) : (tfSuccess > 0 ? 100m : 0m);
@@ -423,7 +439,11 @@ namespace CryptoSense.Infrastructure.Persistence.Repositories
             }
 
             return await _context.Signals
-                .CountAsync(s => deliveredSignalIds.Contains(s.Id) && s.Status == SignalStatus.Open && !s.IsClosed && s.SignalAlertSent && s.SignalNumber > 0);
+                .CountAsync(s => !s.IsTest
+                    && (s.SignalType.Contains("LONG") || s.SignalType.Contains("SHORT"))
+                    && deliveredSignalIds.Contains(s.Id)
+                    && s.Status == SignalStatus.Open && !s.IsClosed
+                    && s.SignalAlertSent && s.SignalNumber > 0);
         }
 
         public async Task RecordDeliveryAsync(int signalId, string chatId, int userSignalNumber)
@@ -491,8 +511,37 @@ namespace CryptoSense.Infrastructure.Persistence.Repositories
             DateTime? untilUtc = null, 
             bool isAllTime = false)
         {
-            // User panel və admin eyni DB sorğusu
-            return await GetPerformanceStatsAsync(specificTimeframe, userCoins, sinceUtc, untilUtc, isAllTime);
+            var stats = await GetPerformanceStatsAsync(specificTimeframe, userCoins, sinceUtc, untilUtc, isAllTime);
+
+            var deliveredSignalIds = await _context.UserSignalDeliveries
+                .Where(d => d.TelegramChatId == chatId)
+                .Select(d => d.SignalId)
+                .ToListAsync();
+
+            bool hasSpecificTf = !string.IsNullOrEmpty(specificTimeframe) 
+                && specificTimeframe != "Hamısı" 
+                && specificTimeframe != "Hamisi" 
+                && specificTimeframe != "AllTime" 
+                && specificTimeframe != "Hamısı (Bütün Tarix)";
+
+            int userOpenCount = 0;
+            if (deliveredSignalIds.Count > 0)
+            {
+                userOpenCount = await _context.Signals.CountAsync(s =>
+                    !s.IsTest
+                    && (s.SignalType.Contains("LONG") || s.SignalType.Contains("SHORT"))
+                    && deliveredSignalIds.Contains(s.Id)
+                    && s.Status == SignalStatus.Open && !s.IsClosed
+                    && s.SignalAlertSent && s.SignalNumber > 0
+                    && (userCoins == null || userCoins.Count == 0 || userCoins.Contains(s.Symbol))
+                    && (!hasSpecificTf || s.Timeframe == specificTimeframe));
+            }
+
+            int closedCount = stats.TotalSignals - stats.OpenSignals;
+            stats.OpenSignals = userOpenCount;
+            stats.TotalSignals = closedCount + userOpenCount;
+
+            return stats;
         }
 
         public async Task<int> CleanupOrphanedSignalsAsync()

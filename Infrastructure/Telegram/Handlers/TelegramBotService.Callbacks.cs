@@ -45,7 +45,7 @@ namespace CryptoSense.Infrastructure.Telegram
                     userSettings.LastPortfolioSummaryMessageId = null;
                 }
 
-                var activeCount = await unitOfWork.Signals.GetActiveSignalsCountAsync();
+                var activeCount = await unitOfWork.Signals.GetUserOpenSignalsCountAsync(chatId);
                 var lastDeliveredUtc = await unitOfWork.Signals.GetLastDeliveredSignalTimeUtcAsync(chatId);
                 var lastTime = lastDeliveredUtc.HasValue ? Domain.Common.TimeHelper.FormatAz(lastDeliveredUtc.Value) : "";
                 var dashText = TelegramMessageFormatter.FormatTerminalDashboard(userSettings, activeCount, lastTime);
@@ -70,9 +70,30 @@ namespace CryptoSense.Infrastructure.Telegram
                 userSettings.IsTerminalOpen = true;
                 SaveSettings();
             }
+            else if (data == "cb_terminal")
+            {
+                var activeCount = await unitOfWork.Signals.GetUserOpenSignalsCountAsync(chatId);
+                var lastDeliveredUtc = await unitOfWork.Signals.GetLastDeliveredSignalTimeUtcAsync(chatId);
+                var lastTime = lastDeliveredUtc.HasValue ? Domain.Common.TimeHelper.FormatAz(lastDeliveredUtc.Value) : "";
+                var dashText = TelegramMessageFormatter.FormatTerminalDashboard(userSettings, activeCount, lastTime);
+                var inlineKb = TelegramKeyboards.BuildTerminalInlineKeyboard(userSettings, _testModeChats.ContainsKey(chatId), isCallerAdmin);
+                bool edited = await EditMessageTextAsync(chatId, messageId, dashText, inlineKb);
+                if (!edited)
+                {
+                    var newMsgId = await SendMessageReturnIdAsync(dashText, chatId, inlineKb);
+                    userSettings.LastTerminalMessageId = newMsgId;
+                }
+                else
+                {
+                    userSettings.LastTerminalMessageId = messageId;
+                }
+
+                userSettings.IsTerminalOpen = true;
+                SaveSettings();
+            }
             else if (data == "cb_refresh")
             {
-                var activeCount = await unitOfWork.Signals.GetActiveSignalsCountAsync();
+                var activeCount = await unitOfWork.Signals.GetUserOpenSignalsCountAsync(chatId);
                 var lastDeliveredUtc = await unitOfWork.Signals.GetLastDeliveredSignalTimeUtcAsync(chatId);
                 var lastTime = lastDeliveredUtc.HasValue ? Domain.Common.TimeHelper.FormatAz(lastDeliveredUtc.Value) : "";
                 var dashText = TelegramMessageFormatter.FormatTerminalDashboard(userSettings, activeCount, lastTime);
@@ -96,7 +117,14 @@ namespace CryptoSense.Infrastructure.Telegram
             }
             else if (data == "cb_toggle")
             {
-                if (!userSettings.IsActive && userSettings.Coins.Count == 0)
+                if (userSettings.IsActive)
+                {
+                    var confirmMsg = TelegramMessageFormatter.FormatStopConfirmPrompt();
+                    await EditMessageTextAsync(chatId, messageId, confirmMsg, TelegramKeyboards.BuildStopConfirmationKeyboard());
+                    return;
+                }
+
+                if (userSettings.Coins.Count == 0)
                 {
                     await SendMessageAsync(
                         "⛔ Ticarət başlamadı.\nSəbəb: heç bir coin seçilməyib.\nƏvvəl ⚙️ Coin Seçimi ilə ən azı 1 coin seçin.",
@@ -104,20 +132,50 @@ namespace CryptoSense.Infrastructure.Telegram
                         TelegramKeyboards.BuildCoinSelectionKeyboard());
                     return;
                 }
-                userSettings.IsActive = !userSettings.IsActive;
+                userSettings.IsActive = true;
+                userSettings.LastResumeTime = DateTime.UtcNow;
                 SaveSettings();
                 try
                 {
                     var dbUser = await unitOfWork.Users.GetByChatIdOrTelegramUserIdAsync(chatId, null);
                     if (dbUser != null)
                     {
-                        dbUser.IsActive = userSettings.IsActive;
+                        dbUser.IsActive = true;
                         await unitOfWork.Users.UpdateAsync(dbUser);
                         await unitOfWork.SaveChangesAsync();
                     }
                 }
                 catch { }
-                var activeCount = await unitOfWork.Signals.GetActiveSignalsCountAsync();
+                var activeCount = await unitOfWork.Signals.GetUserOpenSignalsCountAsync(chatId);
+                var lastDeliveredUtc = await unitOfWork.Signals.GetLastDeliveredSignalTimeUtcAsync(chatId);
+                var lastTime = lastDeliveredUtc.HasValue ? Domain.Common.TimeHelper.FormatAz(lastDeliveredUtc.Value) : "";
+                var dashText = TelegramMessageFormatter.FormatTerminalDashboard(userSettings, activeCount, lastTime);
+                var inlineKb = TelegramKeyboards.BuildTerminalInlineKeyboard(userSettings, _testModeChats.ContainsKey(chatId), isCallerAdmin);
+                bool edited = await EditMessageTextAsync(chatId, messageId, dashText, inlineKb);
+                if (!edited)
+                {
+                    var newMsgId = await SendMessageReturnIdAsync(dashText, chatId, inlineKb);
+                    userSettings.LastTerminalMessageId = newMsgId;
+                    userSettings.IsTerminalOpen = true;
+                    SaveSettings();
+                }
+            }
+            else if (data == "cb_toggle_stop_confirm")
+            {
+                userSettings.IsActive = false;
+                SaveSettings();
+                try
+                {
+                    var dbUser = await unitOfWork.Users.GetByChatIdOrTelegramUserIdAsync(chatId, null);
+                    if (dbUser != null)
+                    {
+                        dbUser.IsActive = false;
+                        await unitOfWork.Users.UpdateAsync(dbUser);
+                        await unitOfWork.SaveChangesAsync();
+                    }
+                }
+                catch { }
+                var activeCount = await unitOfWork.Signals.GetUserOpenSignalsCountAsync(chatId);
                 var lastDeliveredUtc = await unitOfWork.Signals.GetLastDeliveredSignalTimeUtcAsync(chatId);
                 var lastTime = lastDeliveredUtc.HasValue ? Domain.Common.TimeHelper.FormatAz(lastDeliveredUtc.Value) : "";
                 var dashText = TelegramMessageFormatter.FormatTerminalDashboard(userSettings, activeCount, lastTime);
@@ -137,7 +195,7 @@ namespace CryptoSense.Infrastructure.Telegram
                 if (newState)
                 {
                     _testModeChats[chatId] = true;
-                    var activeCount = await unitOfWork.Signals.GetActiveSignalsCountAsync();
+                    var activeCount = await unitOfWork.Signals.GetUserOpenSignalsCountAsync(chatId);
                     var lastDeliveredUtc = await unitOfWork.Signals.GetLastDeliveredSignalTimeUtcAsync(chatId);
                     var lastTime = lastDeliveredUtc.HasValue ? Domain.Common.TimeHelper.FormatAz(lastDeliveredUtc.Value) : "";
                     var dashText = TelegramMessageFormatter.FormatTerminalDashboard(userSettings, activeCount, lastTime);
@@ -305,10 +363,11 @@ namespace CryptoSense.Infrastructure.Telegram
             }
             else if (data == "cb_status")
             {
-                var activeCount = await unitOfWork.Signals.GetActiveSignalsCountAsync();
+                var openCount = await unitOfWork.Signals.GetUserOpenSignalsCountAsync(chatId);
                 var lastDeliveredUtc = await unitOfWork.Signals.GetLastDeliveredSignalTimeUtcAsync(chatId);
                 var lastTime = lastDeliveredUtc.HasValue ? Domain.Common.TimeHelper.FormatAz(lastDeliveredUtc.Value) : "";
-                var statusMsg = TelegramMessageFormatter.FormatBotStatus(userSettings, activeCount, lastTime);
+                bool canPush = await CanReceivePushAsync(chatId);
+                var statusMsg = TelegramMessageFormatter.FormatBotStatus(userSettings, openCount, lastTime, canPush);
                 if (_testModeChats.ContainsKey(chatId))
                 {
                     statusMsg += "\n\n🧪 <b>Test Rejimi:</b> AKTİVDİR 🟢\n<i>Bütün butonlar və simulyasiyalar test üçün hazırdır.</i>";

@@ -190,6 +190,24 @@ namespace CryptoSense.Infrastructure.Telegram
             return BuildCustomCoinsKeyboard(settings ?? new UserSettings());
         }
 
+        public static object BuildStopConfirmationKeyboard()
+        {
+            return new
+            {
+                inline_keyboard = new[]
+                {
+                    new[]
+                    {
+                        new { text = "✅ Bəli, bildirişləri dayandır", callback_data = "cb_toggle_stop_confirm" }
+                    },
+                    new[]
+                    {
+                        new { text = "❌ İmtina", callback_data = "cb_menu" }
+                    }
+                }
+            };
+        }
+
         public static object BuildResetConfirmationKeyboard()
         {
             return new

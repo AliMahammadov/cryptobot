@@ -1508,13 +1508,9 @@ namespace CryptoSense.Infrastructure.Telegram
             }
             else if (text.Contains("Dayandır") || text.Contains("Dayandir") || text == "/stop")
             {
-                userSettings.IsActive = false;
-                SaveSettings();
-                await SendMessageAsync("🛑 <b>Canlı Bildirişlər Dayandırıldı! 🔴</b>\n\n" +
-                                       "Sizə yeni siqnal və nəticə bildirişləri gəlməyəcək.\n" +
-                                       "Yenidən başlatmaq üçün <b>▶️ Bildirişləri Başlat</b> düyməsinə klikləyin.", 
-                                       chatId, 
-                                       TelegramKeyboards.BuildUserKeyboard(userSettings, isAdmin));
+                var confirmMsg = TelegramMessageFormatter.FormatStopConfirmPrompt();
+                await SendMessageAsync(confirmMsg, chatId, TelegramKeyboards.BuildStopConfirmationKeyboard());
+                return;
             }
             else if (text.Contains("Başlat") || text.Contains("Baslat") || text == "/resume" || text == "/start_signals")
             {
@@ -1556,18 +1552,9 @@ namespace CryptoSense.Infrastructure.Telegram
                     return;
                 }
 
-                userSettings.AlertCounter = 0;
-                userSettings.LastResumeTime = DateTime.UtcNow;
-                SaveSettings();
-
-                int coinCount = userSettings.Coins.Count;
-                var resetMsg = "🧹 <b>Bildiriş Sayğacınız Sıfırlandı! ✅</b>\n\n" +
-                               "• Şəxsi siqnal sayğacınız (#1) sıfırlandı və yeni bildirişlər üçün hazırlandı.\n" +
-                               "• Baza statistikası və keçmiş ticarət nəticələri qorunub saxlanıldı.\n" +
-                               $"• Seçilmiş coin siyahınız (<b>{coinCount} coin</b>) qorunub saxlanıldı.\n" +
-                               $"• Bildiriş Statusu: {(userSettings.IsActive ? "Aktiv 🟢" : "Dayandırılıb 🔴")}";
-
-                await SendMessageAsync(resetMsg, chatId, TelegramKeyboards.BuildUserKeyboard(userSettings, isAdmin));
+                var confirmMsg = TelegramMessageFormatter.FormatResetConfirmationPrompt();
+                await SendMessageAsync(confirmMsg, chatId, TelegramKeyboards.BuildResetConfirmationKeyboard());
+                return;
             }
             else if (text.Contains("Dərin") || text.Contains("Derin") || text == "📈 Dərin Statistika" || text == "📈 Coinlər Üzrə Dərin Statistika" || text == "/coin_stats")
             {
@@ -1600,7 +1587,7 @@ namespace CryptoSense.Infrastructure.Telegram
             else if (text.Contains("Coin Seçimi") || text.Contains("Coin Secimi") || text == "/setcoins" || text.Contains("Coinlərim") || text.Contains("Coinlerim") || text == "/my" || text == "⚡ Bütün Siqnallar" || text == "/scan")
             {
                 var unitOfWork = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
-                var openCount = await unitOfWork.Signals.GetActiveSignalsCountAsync();
+                var openCount = await unitOfWork.Signals.GetUserOpenSignalsCountAsync(chatId);
                 var lastDeliveredUtc = await unitOfWork.Signals.GetLastDeliveredSignalTimeUtcAsync(chatId);
                 var lastTime = lastDeliveredUtc.HasValue ? Domain.Common.TimeHelper.FormatAz(lastDeliveredUtc.Value) : "";
                 var dashText = TelegramMessageFormatter.FormatTerminalDashboard(userSettings, openCount, lastTime);
