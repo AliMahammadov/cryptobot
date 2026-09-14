@@ -61,8 +61,16 @@ namespace CryptoSense.Domain.Common
             public const decimal MinRiskReward            = 1.30m;
             /// <summary>No-signal heartbeat interval (minutes)</summary>
             public const int     HeartbeatIntervalMinutes = 60;
-            /// <summary>ATR multiplier for stop-loss</summary>
-            public const decimal AtrMultiplierSl          = 1.50m;
+            /// <summary>Max Stop-Loss percentage for 1h signals (2.80%)</summary>
+            public const decimal MaxSlPct1h               = 2.80m;
+            /// <summary>Max Stop-Loss percentage for 4h signals (4.00%)</summary>
+            public const decimal MaxSlPct4h               = 4.00m;
+            /// <summary>Max allowable WebSocket DataAge in milliseconds</summary>
+            public const long    MaxDataAgeMs             = 3500;
+            /// <summary>Max global concurrent open signals</summary>
+            public const int     MaxGlobalOpenPositions   = 20;
+            /// <summary>Max daily loss threshold percentage before trading halts</summary>
+            public const decimal DailyLossThreshold       = -3.0m;
             /// <summary>Min ADX for 1h signals</summary>
             public const decimal MinAdx1h                 = 22m;
             /// <summary>Min ADX for 4h signals</summary>

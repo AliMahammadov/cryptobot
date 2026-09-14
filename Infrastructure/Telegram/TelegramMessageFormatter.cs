@@ -715,7 +715,7 @@ namespace CryptoSense.Infrastructure.Telegram
 
             if (maxConfluenceSeen >= 0)
             {
-                sb.AppendLine($"📊 Bu saat ən yüksək istiqamətli confluence: {maxConfluenceSeen:F1}%");
+                sb.AppendLine($"📊 Bu saat ən yüksək istiqamətli confluence: {maxConfluenceSeen.ToString("F1", CultureInfo.InvariantCulture)}%");
             }
 
             if (telegramFail > 0)

@@ -82,8 +82,8 @@ namespace CryptoSense.Infrastructure.Testing
                 var indicators = _indicatorEngine.CalculateIndicators(historySlice);
 
                 // Check Institutional Confluence criteria
-                bool isLong = (indicators.ConfluenceScore >= 72m && indicators.SuperTrendVote == IndicatorVote.Bullish && indicators.MacdHist > 0 && indicators.Rsi >= 38 && indicators.Rsi <= 68);
-                bool isShort = (indicators.ConfluenceScore <= 28m && indicators.SuperTrendVote == IndicatorVote.Bearish && indicators.MacdHist < 0 && indicators.Rsi >= 32 && indicators.Rsi <= 62);
+                bool isLong = (indicators.ConfluenceScore >= CryptoSense.Domain.Common.BotConstants.Thresholds.MinConfluence1h4h && indicators.SuperTrendVote == IndicatorVote.Bullish && indicators.MacdHist > 0 && indicators.Rsi >= 38 && indicators.Rsi <= 68);
+                bool isShort = (indicators.ConfluenceScore <= (100m - CryptoSense.Domain.Common.BotConstants.Thresholds.MinConfluence1h4h) && indicators.SuperTrendVote == IndicatorVote.Bearish && indicators.MacdHist < 0 && indicators.Rsi >= 32 && indicators.Rsi <= 62);
 
                 if (!isLong && !isShort) continue;
 

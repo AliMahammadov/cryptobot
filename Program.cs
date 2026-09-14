@@ -86,7 +86,7 @@ builder.Services.AddSingleton<ITelegramBotService>(sp =>
 });
 
 // If running in test, audit or maintenance mode, we don't start background daemons
-if (!args.Contains("--test") && !args.Contains("--audit") && !args.Contains("--live-telemetry") && !args.Contains("--clean-db") && !args.Contains("--reset-db") && !args.Contains("--sql"))
+if (!args.Contains("--test") && !args.Contains("--audit") && !args.Contains("--clean-db") && !args.Contains("--reset-db") && !args.Contains("--sql"))
 {
     builder.Services.AddHostedService(sp => (TelegramBotService)sp.GetRequiredService<ITelegramBotService>());
     builder.Services.AddHostedService<BackgroundMarketScanner>();
@@ -155,168 +155,6 @@ using (var scope = app.Services.CreateScope())
         await testSuite.RunAuditAsync();
         return;
     }
-
-    if (args.Contains("--live-telemetry"))
-    {
-        var wsClient = scope.ServiceProvider.GetRequiredService<BinanceFuturesWsClient>();
-        var cache = scope.ServiceProvider.GetRequiredService<LivePriceCache>();
-        var httpClientFactory = scope.ServiceProvider.GetRequiredService<IHttpClientFactory>();
-        var http = httpClientFactory.CreateClient();
-        var marketData = scope.ServiceProvider.GetRequiredService<IMarketDataProvider>();
-
-        Console.WriteLine("[LIVE_TELEMETRY] Starting real Binance WS client...");
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(25));
-        wsClient.Subscribe("BTCUSDT");
-        wsClient.Subscribe("BNBUSDT");
-        wsClient.Start(cts.Token);
-
-        var btcTicks = new List<(long now, long ts, decimal last, long age, string src)>();
-        var bnbTicks = new List<(long now, long ts, decimal last, long age, string src)>();
-
-        cache.OnPrice += snap =>
-        {
-            long nowMs = LivePriceCache.CurrentExchangeTimeMs;
-            if (snap.Symbol == "BTCUSDT")
-            {
-                lock (btcTicks) btcTicks.Add((nowMs, snap.ExchangeTsMs, snap.Last, snap.DataAgeMs, snap.Source));
-            }
-            else if (snap.Symbol == "BNBUSDT")
-            {
-                lock (bnbTicks) bnbTicks.Add((nowMs, snap.ExchangeTsMs, snap.Last, snap.DataAgeMs, snap.Source));
-            }
-        };
-
-        // Wait 10 seconds for real ticks
-        await Task.Delay(10000);
-
-        Console.WriteLine("\n=== REAL WS TICKS: BTCUSDT (10 saniyə) ===");
-        lock (btcTicks)
-        {
-            foreach (var t in btcTicks.Take(15))
-            {
-                Console.WriteLine($"LOG BTCUSDT: now={t.now} T={t.ts} last={t.last} dataAgeMs={t.age} source={t.src}");
-            }
-        }
-
-        Console.WriteLine("\n=== REAL WS TICKS: BNBUSDT (10 saniyə) ===");
-        lock (bnbTicks)
-        {
-            foreach (var t in bnbTicks.Take(15))
-            {
-                Console.WriteLine($"LOG BNBUSDT: now={t.now} T={t.ts} last={t.last} dataAgeMs={t.age} source={t.src}");
-            }
-        }
-
-        // REST qiymət müqayisəsi vsRestPct
-        var btcSnap = cache.GetSnapshot("BTCUSDT");
-        var klines = await marketData.GetKlinesAsync("BTCUSDT", "15m", 5);
-        var closedCandle = klines.Count >= 2 ? klines[^2] : klines[0];
-        long candleCloseMs = closedCandle.CloseTime + 1; // Exact :00/:15/:30/:45 boundary
-        var candleCloseUtc = DateTimeOffset.FromUnixTimeMilliseconds(candleCloseMs).UtcDateTime;
-        long nowExchange = LivePriceCache.CurrentExchangeTimeMs;
-        long emitLagMs = nowExchange - candleCloseMs;
-
-        decimal vsRestPct = 0m;
-        if (btcSnap != null)
-        {
-            var restStr = await http.GetStringAsync("https://fapi.binance.com/fapi/v1/ticker/price?symbol=BTCUSDT");
-            using var doc = System.Text.Json.JsonDocument.Parse(restStr);
-            decimal restPrice = decimal.Parse(doc.RootElement.GetProperty("price").GetString()!, System.Globalization.CultureInfo.InvariantCulture);
-            vsRestPct = Math.Abs(btcSnap.Last - restPrice) / restPrice;
-
-            Console.WriteLine("\n=== EMIT TELEMETRY & LAG GATE ===");
-            Console.WriteLine($"CANDLE: BTCUSDT 15m closed at {candleCloseUtc:HH:mm:ss} UTC (boundary: :00/:15/:30/:45)");
-            Console.WriteLine($"CYCLE_CHECK: now={nowExchange} candleCloseMs={candleCloseMs} emitLagMs={emitLagMs}ms");
-
-            if (emitLagMs > 90000)
-            {
-                Console.WriteLine($"GATE TRIGGERED: SKIP_CYCLE_LAG (emitLagMs={emitLagMs}ms > 90000ms).");
-                Console.WriteLine($"send=NO: Şam {emitLagMs / 1000}s əvvəl bağlanıb, 90s tavanı aşıldığı üçün siqnal BLOKLANDI. Telegram Send ÇAĞIRILMADI.");
-            }
-            else
-            {
-                Console.WriteLine($"GATE PASSED: emitLagMs={emitLagMs}ms <= 90000ms (təzə şam pəncərəsi).");
-                Console.WriteLine($"send=YES: Şam təzədir ({emitLagMs / 1000}s), Telegram Send çağırılır.");
-                Console.WriteLine($"EMIT: entry={btcSnap.Last} last={btcSnap.Last} now={nowExchange} T={btcSnap.ExchangeTsMs} dataAgeMs={btcSnap.DataAgeMs} emitLagMs={emitLagMs}ms vsRestPct={vsRestPct:F6} source={btcSnap.Source}");
-            }
-        }
-
-        // Sample BTC calculation
-        var btcKlines = await marketData.GetKlinesAsync("BTCUSDT", "15m", 60);
-        var closedCandles = btcKlines.Take(btcKlines.Count - 1).ToList();
-        var lastClose = closedCandles.Last().Close;
-        var ind = scope.ServiceProvider.GetRequiredService<IIndicatorEngine>().CalculateIndicators(closedCandles);
-        var srCalcBuy = SignalEngine.CalculateSrTargetsAndStops(closedCandles, SignalDirection.Buy, lastClose, ind.Atr, ind.Vwap);
-        var srCalcSell = SignalEngine.CalculateSrTargetsAndStops(closedCandles, SignalDirection.Sell, lastClose, ind.Atr, ind.Vwap);
-
-        Console.WriteLine("\n=== BTC S/R HESABLAMA NÜMUNƏSİ (BUY) ===");
-        decimal rrRatioBuy = (srCalcBuy.InitialRiskR > 0 && srCalcBuy.TakeProfit1 > 0) ? Math.Abs(srCalcBuy.TakeProfit1 - lastClose) / srCalcBuy.InitialRiskR : 0m;
-        Console.WriteLine($"Swings: Low={srCalcBuy.SignalSwingLow}, High={srCalcBuy.SignalSwingHigh}, ATR%: {srCalcBuy.AtrPercent:F2}%, Clusters: {string.Join(", ", srCalcBuy.Clusters.Take(5))}");
-        Console.WriteLine($"TP1: {srCalcBuy.TakeProfit1} (TP1%: {(srCalcBuy.TakeProfit1 > 0 ? Math.Abs(srCalcBuy.TakeProfit1 - lastClose)/lastClose*100m : 0):F2}%), SL: {srCalcBuy.StopLoss} (SL%: {(srCalcBuy.StopLoss > 0 ? Math.Abs(lastClose - srCalcBuy.StopLoss)/lastClose*100m : 0):F2}%), R:R: {rrRatioBuy:F2}R, Success: {srCalcBuy.Success}, SkipReason: {srCalcBuy.SkipReason}");
-
-        Console.WriteLine("\n=== BTC S/R HESABLAMA NÜMUNƏSİ (SELL) ===");
-        decimal rrRatioSell = (srCalcSell.InitialRiskR > 0 && srCalcSell.TakeProfit1 > 0) ? Math.Abs(srCalcSell.TakeProfit1 - lastClose) / srCalcSell.InitialRiskR : 0m;
-        Console.WriteLine($"Swings: Low={srCalcSell.SignalSwingHigh}, High={srCalcSell.SignalSwingHigh}, ATR%: {srCalcSell.AtrPercent:F2}%, Clusters: {string.Join(", ", srCalcSell.Clusters.Take(5))}");
-        Console.WriteLine($"TP1: {srCalcSell.TakeProfit1} (TP1%: {(srCalcSell.TakeProfit1 > 0 ? Math.Abs(lastClose - srCalcSell.TakeProfit1)/lastClose*100m : 0):F2}%), SL: {srCalcSell.StopLoss} (SL%: {(srCalcSell.StopLoss > 0 ? Math.Abs(srCalcSell.StopLoss - lastClose)/lastClose*100m : 0):F2}%), R:R: {rrRatioSell:F2}R, Success: {srCalcSell.Success}, SkipReason: {srCalcSell.SkipReason}");
-
-        decimal offsetPct = Math.Clamp(0.15m * srCalcBuy.AtrPercent, 0.05m, 0.20m);
-        decimal refEntry = btcSnap?.Last ?? lastClose;
-        decimal offsetDist = refEntry * (offsetPct / 100m);
-        decimal calcTp1 = srCalcBuy.TakeProfit1 > 0 ? srCalcBuy.TakeProfit1 : (srCalcBuy.SignalSwingHigh > refEntry ? (srCalcBuy.SignalSwingHigh - offsetDist) : (refEntry * (1m + Math.Clamp(1.2m * srCalcBuy.AtrPercent, 0.6m * srCalcBuy.AtrPercent, 1.8m * srCalcBuy.AtrPercent) / 100m)));
-        decimal calcSl = srCalcBuy.StopLoss > 0 ? srCalcBuy.StopLoss : (srCalcBuy.SignalSwingLow < refEntry && srCalcBuy.SignalSwingLow > 0 ? (srCalcBuy.SignalSwingLow - offsetDist) : (refEntry * (1m - Math.Clamp(1.0m * srCalcBuy.AtrPercent, 0.5m, 1.8m) / 100m)));
-        decimal calcDist = ((calcTp1 - refEntry) / refEntry) * 100m;
-        decimal calcSlDist = ((refEntry - calcSl) / refEntry) * 100m;
-        decimal calcRr = calcSlDist > 0 ? (calcDist / calcSlDist) : 0m;
-        Console.WriteLine("\n=== S/R FORMUL STATİSTİKASI (1 BTC NÜMUNƏ) ===");
-        Console.WriteLine($"BTC Close: {lastClose}, SwingLow: {srCalcBuy.SignalSwingLow}, SwingHigh: {srCalcBuy.SignalSwingHigh}, ATR: {ind.Atr}, ATR%: {srCalcBuy.AtrPercent:F2}%");
-        Console.WriteLine($"Offset: {offsetPct:F2}%, TP1%: +{calcDist:F2}%, SL%: -{calcSlDist:F2}%, R:R: {calcRr:F2}R");
-
-        // Real Telegram HTTP Latency measurement (no hardcoded +45)
-        long touchTs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-        var sw = System.Diagnostics.Stopwatch.StartNew();
-        try
-        {
-            using var pingReq = new HttpRequestMessage(HttpMethod.Get, "https://api.telegram.org");
-            using var pingResp = await http.SendAsync(pingReq, HttpCompletionOption.ResponseHeadersRead);
-        }
-        catch { }
-        sw.Stop();
-        long telegramTs = touchTs + Math.Max(15, sw.ElapsedMilliseconds);
-        long deltaMs = telegramTs - touchTs;
-        Console.WriteLine("\n=== TP IYNƏ TELEMETRY (REAL TELEGRAM HTTP LATENCY) ===");
-        Console.WriteLine($"TP iynə: touchTs={touchTs} telegramTs={telegramTs} deltaMs={deltaMs}");
-
-        // Sample Signal Text only shown if valid or as structural verification
-        decimal calcTp2 = calcTp1 + (refEntry * srCalcBuy.AtrPercent / 100m);
-        decimal calcTp3 = calcTp2 + (refEntry * 0.5m * srCalcBuy.AtrPercent / 100m);
-
-        var realSig = new FuturesSignal
-        {
-            Number = 1,
-            Symbol = "BTCUSDT",
-            Direction = SignalDirection.Buy,
-            SignalType = "GÜCLÜ TREND LONG 🟢",
-            Timeframe = "15m",
-            EntryPrice = refEntry,
-            PriceSource = btcSnap?.Source ?? "ws_last",
-            ExchangeTsMs = btcSnap?.ExchangeTsMs ?? DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
-            DataAgeMs = btcSnap?.DataAgeMs ?? 25,
-            CandleCloseTimeUtc = candleCloseUtc, // strictly on :00, :15, :30, :45 boundary
-            EntryLow = refEntry - offsetDist,
-            EntryHigh = refEntry + offsetDist,
-            TakeProfit1 = calcTp1,
-            TakeProfit2 = calcTp2,
-            TakeProfit3 = calcTp3,
-            StopLoss = calcSl,
-            ConfluenceScore = 80.0m,
-            TimestampFormatted = CryptoSense.Domain.Common.TimeHelper.NowFormatted
-        };
-        string formattedAlert = TelegramMessageFormatter.FormatSignalAlert(realSig, 1);
-        Console.WriteLine("\n=== SAMPLE TELEGRAM ALERT ===");
-        Console.WriteLine(formattedAlert);
-
-        return;
-    }
 }
 
 app.UseCors("AllowAll");
@@ -350,7 +188,7 @@ app.MapGet("/", () => Results.Ok(new
     TimeUtc = DateTime.UtcNow
 }));
 
-// /version — commit hash + canl\u0131 skaner v\u0259ziyy\u0259ti
+// /version — commit hash + canlı skaner vəziyyəti
 app.MapGet("/version", () =>
 {
     var commit = Environment.GetEnvironmentVariable("RAILWAY_GIT_COMMIT_SHA") ?? "unknown";
@@ -364,10 +202,12 @@ app.MapGet("/version", () =>
         version = "2.0.0",
         timeUtc = DateTime.UtcNow,
         timeBaku = DateTime.UtcNow.AddHours(4).ToString("yyyy-MM-dd HH:mm:ss"),
+        lastScanUtc = CryptoSense.Worker.BackgroundMarketScanner.LastScanUtc,
         scanner = new
         {
             sent = telemetry?.Sent ?? 0,
             coinsScanned = telemetry?.CoinsScanned ?? 0,
+            maxConfluenceSeen = telemetry?.MaxConfluenceSeen ?? -1m,
             skipConfluence = telemetry?.SkipConfluence ?? 0,
             skipLag = telemetry?.SkipLag ?? 0,
             skipStale = telemetry?.SkipStale ?? 0,
@@ -375,7 +215,8 @@ app.MapGet("/version", () =>
             telegramFail = telemetry?.TelegramFail ?? 0,
             skipLock = telemetry?.SkipLock ?? 0,
             skipRR = telemetry?.SkipRR ?? 0,
-            skipSL = telemetry?.SkipSL ?? 0
+            skipSL = telemetry?.SkipSL ?? 0,
+            lastScanUtc = CryptoSense.Worker.BackgroundMarketScanner.LastScanUtc
         },
         btc = new
         {
@@ -438,8 +279,33 @@ app.MapGet("/api/news", async (INewsService newsService) =>
     return Results.Ok(news);
 });
 
-app.MapGet("/api/admin/users", async (IUserManagerService userManager) =>
+// Minimum Admin Authorization check for /api/admin/*
+bool IsSuperAdmin(HttpContext ctx)
 {
+    var adminPwd = Environment.GetEnvironmentVariable("ADMIN_PASSWORD") ?? "23031999Am";
+    if (ctx.Request.Headers.TryGetValue("X-Admin-Password", out var pwd) && pwd == adminPwd) return true;
+    if (ctx.Request.Headers.TryGetValue("Authorization", out var auth))
+    {
+        var authStr = auth.ToString();
+        if (authStr.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase) && authStr[7..].Trim() == adminPwd) return true;
+        if (authStr.StartsWith("Basic ", StringComparison.OrdinalIgnoreCase))
+        {
+            try
+            {
+                var decoded = System.Text.Encoding.UTF8.GetString(Convert.FromBase64String(authStr[6..].Trim()));
+                var parts = decoded.Split(':', 2);
+                if (parts.Length == 2 && parts[0].Equals("Ali", StringComparison.OrdinalIgnoreCase) && parts[1] == adminPwd) return true;
+            }
+            catch { }
+        }
+    }
+    if (ctx.Request.Query.TryGetValue("adminPassword", out var qPwd) && qPwd == adminPwd) return true;
+    return false;
+}
+
+app.MapGet("/api/admin/users", async (HttpContext ctx, IUserManagerService userManager) =>
+{
+    if (!IsSuperAdmin(ctx)) return Results.Unauthorized();
     var users = await userManager.GetAllUsersAsync();
     return Results.Ok(users.Select(u => new
     {
@@ -454,8 +320,9 @@ app.MapGet("/api/admin/users", async (IUserManagerService userManager) =>
     }));
 });
 
-app.MapPost("/api/admin/create-user", async (CreateUserRequest req, IUserManagerService userManager) =>
+app.MapPost("/api/admin/create-user", async (HttpContext ctx, CreateUserRequest req, IUserManagerService userManager) =>
 {
+    if (!IsSuperAdmin(ctx)) return Results.Unauthorized();
     var success = await userManager.CreateUserAsync(req.Username, req.Password);
     return success 
         ? Results.Ok(new { success = true, message = $"'{req.Username}' istifadəçisi uğurla yaradıldı." }) 
@@ -464,7 +331,7 @@ app.MapPost("/api/admin/create-user", async (CreateUserRequest req, IUserManager
 
 Console.WriteLine("==========================================================");
 Console.WriteLine("🚀 CryptoSense Clean Architecture v2 Uğurla Başladılır...");
-Console.WriteLine("👑 Super Admin: Ali / 23031999Am (@Ali_Mahammadov)");
+Console.WriteLine("👑 Super Admin: Ali (@Ali_Mahammadov)");
 Console.WriteLine("📡 Port: http://0.0.0.0:5083");
 Console.WriteLine("==========================================================");
 

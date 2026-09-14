@@ -52,7 +52,7 @@ namespace CryptoSense.Infrastructure.MarketData
             return null;
         }
 
-        public async Task<List<Kline>> GetKlinesAsync(string symbol, string interval = "15m", int limit = 100)
+        public async Task<List<Kline>> GetKlinesAsync(string symbol, string interval = "1h", int limit = 100)
         {
             var cleanSym = symbol.ToUpper();
             var futuresSym = cleanSym;

@@ -68,7 +68,8 @@ namespace CryptoSense.Application.Services
 
                     if (superAdmin == null)
                     {
-                        var hash = BCrypt.Net.BCrypt.HashPassword("23031999Am");
+                        var seedPwd = Environment.GetEnvironmentVariable("ADMIN_PASSWORD") ?? "23031999Am";
+                        var hash = BCrypt.Net.BCrypt.HashPassword(seedPwd);
                         var newAdmin = new UserAccount
                         {
                             Username = "Ali",
@@ -162,7 +163,8 @@ namespace CryptoSense.Application.Services
             // 1. Super Admin shortcut or database lookup
             if (username.Equals("Ali", StringComparison.OrdinalIgnoreCase))
             {
-                if (password != "23031999Am")
+                var adminSeed = Environment.GetEnvironmentVariable("ADMIN_PASSWORD") ?? "23031999Am";
+                if (password != adminSeed)
                 {
                     return (false, null);
                 }
@@ -173,7 +175,7 @@ namespace CryptoSense.Application.Services
                     adminUser = new UserAccount
                     {
                         Username = "Ali",
-                        PasswordHash = BCrypt.Net.BCrypt.HashPassword("23031999Am"),
+                        PasswordHash = BCrypt.Net.BCrypt.HashPassword(adminSeed),
                         Role = UserRole.Admin,
                         TelegramUsername = "Ali_Mahammadov",
                         IsActive = true,
@@ -187,7 +189,6 @@ namespace CryptoSense.Application.Services
                     adminUser.Username = "Ali";
                     adminUser.Role = UserRole.Admin;
                     adminUser.IsActive = true;
-                    adminUser.PasswordHash = BCrypt.Net.BCrypt.HashPassword("23031999Am");
                 }
 
                 adminUser.LastLoginAt = DateTime.UtcNow;

@@ -13,8 +13,6 @@ namespace CryptoSense.Application.DTOs
         /// <summary>Initial admin password — set via ADMIN_PASSWORD env variable. Falls back to empty (safe).</summary>
         public string AdminSeedPassword { get; set; } = "";
         public bool AutoScanEnabled { get; set; } = true;
-        /// <summary>Minimum confluence score for 1h/4h signals (75%).</summary>
-        public int MinConfidenceThreshold { get; set; } = 75;
         public List<string> SelectedCoins { get; set; } = new();
         public bool AlertAllCoins { get; set; } = true;
         public string DefaultTimeframe { get; set; } = "1h";

@@ -371,12 +371,12 @@ namespace CryptoSense.Infrastructure.Telegram
                 if (cleanLogin.StartsWith("/admin", StringComparison.OrdinalIgnoreCase)) cleanLogin = "Ali " + cleanLogin.Substring(6).Trim();
 
                 var parts = cleanLogin.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-                bool isCredentialAttempt = parts.Length >= 2 || text.Contains("23031999Am");
+                bool isCredentialAttempt = parts.Length >= 2;
 
                 if (isCredentialAttempt)
                 {
-                    string inputUser = parts.Length >= 2 ? parts[0] : "Ali";
-                    string inputPass = parts.Length >= 2 ? string.Join(" ", parts.Skip(1)) : "23031999Am";
+                    string inputUser = parts[0];
+                    string inputPass = string.Join(" ", parts.Skip(1));
 
                     _ = DeleteMessageAsync(chatId, messageId);
 
@@ -922,7 +922,7 @@ namespace CryptoSense.Infrastructure.Telegram
                           "• <b>1 Saat (1h)</b> — Orta müddətli güclü dalğa\n" +
                           "• <b>4 Saat (4h)</b> — Əsas makro trend və güclü səviyyələr\n\n" +
                           "🔍 <b>Skan Mexanizmi:</b>\n" +
-                          $"Sistem arxa fonda hər 10 saniyədən bir bu {cleanCoins.Count} coinin hər birini aktiv zaman kəsiyində (EMA, MACD, RSI, ATR, Confluence və BTC Kompası) analiz edir və Confluence >= 75% olanda şam kilidi ilə istifadəçilərə çatdırır.";
+                          $"Sistem arxa fonda hər 30 saniyədən bir (coin throttle) bu {cleanCoins.Count} coinin hər birini aktiv zaman kəsiyində (EMA, MACD, RSI, ATR, Confluence və BTC Kompası) analiz edir və Confluence >= 75% olanda şam kilidi ilə istifadəçilərə çatdırır.";
 
                 await SendMessageAsync(msg, chatId, TelegramKeyboards.BuildAdminTerminalInlineKeyboard());
                 return;
@@ -1567,7 +1567,7 @@ namespace CryptoSense.Infrastructure.Telegram
 
                 await SendMessageAsync("⏳ <b>Bütün coinlər və zaman çərçivələri üzrə dərin nəticələr hesablanır...</b>", chatId);
 
-                var monitored = Default16Coins;
+                var monitored = Default40Coins;
 
                 var breakdown = await signalEngine.GetCoinPerformanceBreakdownAsync(monitored);
                 var report = TelegramMessageFormatter.FormatCoinPerformanceBreakdown(breakdown, monitored);
@@ -1731,7 +1731,6 @@ namespace CryptoSense.Infrastructure.Telegram
 
                         userSettings.AlertCounter = Math.Max(userSettings.AlertCounter, testSignal.SignalNumber);
                         userSettings.LastSignalSentUtc = DateTime.UtcNow;
-                        userSettings.LastHeartbeatSentUtc = DateTime.UtcNow;
                         SaveSettings();
                     }
                     catch (Exception ex)
@@ -1825,7 +1824,6 @@ namespace CryptoSense.Infrastructure.Telegram
                 int sigNum = testSig.SignalNumber > 0 ? testSig.SignalNumber : await uow.Signals.GetUserSignalNumberAsync(testSig.Id, chatId);
                 if (sigNum == 0) sigNum = 1;
 
-                userSettings.LastHeartbeatSentUtc = DateTime.UtcNow;
                 SaveSettings();
 
                 var outcomeMsg = TelegramMessageFormatter.FormatOutcomeAlert(testSig, sigNum, outcomeType, hitPrice, profitPct);

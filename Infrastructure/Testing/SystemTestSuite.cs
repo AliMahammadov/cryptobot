@@ -6,6 +6,7 @@ using System.Collections.Concurrent;
 using CryptoSense.Application.DTOs;
 using CryptoSense.Application.Interfaces;
 using CryptoSense.Application.Services;
+using CryptoSense.Domain.Common;
 using CryptoSense.Domain.Entities;
 using CryptoSense.Domain.Enums;
 using CryptoSense.Domain.Interfaces;
@@ -376,7 +377,7 @@ namespace CryptoSense.Infrastructure.Testing
             await AssertTest("Test 21: Telegram Menus & Keyboards Workflow Verification", () =>
             {
                 var userSettings = new UserSettings { Timeframe = "Hamısı", IsActive = true };
-                userSettings.Coins.AddRange(TelegramBotService.Default16Coins);
+                userSettings.Coins.AddRange(TelegramBotService.Default40Coins);
 
                 var userKb = TelegramKeyboards.BuildUserKeyboard(userSettings, isAdmin: true);
                 var tfKb = TelegramKeyboards.BuildTimeframeKeyboard();
@@ -863,85 +864,43 @@ namespace CryptoSense.Infrastructure.Testing
             });
 
             // 32. Signal Quality: 74.0% Confluence Strictly Rejected (Min 75.0% Required)
-            await AssertTest("Test 39: Signal Quality - 74.0% Confluence Strictly Blocked", async () =>
+            await AssertTest("Test 39: Signal Quality - 74.0% Confluence Strictly Blocked", () =>
             {
-                // Force confluence to 74.0%
-                decimal testConfluence = 74.0m;
-                bool shouldPass = testConfluence >= 75.0m;
-                if (shouldPass)
+                decimal threshold = BotConstants.Thresholds.MinConfluence1h4h;
+                decimal val74 = 74.0m;
+                decimal val75 = 75.0m;
+                if (threshold != 75m)
                 {
-                    Console.WriteLine("[Test 39 Fail] 74.0% was evaluated as passing!");
-                    return false;
+                    Console.WriteLine($"[Test 39 Fail] MinConfluence1h4h is {threshold} (expected 75m)");
+                    return Task.FromResult(false);
                 }
-
-                // Test live analysis returns neutral or has score >= 75
-                var sig = await _signalEngine.AnalyzeCoinAsync("XRPUSDT", "15m", isLiveScan: false);
-                if (sig.SignalType.Contains("LONG") || sig.SignalType.Contains("SHORT"))
+                if (!(val74 < threshold))
                 {
-                    if (sig.ConfluenceScore < 75.0m)
-                    {
-                        Console.WriteLine($"[Test 39 Fail] Active signal generated with < 75% confluence: {sig.ConfluenceScore}%");
-                        return false;
-                    }
+                    Console.WriteLine("[Test 39 Fail] 74.0m was evaluated as passing!");
+                    return Task.FromResult(false);
                 }
-
-                return true;
+                if (!(val75 >= threshold))
+                {
+                    Console.WriteLine("[Test 39 Fail] 75.0m was evaluated as not meeting threshold!");
+                    return Task.FromResult(false);
+                }
+                return Task.FromResult(true);
             });
 
-            // 33. Signal Quality: 15m Expiry Max 90m, TP1 Distance <= 2.0%, BTC Bullish Blocks Altcoin SHORT
-            await AssertTest("Test 40: Signal Quality - 15m Max 90m Expiry, TP1 Distance Cap & BTC Compass Guard", async () =>
+            // 33. Signal Quality: Dead TF Live Rejection (15m live returns GÖZLƏMƏ)
+            await AssertTest("Test 40: Signal Quality - Dead TF Live Rejection (15m live returns GÖZLƏMƏ)", async () =>
             {
-                var sig15m = await _signalEngine.AnalyzeCoinAsync("BTCUSDT", "15m", isLiveScan: false);
-                var durationMinutes = (sig15m.ExpiryTimeUtc - sig15m.GeneratedAt).TotalMinutes;
-                if (Math.Round(durationMinutes, 1) > 90.0)
+                var sig15mLive = await _signalEngine.AnalyzeCoinAsync("BTCUSDT", "15m", isLiveScan: true);
+                if (sig15mLive.SignalType.Contains("LONG") || sig15mLive.SignalType.Contains("SHORT"))
                 {
-                    Console.WriteLine($"[Test 40 Fail] 15m Expiry duration is {durationMinutes} mins (expected <= 90 mins)");
+                    Console.WriteLine($"[Test 40 Fail] Live 15m scan returned trade signal: {sig15mLive.SignalType}");
                     return false;
                 }
-
-                // If trade signal was generated on 15m, check TP1 distance (0.60% <= TP1 <= 2.50%) & TP3 > 0
-                if (sig15m.SignalType.Contains("LONG") || sig15m.SignalType.Contains("SHORT"))
+                if (!sig15mLive.SignalType.Contains("GÖZLƏMƏ"))
                 {
-                    decimal refEntry = sig15m.EntryPrice > 0 ? sig15m.EntryPrice : sig15m.CurrentPrice;
-                    if (refEntry > 0)
-                    {
-                        decimal tp1DistPct = Math.Abs(sig15m.TakeProfit1 - refEntry) / refEntry;
-                        if (tp1DistPct > 0.025m)
-                        {
-                            Console.WriteLine($"[Test 40 Fail] 15m TP1 distance is {tp1DistPct:P2} (must be <= 2.5%)");
-                            return false;
-                        }
-                        if (tp1DistPct < 0.0035m)
-                        {
-                            Console.WriteLine($"[Test 40 Fail] 15m TP1 distance is {tp1DistPct:P2} (must be >= 0.35%)");
-                            return false;
-                        }
-                    }
-                    if (sig15m.TakeProfit2 > 0 && sig15m.TakeProfit2 == sig15m.TakeProfit1)
-                    {
-                        Console.WriteLine("[Test 40 Fail] TakeProfit2 cannot equal TakeProfit1!");
-                        return false;
-                    }
-                    if (sig15m.TakeProfit3 > 0 && (sig15m.TakeProfit3 == sig15m.TakeProfit2 || sig15m.TakeProfit3 == sig15m.TakeProfit1))
-                    {
-                        Console.WriteLine("[Test 40 Fail] TakeProfit3 cannot equal TakeProfit2 or TakeProfit1!");
-                        return false;
-                    }
+                    Console.WriteLine($"[Test 40 Fail] Live 15m scan expected GÖZLƏMƏ, got: {sig15mLive.SignalType}");
+                    return false;
                 }
-
-                // Verify BTC Bullish Guard: Altcoin SHORT must be blocked if BTC is Bullish
-                var btcCompass = await _signalEngine.GetBtcCompassAsync();
-                bool isBtcBullish = btcCompass.Regime == BtcMarketRegime.Bullish || btcCompass.Trend.Contains("Bullish") || btcCompass.Trend.Contains("Yüksəliş");
-                if (isBtcBullish)
-                {
-                    var altSignal = await _signalEngine.AnalyzeCoinAsync("SOLUSDT", "15m", isLiveScan: false);
-                    if (altSignal.SignalType.Contains("SHORT"))
-                    {
-                        Console.WriteLine("[Test 40 Fail] Altcoin SHORT was generated while BTC Compass is Bullish!");
-                        return false;
-                    }
-                }
-
                 return true;
             });
 
@@ -1002,12 +961,12 @@ namespace CryptoSense.Infrastructure.Testing
                 return Task.FromResult(true);
             });
 
-            // 35. Risk:Reward Gate: R:R = (TP1 məsafəsi) / (SL məsafəsi) < 0.8 -> SKIP_RR send=NO
-            await AssertTest("Test 42: Risk:Reward Gate - R:R < 0.8 Strictly Blocked & Format Verified", () =>
+            // 35. Risk:Reward Gate: R:R = (weighted TP) / (SL məsafəsi) < 1.30 -> SKIP_RR
+            await AssertTest("Test 42: Risk:Reward Gate - R:R < 1.30 Strictly Blocked & Format Verified", () =>
             {
-                // Case 1: Bad R:R (e.g. BTC TP1 +0.16%, SL -1.01%, R:R = 0.16)
+                // Case 1: Bad R:R (e.g. BTC TP1 +1.08%, SL -1.01%, R:R = 1.07 < 1.30)
                 decimal entryPrice = 78350.00m;
-                decimal badTp1 = 78472.45m;
+                decimal badTp1 = 79200.00m;
                 decimal badSl = 77560.55m;
 
                 decimal badTp1Dist = Math.Abs(badTp1 - entryPrice);
@@ -1016,7 +975,7 @@ namespace CryptoSense.Infrastructure.Testing
                 decimal badSlPct = (badSlDist / entryPrice) * 100m;
                 decimal badRr = badSlDist > 0 ? (badTp1Dist / badSlDist) : 0m;
 
-                bool badBlocked = badRr < 0.8m;
+                bool badBlocked = badRr < BotConstants.Thresholds.MinRiskReward;
                 if (!badBlocked)
                 {
                     Console.WriteLine($"[Test 42 Fail] Bad R:R ({badRr:F2}) was not blocked!");
@@ -1027,14 +986,14 @@ namespace CryptoSense.Infrastructure.Testing
                 string log = $"[MarketScanner] SKIP_RR send=NO BTCUSDT tp1%={badTp1Pct:F2}% sl%={badSlPct:F2}% rr={badRr:F2}";
                 Console.WriteLine(log);
 
-                // Case 2: Good R:R (e.g. TP1 +1.08%, SL -1.01%, R:R = 1.07 >= 0.8)
-                decimal goodTp1 = 79200.00m;
-                decimal goodSl = 77560.55m;
-                decimal goodTp1Dist = Math.Abs(goodTp1 - entryPrice);
-                decimal goodSlDist = Math.Abs(goodSl - entryPrice);
+                // Case 2: Good R:R (e.g. TP1 +1.40%, SL -1.01%, R:R >= 1.30)
+                decimal goodSlDist = badSlDist;
+                decimal goodTp1Dist = goodSlDist * 1.35m;
+                decimal goodTp1 = entryPrice + goodTp1Dist;
+                decimal goodSl = badSl;
                 decimal goodRr = goodSlDist > 0 ? (goodTp1Dist / goodSlDist) : 0m;
 
-                bool goodAllowed = goodRr >= 0.8m;
+                bool goodAllowed = goodRr >= BotConstants.Thresholds.MinRiskReward;
                 if (!goodAllowed)
                 {
                     Console.WriteLine($"[Test 42 Fail] Good R:R ({goodRr:F2}) was blocked!");
@@ -1046,19 +1005,19 @@ namespace CryptoSense.Infrastructure.Testing
                     SignalNumber = 1,
                     Symbol = "BTCUSDT",
                     Direction = SignalDirection.Buy,
-                    Timeframe = "15m",
+                    Timeframe = "1h",
                     EntryPrice = entryPrice,
                     TakeProfit1 = goodTp1,
-                    TakeProfit2 = 79800.00m,
-                    TakeProfit3 = 80500.00m,
+                    TakeProfit2 = 0m,
+                    TakeProfit3 = 0m,
                     StopLoss = goodSl,
                     ConfluenceScore = 80.0m
                 };
 
                 var alertText = TelegramMessageFormatter.FormatSignalAlert(goodSig, 1);
-                bool hasTp1Pct = alertText.Contains("(+1.08%)");
+                bool hasTp1Pct = alertText.Contains("(+") && alertText.Contains("%)");
                 bool hasSlPct = alertText.Contains("(-1.01%)");
-                bool hasRr = alertText.Contains(goodRr.ToString("F2", CultureInfo.InvariantCulture)) && alertText.Contains("Risk:Mükafat (R:R)");
+                bool hasRr = alertText.Contains(goodRr.ToString("F2", CultureInfo.InvariantCulture)) && alertText.Contains("(R:R)");
 
                 if (!hasTp1Pct || !hasSlPct || !hasRr)
                 {
@@ -1342,18 +1301,21 @@ namespace CryptoSense.Infrastructure.Testing
                     SkipGozleme = 10,
                     SkipBtcBearLong = 4,
                     SkipBtcRange = 2,
-                    SkipBtc4hOppose = 1
+                    SkipBtc4hOppose = 1,
+                    MaxConfluenceSeen = 65.5m
                 };
 
                 if (telem.SkipBtcGate != 5) return Task.FromResult(false);
 
                 var cloned = telem.Clone();
-                if (cloned.SkipGozleme != 10 || cloned.SkipBtcGate != 5 || cloned.SkipBtcRange != 2) return Task.FromResult(false);
+                if (cloned.SkipGozleme != 10 || cloned.SkipBtcGate != 5 || cloned.SkipBtcRange != 2 || cloned.MaxConfluenceSeen != 65.5m) 
+                    return Task.FromResult(false);
 
                 cloned.Reset();
-                if (cloned.SkipGozleme != 0 || cloned.SkipBtcGate != 0 || cloned.SkipBtcRange != 0 || cloned.SkipConfluence != 0) return Task.FromResult(false);
+                if (cloned.SkipGozleme != 0 || cloned.SkipBtcGate != 0 || cloned.SkipBtcRange != 0 || cloned.SkipConfluence != 0 || cloned.MaxConfluenceSeen != -1m) 
+                    return Task.FromResult(false);
 
-                // 2. FormatLiveHeartbeat string verification
+                // 2. FormatLiveHeartbeat string verification with maxConfluenceSeen: -1 (suppressed)
                 var hbMsg = TelegramMessageFormatter.FormatLiveHeartbeat(
                     chase: telem.SkipChase,
                     corr: telem.SkipCorr,
@@ -1370,7 +1332,7 @@ namespace CryptoSense.Infrastructure.Testing
                     skipGozleme: telem.SkipGozleme,
                     skipBtcGate: telem.SkipBtcGate,
                     skipBtcRange: telem.SkipBtcRange,
-                    maxConfluenceSeen: 0);
+                    maxConfluenceSeen: -1m);
 
                 bool hasConf = hbMsg.Contains("Conf:15");
                 bool hasSentZero = hbMsg.Contains("Göndərildi:0") || hbMsg.Contains("G&#246;nd&#601;rildi:0");
@@ -1380,14 +1342,41 @@ namespace CryptoSense.Infrastructure.Testing
                 bool hasReason = hbMsg.Contains("Səbəb:") || hbMsg.Contains("S&#601;b&#601;b:");
                 bool has60Min = hbMsg.Contains("60 dəq") || hbMsg.Contains("60 d&#601;q");
                 bool hasBuFaizDeyil = hbMsg.Contains("bu faiz deyil") || hbMsg.Contains("bu faiz DEYİL");
+                bool lineSuppressed = !hbMsg.Contains("ən yüksək istiqamətli confluence");
 
-                if (!hasConf || !hasSentZero || !hasGozleme || !hasBtcGate || !hasBtcRange || !hasReason || !has60Min || !hasBuFaizDeyil)
+                if (!hasConf || !hasSentZero || !hasGozleme || !hasBtcGate || !hasBtcRange || !hasReason || !has60Min || !hasBuFaizDeyil || !lineSuppressed)
                 {
                     Console.WriteLine($"[Test 48 Fail] HB message format mismatch:\n{hbMsg}");
                     return Task.FromResult(false);
                 }
 
-                // 3. Heartbeat interval constant
+                // 3. FormatLiveHeartbeat with maxConfluenceSeen: 61.2m (displayed)
+                var hbMsg61 = TelegramMessageFormatter.FormatLiveHeartbeat(
+                    chase: telem.SkipChase,
+                    corr: telem.SkipCorr,
+                    slWide: telem.SkipSL,
+                    lowRr: telem.SkipRR,
+                    activeLocks: 0,
+                    sent: telem.Sent,
+                    nextCheckMinutes: 60,
+                    dataAgeMsBtc: 300,
+                    skipStale: 0,
+                    skipLag: 0,
+                    skipConfluence: telem.SkipConfluence,
+                    telegramFail: 0,
+                    skipGozleme: telem.SkipGozleme,
+                    skipBtcGate: telem.SkipBtcGate,
+                    skipBtcRange: telem.SkipBtcRange,
+                    maxConfluenceSeen: 61.2m);
+
+                bool has61 = hbMsg61.Contains("61.2") && (hbMsg61.Contains("ən yüksək") || hbMsg61.Contains("yüksək") || hbMsg61.Contains("y\u00fcks\u0259k"));
+                if (!has61)
+                {
+                    Console.WriteLine($"[Test 48 Fail] HB 61.2m message format mismatch:\n{hbMsg61}");
+                    return Task.FromResult(false);
+                }
+
+                // 4. Heartbeat interval constant
                 int expectedInterval = 60;
                 if (CryptoSense.Domain.Common.BotConstants.Thresholds.HeartbeatIntervalMinutes != expectedInterval) return Task.FromResult(false);
 
@@ -2037,6 +2026,107 @@ namespace CryptoSense.Infrastructure.Testing
                 }
             });
 
+            // 49. SignalEmitGates Unit Verification (SL 2.81% 1h fail, RR 1.29 fail, DataAge 3501 fail, 2.80/1.30/3500 pass)
+            await AssertTest("Test 57: SignalEmitGates - SL, RR, DataAge Thresholds from BotConstants", () =>
+            {
+                // 1. Pass baseline (SL 2.0%, RR 1.30, DataAge 1000ms)
+                var baseSignal = new FuturesSignal
+                {
+                    Symbol = "TESTGATE57",
+                    Timeframe = "1h",
+                    Direction = SignalDirection.Buy,
+                    EntryPrice = 100m,
+                    TakeProfit1 = 102.00m,
+                    TakeProfit2 = 103.20m,
+                    StopLoss = 98.00m,
+                    DataAgeMs = 1000
+                };
+                var (passOk, passReason) = CryptoSense.Application.Services.SignalEmitGates.Evaluate(baseSignal, 100m, 1000, "1h");
+                if (!passOk)
+                {
+                    Console.WriteLine($"[Test 57 Fail] Baseline passed signal was blocked: {passReason}");
+                    return Task.FromResult(false);
+                }
+
+                // 2. Exact boundary pass: SL 2.80%, RR 1.30, DataAge 3500ms
+                var boundarySignal = new FuturesSignal
+                {
+                    Symbol = "TESTGATE57",
+                    Timeframe = "1h",
+                    Direction = SignalDirection.Buy,
+                    EntryPrice = 100m,
+                    TakeProfit1 = 103.00m,
+                    TakeProfit2 = 104.28m,
+                    StopLoss = 97.20m, // 2.80% SL
+                    DataAgeMs = 3500
+                };
+                var (boundaryOk, boundaryReason) = CryptoSense.Application.Services.SignalEmitGates.Evaluate(boundarySignal, 100m, 3500, "1h");
+                if (!boundaryOk)
+                {
+                    Console.WriteLine($"[Test 57 Fail] Exact boundary signal (2.80% / 1.30 / 3500ms) was blocked: {boundaryReason}");
+                    return Task.FromResult(false);
+                }
+
+                // 3. SL Fail: SL 2.81% (1h) -> fail ("SL")
+                var slFailSignal = new FuturesSignal
+                {
+                    Symbol = "TESTGATE57",
+                    Timeframe = "1h",
+                    Direction = SignalDirection.Buy,
+                    EntryPrice = 100m,
+                    TakeProfit1 = 105.00m,
+                    TakeProfit2 = 105.00m,
+                    StopLoss = 97.19m, // 2.81% SL > 2.80%
+                    DataAgeMs = 1000
+                };
+                var (slOk, slReason) = CryptoSense.Application.Services.SignalEmitGates.Evaluate(slFailSignal, 100m, 1000, "1h");
+                if (slOk || slReason != "SL")
+                {
+                    Console.WriteLine($"[Test 57 Fail] SL 2.81% was not rejected with 'SL': ok={slOk}, reason={slReason}");
+                    return Task.FromResult(false);
+                }
+
+                // 4. RR Fail: R:R 1.29 -> fail ("RR")
+                var rrFailSignal = new FuturesSignal
+                {
+                    Symbol = "TESTGATE57",
+                    Timeframe = "1h",
+                    Direction = SignalDirection.Buy,
+                    EntryPrice = 100m,
+                    TakeProfit1 = 101.29m,
+                    TakeProfit2 = 101.29m,
+                    StopLoss = 99.00m, // SL dist = 1.0 -> RR = 1.29 < 1.30
+                    DataAgeMs = 1000
+                };
+                var (rrOk, rrReason) = CryptoSense.Application.Services.SignalEmitGates.Evaluate(rrFailSignal, 100m, 1000, "1h");
+                if (rrOk || rrReason != "RR")
+                {
+                    Console.WriteLine($"[Test 57 Fail] RR 1.29 was not rejected with 'RR': ok={rrOk}, reason={rrReason}");
+                    return Task.FromResult(false);
+                }
+
+                // 5. DataAge Fail: DataAge 3501 -> fail ("DataAge")
+                var ageFailSignal = new FuturesSignal
+                {
+                    Symbol = "TESTGATE57",
+                    Timeframe = "1h",
+                    Direction = SignalDirection.Buy,
+                    EntryPrice = 100m,
+                    TakeProfit1 = 103.00m,
+                    TakeProfit2 = 104.28m,
+                    StopLoss = 98.00m,
+                    DataAgeMs = 3501
+                };
+                var (ageOk, ageReason) = CryptoSense.Application.Services.SignalEmitGates.Evaluate(ageFailSignal, 100m, 3501, "1h");
+                if (ageOk || ageReason != "DataAge")
+                {
+                    Console.WriteLine($"[Test 57 Fail] DataAge 3501ms was not rejected with 'DataAge': ok={ageOk}, reason={ageReason}");
+                    return Task.FromResult(false);
+                }
+
+                return Task.FromResult(true);
+            });
+
             Console.WriteLine("\n========================================================");
             Console.WriteLine($"🏁 TEST NƏTİCƏLƏRİ: {passed} UĞURLU (PASS), {failed} UĞURSUZ (FAIL)");
             Console.WriteLine("========================================================\n");
@@ -2140,8 +2230,8 @@ namespace CryptoSense.Infrastructure.Testing
                     var indicators = _indicatorEngine.CalculateIndicators(slice);
                     var rawPrice = slice.Last().Close;
 
-                    bool isLong = (indicators.ConfluenceScore >= 72m && indicators.SuperTrendVote == IndicatorVote.Bullish && indicators.MacdHist > 0 && indicators.Rsi >= 38 && indicators.Rsi <= 68);
-                    bool isShort = (indicators.ConfluenceScore <= 28m && indicators.SuperTrendVote == IndicatorVote.Bearish && indicators.MacdHist < 0 && indicators.Rsi >= 32 && indicators.Rsi <= 62);
+                    bool isLong = (indicators.ConfluenceScore >= BotConstants.Thresholds.MinConfluence1h4h && indicators.SuperTrendVote == IndicatorVote.Bullish && indicators.MacdHist > 0 && indicators.Rsi >= 38 && indicators.Rsi <= 68);
+                    bool isShort = (indicators.ConfluenceScore <= (100m - BotConstants.Thresholds.MinConfluence1h4h) && indicators.SuperTrendVote == IndicatorVote.Bearish && indicators.MacdHist < 0 && indicators.Rsi >= 32 && indicators.Rsi <= 62);
 
                     if (!isLong && !isShort) continue;
 

@@ -57,8 +57,6 @@ namespace CryptoSense.Infrastructure.Telegram
             "RENDERUSDT", "FETUSDT", "TAOUSDT", "ONDOUSDT", "PENDLEUSDT", "1000PEPEUSDT"
         };
 
-        public static readonly List<string> Default16Coins = Default40Coins;
-
         public static readonly List<string> OptionalCoins = new()
         {
             "UNIUSDT", "APTUSDT"
@@ -135,24 +133,36 @@ namespace CryptoSense.Infrastructure.Telegram
             catch { }
         }
 
+        private static readonly object _settingsFileLock = new();
+
         public static void SaveSettings()
         {
-            try
+            lock (_settingsFileLock)
             {
-                if (!Directory.Exists(DataDirectory))
+                try
                 {
-                    Directory.CreateDirectory(DataDirectory);
+                    if (!Directory.Exists(DataDirectory))
+                    {
+                        Directory.CreateDirectory(DataDirectory);
+                    }
+
+                    var dict = new Dictionary<string, UserSettings>(UserPreferences);
+                    var json = JsonSerializer.Serialize(dict, new JsonSerializerOptions { WriteIndented = true });
+                    string tempSettings = SettingsFilePath + ".tmp";
+                    File.WriteAllText(tempSettings, json);
+                    File.Move(tempSettings, SettingsFilePath, overwrite: true);
+
+                    var mapDict = new Dictionary<string, int>(_signalUserNumberMap);
+                    var mapJson = JsonSerializer.Serialize(mapDict);
+                    string tempMap = SignalMapFilePath + ".tmp";
+                    File.WriteAllText(tempMap, mapJson);
+                    File.Move(tempMap, SignalMapFilePath, overwrite: true);
                 }
-
-                var dict = new Dictionary<string, UserSettings>(UserPreferences);
-                var json = JsonSerializer.Serialize(dict, new JsonSerializerOptions { WriteIndented = true });
-                File.WriteAllText(SettingsFilePath, json);
-
-                var mapDict = new Dictionary<string, int>(_signalUserNumberMap);
-                var mapJson = JsonSerializer.Serialize(mapDict);
-                File.WriteAllText(SignalMapFilePath, mapJson);
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[TelegramBotService] SaveSettings error: {ex.Message}");
+                }
             }
-            catch { }
         }
 
         public static void ResetAllAlertCounters()
@@ -695,10 +705,10 @@ namespace CryptoSense.Infrastructure.Telegram
             // Strict Timeframe check: Only 1h, 4h
             if (signal.Timeframe == "15m") return false;
 
-            // Strict DataAge check: <= 3500ms
-            if (signal.DataAgeMs > 3500)
+            // Strict DataAge check: <= MaxDataAgeMs
+            if (signal.DataAgeMs > CryptoSense.Domain.Common.BotConstants.Thresholds.MaxDataAgeMs)
             {
-                Console.WriteLine($"[TelegramBotService] DataAge gate blocked: {signal.Symbol} DataAge={signal.DataAgeMs}ms > 3500ms");
+                Console.WriteLine($"[TelegramBotService] DataAge gate blocked: {signal.Symbol} DataAge={signal.DataAgeMs}ms > {CryptoSense.Domain.Common.BotConstants.Thresholds.MaxDataAgeMs}ms");
                 return false;
             }
 
@@ -707,9 +717,9 @@ namespace CryptoSense.Infrastructure.Telegram
             decimal weightedTpDistCheck = (0.50m * tp1DistCheck) + (0.50m * tp2DistCheck);
             decimal slDistCheck = Math.Abs(signal.StopLoss - signal.EntryPrice);
             decimal rrCheck = slDistCheck > 0 ? (weightedTpDistCheck / slDistCheck) : 0m;
-            if (rrCheck < 1.30m)
+            if (rrCheck < CryptoSense.Domain.Common.BotConstants.Thresholds.MinRiskReward)
             {
-                Console.WriteLine($"[TelegramBotService] R:R filter blocked (Weighted R:R {rrCheck:F2} < 1.30)");
+                Console.WriteLine($"[TelegramBotService] R:R filter blocked (Weighted R:R {rrCheck:F2} < {CryptoSense.Domain.Common.BotConstants.Thresholds.MinRiskReward})");
                 return false;
             }
 
@@ -744,7 +754,6 @@ namespace CryptoSense.Infrastructure.Telegram
                             var committedNum = await uow.Signals.CommitSignalNumberOnSendSuccessAsync(signal.Id);
                             settings.AlertCounter = Math.Max(settings.AlertCounter, committedNum);
                             settings.LastSignalSentUtc = DateTime.UtcNow;
-                            settings.LastHeartbeatSentUtc = DateTime.UtcNow;
                             SaveSettings();
                             await uow.Signals.RecordDeliveryAsync(signal.Id, specificChatId, committedNum);
                             signal.SignalAlertSent = true;
@@ -794,51 +803,30 @@ namespace CryptoSense.Infrastructure.Telegram
                         "4h" => TimeSpan.FromHours(4),
                         _ => TimeSpan.FromHours(1)
                     };
-                    var maxTolerance = signal.Timeframe switch
-                    {
-                        "4h" => TimeSpan.FromHours(3),
-                        _ => TimeSpan.FromMinutes(50)
-                    };
+                    var maxTolerance = SignalEngine.GetMaxLiveDelay(signal.Timeframe);
                     var candleCloseUtc = signal.SourceCandleOpenTimeUtc + candleDuration;
                     if (DateTime.UtcNow - candleCloseUtc > maxTolerance)
                     {
                         continue;
                     }
 
-                    // Strict R:R Gate: Weighted R:R = TP1 (1.0R - 50%) + TP2 (min(2.0R, struct) - 50%). R:R < 1.30 isə send=NO
-                    decimal tp1Dist = Math.Abs(signal.TakeProfit1 - signal.EntryPrice);
-                    decimal tp2Dist = signal.TakeProfit2 > 0 ? Math.Abs(signal.TakeProfit2 - signal.EntryPrice) : tp1Dist;
-                    decimal weightedTpDist = (0.50m * tp1Dist) + (0.50m * tp2Dist);
-                    decimal slDist = Math.Abs(signal.StopLoss - signal.EntryPrice);
-                    decimal rr = slDist > 0 ? (weightedTpDist / slDist) : 0m;
-                    if (rr < 1.30m)
-                    {
-                        continue;
-                    }
-
                     // Strict User Coin Filter: User only receives signals if they have explicitly selected coins.
-                    if (settings.Coins.Count == 0) continue;
-                    bool coinMatched = settings.Coins.Contains(signal.Symbol)
-                        || (!string.IsNullOrEmpty(signal.CleanSymbol) && settings.Coins.Contains(signal.CleanSymbol))
-                        || settings.Coins.Contains(signal.Symbol.Replace("USDT", ""))
-                        || (!string.IsNullOrEmpty(signal.CleanSymbol) && settings.Coins.Contains(signal.CleanSymbol + "USDT"));
-                    if (!coinMatched) continue;
-
-                    // Fresh Entry Filter: If price drifted > 0.35% away from entry towards TP1 or StopLoss, don't send stale setup
-                    if (signal.CurrentPrice > 0 && signal.EntryPrice > 0)
+                    var allowedCoins = settings.Coins;
+                    if (allowedCoins == null || allowedCoins.Count == 0)
                     {
-                        bool isLong = signal.Direction == SignalDirection.Buy || signal.SignalType.Contains("LONG");
-                        if (isLong && signal.TakeProfit1 > signal.EntryPrice)
+                        if (settings.PortfolioMode == "Custom")
                         {
-                            decimal maxAllowed = signal.EntryHigh > 0 ? signal.EntryHigh * 1.0035m : signal.EntryPrice * 1.0035m;
-                            if (signal.CurrentPrice > maxAllowed) continue;
+                            Console.WriteLine($"[TelegramBotService] Custom portfolio mode has empty coins list for {chatId}. Skipping delivery.");
+                            continue;
                         }
-                        else if (!isLong && signal.TakeProfit1 < signal.EntryPrice)
-                        {
-                            decimal minAllowed = signal.EntryLow > 0 ? signal.EntryLow * 0.9965m : signal.EntryPrice * 0.9965m;
-                            if (signal.CurrentPrice < minAllowed) continue;
-                        }
+                        allowedCoins = Default40Coins;
                     }
+
+                    bool coinMatched = allowedCoins.Contains(signal.Symbol)
+                        || (!string.IsNullOrEmpty(signal.CleanSymbol) && allowedCoins.Contains(signal.CleanSymbol))
+                        || allowedCoins.Contains(signal.Symbol.Replace("USDT", ""))
+                        || (!string.IsNullOrEmpty(signal.CleanSymbol) && allowedCoins.Contains(signal.CleanSymbol + "USDT"));
+                    if (!coinMatched) continue;
 
                     // Strict Delivery Dedup: Never deliver the same signal twice to the same user
                     var deliveredChats = await uow.Signals.GetDeliveredChatIdsAsync(signal.Id);
@@ -866,7 +854,6 @@ namespace CryptoSense.Infrastructure.Telegram
                         {
                             settings.AlertCounter = Math.Max(settings.AlertCounter, userSigNum);
                             settings.LastSignalSentUtc = DateTime.UtcNow;
-                            settings.LastHeartbeatSentUtc = DateTime.UtcNow;
                             SaveSettings();
                             await uow.Signals.RecordDeliveryAsync(signal.Id, chatId, userSigNum);
                         }
@@ -954,7 +941,6 @@ namespace CryptoSense.Infrastructure.Telegram
 
                 var msg = TelegramMessageFormatter.FormatOutcomeAlert(signal, userSigNum, outcomeType, hitPrice, profitPct);
                 await SendMessageAsync(msg, chatId);
-                settings.LastHeartbeatSentUtc = DateTime.UtcNow;
                 SaveSettings();
             }
         }

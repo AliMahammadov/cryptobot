@@ -35,7 +35,7 @@ namespace CryptoSense.Domain.Entities
         
         [Required]
         [MaxLength(10)]
-        public string Timeframe { get; set; } = "15m";
+        public string Timeframe { get; set; } = "1h";
         
         [Column(TypeName = "decimal(18, 8)")]
         public decimal EntryPrice { get; set; }
