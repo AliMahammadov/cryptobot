@@ -36,5 +36,12 @@ namespace CryptoSense.Domain.Interfaces
         Task<int> CleanupOrphanedSignalsAsync();
         Task<DateTime?> GetLastDeliveredSignalTimeUtcAsync(string chatId);
         Task<FuturesSignal?> GetLastTestSignalAsync(string chatId);
+        Task DeleteAsync(FuturesSignal signal);
+        Task<bool> DeleteUnsentForCandleAsync(string symbol, string timeframe, DateTime sourceCandleOpenTimeUtc, SignalDirection direction);
+        Task<bool> DeleteUnsentForCandleAsync(string symbol, string timeframe, DateTime sourceCandleOpenTimeUtc, string direction);
+        Task<FuturesSignal?> GetUnsentSignalForCandleAsync(string symbol, string timeframe, DateTime sourceCandleOpenTimeUtc, SignalDirection direction);
+        Task<FuturesSignal?> GetUnsentSignalForCandleAsync(string symbol, string timeframe, DateTime sourceCandleOpenTimeUtc, string direction);
+        Task<decimal> GetClosedPnlSinceAsync(DateTime sinceUtc);
+        Task<List<FuturesSignal>> GetClosedSignalsSinceAsync(DateTime sinceUtc);
     }
 }

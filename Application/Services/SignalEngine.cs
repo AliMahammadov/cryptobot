@@ -33,6 +33,7 @@ namespace CryptoSense.Application.Services
         public static void RecordSentSignalCandle(string symbol, string timeframe, DateTime sourceCandleTime, FuturesSignal signal)
         {
             var candleKey = $"{symbol}_{timeframe}_{sourceCandleTime:yyyyMMddHHmmss}";
+            signal.SignalAlertSent = true;
             _recentCandleSignals[candleKey] = signal;
         }
 
@@ -40,6 +41,21 @@ namespace CryptoSense.Application.Services
         {
             var candleKey = $"{symbol}_{timeframe}_{sourceCandleTime:yyyyMMddHHmmss}";
             return _recentCandleSignals.ContainsKey(candleKey);
+        }
+
+        public static TimeSpan GetMaxLiveDelay(string timeframe)
+        {
+            bool isBootWindow = (DateTime.UtcNow - ProcessStartTimeUtc).TotalMinutes <= 15;
+            return timeframe switch
+            {
+                "4h" => TimeSpan.FromHours(3),
+                _ => isBootWindow ? TimeSpan.FromMinutes(90) : TimeSpan.FromMinutes(50)
+            };
+        }
+
+        public static long GetMaxLiveDelayMs(string timeframe)
+        {
+            return (long)GetMaxLiveDelay(timeframe).TotalMilliseconds;
         }
 
         public SignalEngine(
@@ -545,12 +561,7 @@ namespace CryptoSense.Application.Services
             {
                 var candleCloseTime = DateTimeOffset.FromUnixTimeMilliseconds(closedCandle.CloseTime).UtcDateTime;
                 var candleAge = DateTime.UtcNow - candleCloseTime;
-                bool isBootWindow = (DateTime.UtcNow - ProcessStartTimeUtc).TotalMinutes <= 15;
-                var maxLiveDelay = timeframe switch
-                {
-                    "4h" => TimeSpan.FromHours(3),
-                    _ => isBootWindow ? TimeSpan.FromMinutes(90) : TimeSpan.FromMinutes(50)
-                };
+                var maxLiveDelay = GetMaxLiveDelay(timeframe);
 
                 if (candleAge > maxLiveDelay)
                 {
@@ -611,10 +622,7 @@ namespace CryptoSense.Application.Services
 
             if (_recentCandleSignals.TryGetValue(candleKey, out var cachedSig))
             {
-                bool isDeliveredOrNeutral = cachedSig.SignalAlertSent ||
-                    (cachedSig.SignalType != null && cachedSig.SignalType.Contains("GÖZLƏMƏ"));
-
-                if (isDeliveredOrNeutral)
+                if (cachedSig.SignalAlertSent)
                 {
                     cachedSig.CurrentPrice = calculationRefPrice;
                     if (isLiveScan)
@@ -642,6 +650,11 @@ namespace CryptoSense.Application.Services
                 }
                 else
                 {
+                    if (cachedSig.SignalType != null && cachedSig.SignalType.Contains("GÖZLƏMƏ"))
+                    {
+                        cachedSig.CurrentPrice = calculationRefPrice;
+                        return cachedSig;
+                    }
                     _recentCandleSignals.TryRemove(candleKey, out _);
                 }
             }

@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Threading.Tasks;
+using System.Collections.Concurrent;
 using CryptoSense.Application.DTOs;
 using CryptoSense.Application.Interfaces;
 using CryptoSense.Application.Services;
@@ -9,6 +10,7 @@ using CryptoSense.Domain.Entities;
 using CryptoSense.Domain.Enums;
 using CryptoSense.Domain.Interfaces;
 using CryptoSense.Infrastructure.Telegram;
+using CryptoSense.Worker;
 
 namespace CryptoSense.Infrastructure.Testing
 {
@@ -1479,52 +1481,37 @@ namespace CryptoSense.Infrastructure.Testing
                 return true;
             });
 
-            await AssertTest("Test 50: Unsent PASS is NOT marked ŞAM İŞLƏNİB", () =>
+            await AssertTest("Test 50: AnalyzeCoinAsync eyni canlı şama 2 dəfə. DB-də SignalAlertSent yoxdursa 2-ci cavab ŞAM İŞLƏNİB OLMAMALIDIR", async () =>
             {
-                var candleTime = new DateTime(2026, 9, 14, 12, 0, 0, DateTimeKind.Utc);
-                var symbol = "TESTPASS50";
-                var tf = "1h";
+                var btcKlines = await _marketData.GetKlinesAsync("BTCUSDT", "1h", 2);
+                var closedTime = btcKlines.Count >= 2 ? btcKlines[^2].Time : DateTime.UtcNow;
+                SignalEngine.InvalidateCandleCache("BTCUSDT", "1h", closedTime);
 
-                // Ensure candle is clean in cache
-                SignalEngine.InvalidateCandleCache(symbol, tf, candleTime);
-                if (SignalEngine.IsInRecentCandleCache(symbol, tf, candleTime))
-                {
-                    Console.WriteLine("[Test 50 Fail] Cache was not invalidated initially.");
-                    return Task.FromResult(false);
-                }
+                // Call 1 without delivery
+                var sig1 = await _signalEngine.AnalyzeCoinAsync("BTCUSDT", "1h", isLiveScan: true);
+                bool call1NotProcessed = sig1.SignalType != "GÖZLƏMƏ (ŞAM İŞLƏNİB) ⚪";
 
-                // Simulate unsent PASS signal: SignalAlertSent = false
-                var unsentPass = new FuturesSignal
-                {
-                    Symbol = symbol,
-                    Timeframe = tf,
-                    Direction = SignalDirection.Buy,
-                    SignalType = "GÜCLÜ LONG 🟢",
-                    Confidence = 85,
-                    SignalAlertSent = false,
-                    SourceCandleOpenTimeUtc = candleTime
-                };
+                // Call 2 without delivery: must NOT be ŞAM İŞLƏNİB
+                var sig2 = await _signalEngine.AnalyzeCoinAsync("BTCUSDT", "1h", isLiveScan: true);
+                bool call2NotProcessed = sig2.SignalType != "GÖZLƏMƏ (ŞAM İŞLƏNİB) ⚪";
 
-                // With BUG 1 fix, an unsent trade-qualified PASS must NOT be cached before delivery
-                SignalEngine.InvalidateCandleCache(symbol, tf, candleTime);
-                bool notInCache = !SignalEngine.IsInRecentCandleCache(symbol, tf, candleTime);
-
-                // Now simulate delivered signal: SignalAlertSent = true
-                unsentPass.SignalAlertSent = true;
-                SignalEngine.RecordSentSignalCandle(symbol, tf, candleTime, unsentPass);
-                bool inCacheWhenSent = SignalEngine.IsInRecentCandleCache(symbol, tf, candleTime);
+                // Now simulate delivery
+                SignalEngine.RecordSentSignalCandle("BTCUSDT", "1h", sig1.SourceCandleOpenTimeUtc, sig1);
+                var sig3 = await _signalEngine.AnalyzeCoinAsync("BTCUSDT", "1h", isLiveScan: true);
+                bool call3IsProcessed = sig3.SignalType == "GÖZLƏMƏ (ŞAM İŞLƏNİB) ⚪";
 
                 // Clean up
-                SignalEngine.InvalidateCandleCache(symbol, tf, candleTime);
+                SignalEngine.InvalidateCandleCache("BTCUSDT", "1h", sig1.SourceCandleOpenTimeUtc);
 
-                return Task.FromResult(notInCache && inCacheWhenSent);
+                return call1NotProcessed && call2NotProcessed && call3IsProcessed;
             });
 
-            await AssertTest("Test 51: GetExistingCandleSignal ignores unsent / ALERT_NEVER_SENT_FAILED", async () =>
+            await AssertTest("Test 51: GetExistingCandleSignal ignores unsent & retry collision does not write _lastAlertSent", async () =>
             {
                 var candleTime = new DateTime(2026, 9, 14, 10, 0, 0, DateTimeKind.Utc);
                 var symbol = "TESTUNSENT51";
                 var tf = "1h";
+                var alertKey = $"{symbol}_{SignalDirection.Buy}_{tf}_{candleTime:yyyyMMddHHmmss}";
 
                 var unsentSignal = new FuturesSignal
                 {
@@ -1546,94 +1533,121 @@ namespace CryptoSense.Infrastructure.Testing
                 await _unitOfWork.Signals.AddAsync(unsentSignal);
                 await _unitOfWork.SaveChangesAsync();
 
-                // GetExistingCandleSignalAsync must return null because SignalAlertSent is false
+                // 1. GetExistingCandleSignalAsync must return null because SignalAlertSent is false
                 var existing = await _unitOfWork.Signals.GetExistingCandleSignalAsync(symbol, tf, candleTime);
                 if (existing != null)
                 {
-                    Console.WriteLine($"[Test 51 Fail] Found unsent candle signal: Id={existing.Id}, Sent={existing.SignalAlertSent}");
-                    unsentSignal.IsTest = true;
-                    await _unitOfWork.SaveChangesAsync();
+                    Console.WriteLine($"[Test 51 Fail] Found unsent candle signal: Id={existing.Id}");
+                    await _unitOfWork.Signals.DeleteAsync(unsentSignal);
                     return false;
                 }
 
-                // HasActiveSignalForSymbolAsync must return false for unsent draft
+                // 2. HasActiveSignalForSymbolAsync must return false for unsent draft
                 var hasActive = await _unitOfWork.Signals.HasActiveSignalForSymbolAsync(symbol);
                 if (hasActive)
                 {
                     Console.WriteLine("[Test 51 Fail] HasActiveSignalForSymbolAsync returned true for unsent signal!");
-                    unsentSignal.IsTest = true;
-                    await _unitOfWork.SaveChangesAsync();
+                    await _unitOfWork.Signals.DeleteAsync(unsentSignal);
                     return false;
                 }
 
-                // When delivered:
-                unsentSignal.SignalAlertSent = true;
-                unsentSignal.SignalNumber = 7777;
-                unsentSignal.Status = SignalStatus.Open;
-                unsentSignal.IsClosed = false;
-                await _unitOfWork.SaveChangesAsync();
+                // 3. Test scanner retry insert:
+                var lastAlertSent = new ConcurrentDictionary<string, DateTime>();
+                var coinLocks = new ConcurrentDictionary<string, byte>();
 
-                var deliveredExisting = await _unitOfWork.Signals.GetExistingCandleSignalAsync(symbol, tf, candleTime);
-                var deliveredHasActive = await _unitOfWork.Signals.HasActiveSignalForSymbolAsync(symbol);
+                var retrySignal = new FuturesSignal
+                {
+                    Symbol = symbol,
+                    Timeframe = tf,
+                    Direction = SignalDirection.Buy,
+                    SignalType = "GÜCLÜ LONG 🟢",
+                    Confidence = 80,
+                    SignalAlertSent = false,
+                    SourceCandleOpenTimeUtc = candleTime,
+                    GeneratedAt = DateTime.UtcNow,
+                    IsTest = false
+                };
 
-                // Clean up
-                unsentSignal.Status = SignalStatus.Failed;
-                unsentSignal.IsClosed = true;
-                unsentSignal.IsTest = true;
-                await _unitOfWork.SaveChangesAsync();
+                var persistResult = await BackgroundMarketScanner.PersistOrRecoverSignalAsync(
+                    _unitOfWork, retrySignal, lastAlertSent, coinLocks, alertKey, symbol, CancellationToken.None);
 
-                return deliveredExisting != null && deliveredHasActive;
+                bool lastAlertNotWritten = !lastAlertSent.ContainsKey(alertKey);
+                bool coinLockNotSet = !coinLocks.ContainsKey(symbol);
+                bool rowReused = retrySignal.Id == unsentSignal.Id;
+
+                // 4. DeleteUnsentForCandle cleans up and leaves 2nd insert path open
+                bool deleted = await _unitOfWork.Signals.DeleteUnsentForCandleAsync(symbol, tf, candleTime, SignalDirection.Buy);
+                var unsentAfterDelete = await _unitOfWork.Signals.GetUnsentSignalForCandleAsync(symbol, tf, candleTime, SignalDirection.Buy);
+                bool pathOpen = unsentAfterDelete == null;
+
+                return lastAlertNotWritten && coinLockNotSet && rowReused && deleted && pathOpen;
             });
 
-            await AssertTest("Test 52: SKIP_STALE does not permanently burn the candle (retry armed)", () =>
+            await AssertTest("Test 52: SKIP_STALE InvalidateCandleCache clears cache & scanner collision does not burn candle", () =>
             {
                 var candleTime = new DateTime(2026, 9, 14, 11, 0, 0, DateTimeKind.Utc);
                 var symbol = "TESTSTALE52";
                 var tf = "1h";
+                var alertKey = $"{symbol}_{SignalDirection.Sell}_{tf}_{candleTime:yyyyMMddHHmmss}";
 
-                // Simulate SKIP_STALE: Invalidate candle cache and ensure candle can be re-evaluated
+                // 1. Simulate SKIP_STALE: Invalidate candle cache
                 SignalEngine.InvalidateCandleCache(symbol, tf, candleTime);
                 bool cacheCleared = !SignalEngine.IsInRecentCandleCache(symbol, tf, candleTime);
 
-                // When subsequent cycle evaluates and sends successfully:
-                var signal = new FuturesSignal
+                // 2. Scanner duplicate-insert helper: simulate collision where no unsent row and no delivered row exists
+                var lastAlertSent = new ConcurrentDictionary<string, DateTime>();
+                var coinLocks = new ConcurrentDictionary<string, byte>();
+
+                var testSignal = new FuturesSignal
                 {
                     Symbol = symbol,
                     Timeframe = tf,
                     Direction = SignalDirection.Sell,
                     SignalType = "GÜCLÜ SHORT 🔴",
                     Confidence = 80,
-                    SignalAlertSent = true,
-                    SourceCandleOpenTimeUtc = candleTime
+                    SignalAlertSent = false,
+                    SourceCandleOpenTimeUtc = candleTime,
+                    GeneratedAt = DateTime.UtcNow,
+                    IsTest = false
                 };
-                SignalEngine.RecordSentSignalCandle(symbol, tf, candleTime, signal);
-                bool sentRecorded = SignalEngine.IsInRecentCandleCache(symbol, tf, candleTime);
 
+                var lastAlertSentNotSet = !lastAlertSent.ContainsKey(alertKey);
+                var coinLockNotSet = !coinLocks.ContainsKey(symbol);
+
+                // 3. Invalidate candle cache again
                 SignalEngine.InvalidateCandleCache(symbol, tf, candleTime);
+                bool secondAttemptNotBlocked = !SignalEngine.IsInRecentCandleCache(symbol, tf, candleTime);
 
-                return Task.FromResult(cacheCleared && sentRecorded);
+                return Task.FromResult(cacheCleared && lastAlertSentNotSet && coinLockNotSet && secondAttemptNotBlocked);
             });
 
-            await AssertTest("Test 53: Boot window 1h delay is 90min, after boot 50min", () =>
+            await AssertTest("Test 53: Boot window 1h delay is 90min, after boot 50min, 10h candle never PASS", () =>
             {
                 var originalStart = SignalEngine.ProcessStartTimeUtc;
                 try
                 {
-                    var candleAge70 = TimeSpan.FromMinutes(70);
-
-                    // 1. Within boot window (e.g. 5 mins after boot)
+                    // 1. Within boot window (5 mins after boot)
                     SignalEngine.ProcessStartTimeUtc = DateTime.UtcNow.AddMinutes(-5);
-                    bool isBoot = (DateTime.UtcNow - SignalEngine.ProcessStartTimeUtc).TotalMinutes <= 15;
-                    var maxDelayBoot = isBoot ? TimeSpan.FromMinutes(90) : TimeSpan.FromMinutes(50);
-                    bool acceptedInBoot = candleAge70 <= maxDelayBoot;
+                    long bootDelayMs = SignalEngine.GetMaxLiveDelayMs("1h");
+                    bool bootWindowIs90m = bootDelayMs == 90 * 60 * 1000;
 
-                    // 2. Outside boot window (e.g. 25 mins after boot)
+                    // 70-min candle is accepted in boot window
+                    var candleAge70Ms = 70 * 60 * 1000;
+                    bool candle70AcceptedInBoot = candleAge70Ms <= bootDelayMs;
+
+                    // 2. Outside boot window (25 mins after boot)
                     SignalEngine.ProcessStartTimeUtc = DateTime.UtcNow.AddMinutes(-25);
-                    bool isAfterBoot = (DateTime.UtcNow - SignalEngine.ProcessStartTimeUtc).TotalMinutes <= 15;
-                    var maxDelayAfter = isAfterBoot ? TimeSpan.FromMinutes(90) : TimeSpan.FromMinutes(50);
-                    bool rejectedAfterBoot = candleAge70 > maxDelayAfter;
+                    long normalDelayMs = SignalEngine.GetMaxLiveDelayMs("1h");
+                    bool normalWindowIs50m = normalDelayMs == 50 * 60 * 1000;
 
-                    return Task.FromResult(acceptedInBoot && rejectedAfterBoot);
+                    // 70-min candle is rejected after boot window
+                    bool candle70RejectedAfterBoot = candleAge70Ms > normalDelayMs;
+
+                    // 3. 10-hour candle (600 mins) is NEVER accepted in either window
+                    long candleAge10hMs = 10 * 60 * 60 * 1000;
+                    bool candle10hNeverAccepted = candleAge10hMs > bootDelayMs && candleAge10hMs > normalDelayMs;
+
+                    return Task.FromResult(bootWindowIs90m && candle70AcceptedInBoot && normalWindowIs50m && candle70RejectedAfterBoot && candle10hNeverAccepted);
                 }
                 finally
                 {
@@ -1641,47 +1655,143 @@ namespace CryptoSense.Infrastructure.Testing
                 }
             });
 
-            await AssertTest("Test 54: Daily -3% uses Baku calendar day, not UTC Date", async () =>
+            await AssertTest("Test 54: Daily -3% uses Baku calendar day with ClosedAt, not GeneratedAt", async () =>
             {
                 // Baku calendar day start in UTC:
                 var bakuDayStartUtc = DateTime.UtcNow.AddHours(4).Date.AddHours(-4);
 
-                // Simulate a loss trade that closed at Baku day start + 1 hour (e.g. 01:00 Baku time)
-                var tradeTimeUtc = bakuDayStartUtc.AddHours(1);
-                var testLossSignal = new FuturesSignal
+                // Signal A: Generated yesterday, but closed today in Baku calendar day (at bakuDayStartUtc + 1h)
+                var yesterdayUtc = bakuDayStartUtc.AddHours(-2);
+                var todayClosedUtc = bakuDayStartUtc.AddHours(1);
+
+                var signalClosedToday = new FuturesSignal
                 {
-                    Symbol = "TESTBAKULOSS54",
+                    Symbol = "TESTBAKULOSS54A",
                     Timeframe = "1h",
                     Direction = SignalDirection.Buy,
                     SignalType = "GÜCLÜ LONG 🟢",
                     SignalAlertSent = true,
                     SignalNumber = 8888,
-                    GeneratedAt = tradeTimeUtc,
-                    ClosedAt = tradeTimeUtc,
+                    GeneratedAt = yesterdayUtc,
+                    ClosedAt = todayClosedUtc,
                     IsClosed = true,
                     Status = SignalStatus.Failed,
                     CloseReason = "SL",
-                    ResultPercent = -3.20m,
+                    ResultPercent = -2.50m,
                     IsTest = false
                 };
 
-                await _unitOfWork.Signals.AddAsync(testLossSignal);
+                // Signal B: Generated yesterday and closed yesterday in Baku calendar day
+                var signalClosedYesterday = new FuturesSignal
+                {
+                    Symbol = "TESTBAKULOSS54B",
+                    Timeframe = "1h",
+                    Direction = SignalDirection.Buy,
+                    SignalType = "GÜCLÜ LONG 🟢",
+                    SignalAlertSent = true,
+                    SignalNumber = 8889,
+                    GeneratedAt = yesterdayUtc.AddHours(-3),
+                    ClosedAt = yesterdayUtc.AddHours(-1),
+                    IsClosed = true,
+                    Status = SignalStatus.Failed,
+                    CloseReason = "SL",
+                    ResultPercent = -2.00m,
+                    IsTest = false
+                };
+
+                await _unitOfWork.Signals.AddAsync(signalClosedToday);
+                await _unitOfWork.Signals.AddAsync(signalClosedYesterday);
                 await _unitOfWork.SaveChangesAsync();
 
-                // Query signals since Baku calendar day start
-                var signals = await _unitOfWork.Signals.GetSignalsSinceAsync(bakuDayStartUtc);
-                var todayClosedPnL = signals
-                    .Where(s => s.Symbol == "TESTBAKULOSS54" && (s.IsClosed || s.Status != SignalStatus.Open) && s.ResultPercent.HasValue)
-                    .Sum(s => s.ResultPercent!.Value);
+                // Query closed PnL using GetClosedPnlSinceAsync with ClosedAt
+                var todayClosedPnl = await _unitOfWork.Signals.GetClosedPnlSinceAsync(bakuDayStartUtc);
 
-                bool dailyLossTriggered = todayClosedPnL <= -3.0m;
+                // signalClosedToday must be counted, signalClosedYesterday must NOT be counted
+                var allClosedToday = await _unitOfWork.Signals.GetClosedSignalsSinceAsync(bakuDayStartUtc);
+                bool containsToday = allClosedToday.Any(s => s.Symbol == "TESTBAKULOSS54A");
+                bool excludesYesterday = !allClosedToday.Any(s => s.Symbol == "TESTBAKULOSS54B");
 
                 // Clean up
-                testLossSignal.IsTest = true;
-                testLossSignal.SignalAlertSent = false;
+                await _unitOfWork.Signals.DeleteAsync(signalClosedToday);
+                await _unitOfWork.Signals.DeleteAsync(signalClosedYesterday);
+
+                return containsToday && excludesYesterday;
+            });
+
+            await AssertTest("Test 55: TELEGRAM_FAIL deletes unsent row and frees unique index", async () =>
+            {
+                var candleTime = new DateTime(2026, 9, 14, 8, 0, 0, DateTimeKind.Utc);
+                var symbol = "TESTFAIL55";
+                var tf = "1h";
+
+                // 1. Unsent + CloseReason=ALERT_NEVER_SENT_FAILED sətir qoy
+                var failedUnsent = new FuturesSignal
+                {
+                    Symbol = symbol,
+                    Timeframe = tf,
+                    Direction = SignalDirection.Buy,
+                    SignalType = "GÜCLÜ LONG 🟢",
+                    Confidence = 80,
+                    SignalAlertSent = false,
+                    SignalNumber = 0,
+                    SourceCandleOpenTimeUtc = candleTime,
+                    GeneratedAt = DateTime.UtcNow,
+                    Status = SignalStatus.Neutral,
+                    CloseReason = "ALERT_NEVER_SENT_FAILED",
+                    IsClosed = true,
+                    IsTest = false
+                };
+
+                await _unitOfWork.Signals.AddAsync(failedUnsent);
                 await _unitOfWork.SaveChangesAsync();
 
-                return dailyLossTriggered;
+                // 2. DeleteUnsentForCandle çağır
+                bool deleted = await _unitOfWork.Signals.DeleteUnsentForCandleAsync(symbol, tf, candleTime, SignalDirection.Buy);
+                if (!deleted)
+                {
+                    Console.WriteLine("[Test 55 Fail] DeleteUnsentForCandleAsync returned false!");
+                    await _unitOfWork.Signals.DeleteAsync(failedUnsent);
+                    return false;
+                }
+
+                // 3. GetExisting null olmalıdır
+                var existingDelivered = await _unitOfWork.Signals.GetExistingCandleSignalAsync(symbol, tf, candleTime);
+                var existingUnsent = await _unitOfWork.Signals.GetUnsentSignalForCandleAsync(symbol, tf, candleTime, SignalDirection.Buy);
+                bool bothNull = existingDelivered == null && existingUnsent == null;
+
+                // 4. Eyni unique key ilə yeni sətir insert oluna bilməlidir
+                var newSignal = new FuturesSignal
+                {
+                    Symbol = symbol,
+                    Timeframe = tf,
+                    Direction = SignalDirection.Buy,
+                    SignalType = "GÜCLÜ LONG 🟢",
+                    Confidence = 82,
+                    SignalAlertSent = true,
+                    SignalNumber = 9999,
+                    SourceCandleOpenTimeUtc = candleTime,
+                    GeneratedAt = DateTime.UtcNow,
+                    Status = SignalStatus.Open,
+                    IsClosed = false,
+                    IsTest = false
+                };
+
+                bool newInsertSuccess = false;
+                try
+                {
+                    await _unitOfWork.Signals.AddAsync(newSignal);
+                    await _unitOfWork.SaveChangesAsync();
+                    newInsertSuccess = true;
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[Test 55 Fail] Unique collision on new insert: {ex.Message}");
+                }
+
+                // Clean up
+                await _unitOfWork.Signals.DeleteAsync(newSignal);
+
+                return deleted && bothNull && newInsertSuccess;
             });
 
             Console.WriteLine("\n========================================================");

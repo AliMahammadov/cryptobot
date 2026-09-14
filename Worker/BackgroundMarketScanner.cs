@@ -470,6 +470,73 @@ namespace CryptoSense.Worker
             }
         }
 
+        public static async Task<(bool Success, bool ShouldBreak, bool InvalidateArmed)> PersistOrRecoverSignalAsync(
+            IUnitOfWork uow,
+            FuturesSignal signal,
+            ConcurrentDictionary<string, DateTime> lastAlertSent,
+            ConcurrentDictionary<string, byte> coinLocks,
+            string alertKey,
+            string sym,
+            CancellationToken ct)
+        {
+            // Check if existing delivered candle signal exists in DB
+            var existingCandle = await uow.Signals.GetExistingCandleSignalAsync(signal.Symbol, signal.Timeframe, signal.SourceCandleOpenTimeUtc);
+            if (existingCandle != null && existingCandle.SignalAlertSent)
+            {
+                lastAlertSent[alertKey] = DateTime.UtcNow;
+                coinLocks.TryAdd(sym, 1);
+                return (Success: false, ShouldBreak: true, InvalidateArmed: false);
+            }
+
+            // Check if unsent draft row exists for this candle + direction to reuse
+            var unsentDraft = await uow.Signals.GetUnsentSignalForCandleAsync(signal.Symbol, signal.Timeframe, signal.SourceCandleOpenTimeUtc, signal.Direction);
+            if (unsentDraft != null)
+            {
+                signal.Id = unsentDraft.Id;
+                signal.GeneratedAt = unsentDraft.GeneratedAt;
+                Console.WriteLine($"[MarketScanner] Reusing existing unsent DB signal Id={unsentDraft.Id} for {signal.Symbol} {signal.Timeframe}");
+                return (Success: true, ShouldBreak: false, InvalidateArmed: false);
+            }
+
+            if (signal.Id == 0)
+            {
+                try
+                {
+                    await uow.Signals.AddAsync(signal);
+                    await uow.SaveChangesAsync(ct);
+                    return (Success: true, ShouldBreak: false, InvalidateArmed: false);
+                }
+                catch (Exception dbEx)
+                {
+                    Console.WriteLine($"[MarketScanner] Duplicate signal insert collision for {signal.Symbol}: {dbEx.Message}");
+                    // Attempt recovery of unsent row
+                    var recoveredUnsent = await uow.Signals.GetUnsentSignalForCandleAsync(signal.Symbol, signal.Timeframe, signal.SourceCandleOpenTimeUtc, signal.Direction);
+                    if (recoveredUnsent != null)
+                    {
+                        signal.Id = recoveredUnsent.Id;
+                        Console.WriteLine($"[MarketScanner] Recovered unsent signal Id={recoveredUnsent.Id} after collision");
+                        return (Success: true, ShouldBreak: false, InvalidateArmed: false);
+                    }
+
+                    // Check if delivered exists
+                    var delivered = await uow.Signals.GetExistingCandleSignalAsync(signal.Symbol, signal.Timeframe, signal.SourceCandleOpenTimeUtc);
+                    if (delivered != null && delivered.SignalAlertSent)
+                    {
+                        lastAlertSent[alertKey] = DateTime.UtcNow;
+                        coinLocks.TryAdd(sym, 1);
+                        return (Success: false, ShouldBreak: true, InvalidateArmed: false);
+                    }
+
+                    // QƏTİYYƏN _lastAlertSent yazma və coin lock qoyma!
+                    SignalEngine.InvalidateCandleCache(signal.Symbol, signal.Timeframe, signal.SourceCandleOpenTimeUtc);
+                    Console.WriteLine($"[EMIT_RETRY_ARMED] {signal.Symbol} {signal.Timeframe} candle={signal.SourceCandleOpenTimeUtc:yyyy-MM-dd HH:mm} reason=TELEGRAM_FAIL_DB_REUSE");
+                    return (Success: false, ShouldBreak: true, InvalidateArmed: true);
+                }
+            }
+
+            return (Success: true, ShouldBreak: false, InvalidateArmed: false);
+        }
+
         private async Task WaitUntilWsHealthyAsync(CancellationToken stoppingToken)
         {
             var sw = System.Diagnostics.Stopwatch.StartNew();
@@ -486,22 +553,37 @@ namespace CryptoSense.Worker
                 await Task.Delay(1000, stoppingToken);
             }
 
-            // Timeout olarsa: 1 dəfəlik REST ilə BTC qiymətini çəkib DataAge-i təzələsin
+            // Timeout olarsa: REST ilə Default40 + BTC koinlərinin qiymətini çəkib LivePriceCache doldur
             try
             {
                 using var scope = _serviceProvider.CreateScope();
                 var marketData = scope.ServiceProvider.GetRequiredService<IMarketDataProvider>();
-                var lastAgg = await marketData.GetLastAggTradeAsync("BTCUSDT");
-                if (lastAgg.HasValue)
+                var coinsToSeed = new HashSet<string>(TelegramBotService.Default40Coins, StringComparer.OrdinalIgnoreCase);
+                coinsToSeed.Add("BTCUSDT");
+
+                var seedTasks = coinsToSeed.Select(async coin =>
                 {
-                    _livePriceCache.UpdateFromAggTrade("BTCUSDT", lastAgg.Value.Price, lastAgg.Value.ExchangeTsMs, isRestFallback: false);
-                    var snap = _livePriceCache.GetSnapshot("BTCUSDT");
-                    Console.WriteLine($"[WS_READY] REST fallback seeded BTCUSDT dataAgeMs={snap?.DataAgeMs ?? -1} price={lastAgg.Value.Price}");
-                }
+                    try
+                    {
+                        var lastAgg = await marketData.GetLastAggTradeAsync(coin);
+                        if (lastAgg.HasValue)
+                        {
+                            _livePriceCache.UpdateFromAggTrade(coin, lastAgg.Value.Price, lastAgg.Value.ExchangeTsMs, isRestFallback: false);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"[WS_TIMEOUT_REST_SEED] Failed {coin}: {ex.Message}");
+                    }
+                });
+                await Task.WhenAll(seedTasks);
+
+                var snap = _livePriceCache.GetSnapshot("BTCUSDT");
+                Console.WriteLine($"[WS_READY] REST fallback seeded {coinsToSeed.Count} coins. BTC dataAgeMs={snap?.DataAgeMs ?? -1}");
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[WS_READY] Failed to seed BTCUSDT via REST: {ex.Message}");
+                Console.WriteLine($"[WS_READY] Failed to seed coins via REST: {ex.Message}");
             }
         }
 
@@ -509,6 +591,7 @@ namespace CryptoSense.Worker
         {
             Console.WriteLine("[BackgroundMarketScanner] Startup Market Catch-Up skanı başladı...");
             var emittedSignals = new List<FuturesSignal>();
+            var skippedPassSignals = new List<(string Symbol, string Timeframe, string Direction, decimal EntryPrice, string Reason)>();
             var skipCounts = new ConcurrentDictionary<string, int>();
             int scannedCount = 0;
 
@@ -593,6 +676,7 @@ namespace CryptoSense.Worker
 
                             if (await uow.Signals.HasActiveSignalForSymbolAsync(signal.Symbol))
                             {
+                                skippedPassSignals.Add((signal.Symbol, signal.Timeframe, signal.Direction.ToString(), signal.EntryPrice, "Lock"));
                                 continue;
                             }
 
@@ -622,6 +706,7 @@ namespace CryptoSense.Worker
                             {
                                 SignalEngine.InvalidateCandleCache(signal.Symbol, signal.Timeframe, signal.SourceCandleOpenTimeUtc);
                                 skipCounts.AddOrUpdate("Stale", 1, (_, v) => v + 1);
+                                skippedPassSignals.Add((signal.Symbol, signal.Timeframe, signal.Direction.ToString(), signal.EntryPrice, "Stale"));
                                 continue;
                             }
 
@@ -641,6 +726,7 @@ namespace CryptoSense.Worker
                             {
                                 SignalEngine.InvalidateCandleCache(signal.Symbol, signal.Timeframe, signal.SourceCandleOpenTimeUtc);
                                 skipCounts.AddOrUpdate("SL", 1, (_, v) => v + 1);
+                                skippedPassSignals.Add((signal.Symbol, signal.Timeframe, signal.Direction.ToString(), signal.EntryPrice, "SL"));
                                 continue;
                             }
 
@@ -652,6 +738,7 @@ namespace CryptoSense.Worker
                             {
                                 SignalEngine.InvalidateCandleCache(signal.Symbol, signal.Timeframe, signal.SourceCandleOpenTimeUtc);
                                 skipCounts.AddOrUpdate("RR", 1, (_, v) => v + 1);
+                                skippedPassSignals.Add((signal.Symbol, signal.Timeframe, signal.Direction.ToString(), signal.EntryPrice, "RR"));
                                 continue;
                             }
 
@@ -659,13 +746,28 @@ namespace CryptoSense.Worker
                             await _sendSemaphore.WaitAsync(stoppingToken);
                             try
                             {
-                                if (_coinActiveLocks.ContainsKey(sym)) continue;
-                                if (_coinActiveLocks.Count >= MaxGlobalOpenPositions) break;
-                                if (await uow.Signals.HasActiveSignalForSymbolAsync(signal.Symbol)) continue;
+                                if (_coinActiveLocks.ContainsKey(sym))
+                                {
+                                    skippedPassSignals.Add((signal.Symbol, signal.Timeframe, signal.Direction.ToString(), signal.EntryPrice, "Lock"));
+                                    continue;
+                                }
+                                if (_coinActiveLocks.Count >= MaxGlobalOpenPositions)
+                                {
+                                    skippedPassSignals.Add((signal.Symbol, signal.Timeframe, signal.Direction.ToString(), signal.EntryPrice, "Lock"));
+                                    break;
+                                }
+                                if (await uow.Signals.HasActiveSignalForSymbolAsync(signal.Symbol))
+                                {
+                                    skippedPassSignals.Add((signal.Symbol, signal.Timeframe, signal.Direction.ToString(), signal.EntryPrice, "Lock"));
+                                    continue;
+                                }
 
                                 signal.Number = 0;
-                                await uow.Signals.AddAsync(signal);
-                                await uow.SaveChangesAsync(stoppingToken);
+                                var persistRes = await PersistOrRecoverSignalAsync(uow, signal, _lastAlertSent, _coinActiveLocks, alertKey, sym, stoppingToken);
+                                if (!persistRes.Success || persistRes.ShouldBreak)
+                                {
+                                    continue;
+                                }
 
                                 bool ok = await _telegramService.SendSignalAlertAsync(signal);
                                 if (ok)
@@ -681,11 +783,19 @@ namespace CryptoSense.Worker
                                 {
                                     _lastAlertSent.TryRemove(alertKey, out _);
                                     SignalEngine.InvalidateCandleCache(signal.Symbol, signal.Timeframe, signal.SourceCandleOpenTimeUtc);
-                                    signal.IsClosed = true;
-                                    signal.ClosedAt = DateTime.UtcNow;
-                                    signal.Status = SignalStatus.Neutral;
-                                    signal.CloseReason = "ALERT_NEVER_SENT_FAILED";
-                                    await uow.SaveChangesAsync(stoppingToken);
+                                    _coinActiveLocks.TryRemove(sym, out _);
+                                    skippedPassSignals.Add((signal.Symbol, signal.Timeframe, signal.Direction.ToString(), signal.EntryPrice, "TelegramFail"));
+
+                                    Console.WriteLine($"[EMIT_RETRY_ARMED] {signal.Symbol} {signal.Timeframe} candle={signal.SourceCandleOpenTimeUtc:yyyy-MM-dd HH:mm} reason=TELEGRAM_FAIL_DELETED");
+
+                                    try
+                                    {
+                                        await uow.Signals.DeleteUnsentForCandleAsync(signal.Symbol, signal.Timeframe, signal.SourceCandleOpenTimeUtc, signal.Direction);
+                                    }
+                                    catch (Exception delEx)
+                                    {
+                                        Console.WriteLine($"[StartupMarketCatchUp] Failed to delete unsent signal: {delEx.Message}");
+                                    }
                                 }
                             }
                             finally
@@ -738,6 +848,18 @@ namespace CryptoSense.Worker
                     }
                     catch { }
 
+                    // Fetch last 12 closed BTC 1h candles
+                    List<Kline>? recentBtc1hCandles = null;
+                    try
+                    {
+                        var btc1hKlines = await marketData.GetKlinesAsync("BTCUSDT", "1h", 15);
+                        if (btc1hKlines != null && btc1hKlines.Count > 1)
+                        {
+                            recentBtc1hCandles = btc1hKlines.Take(btc1hKlines.Count - 1).TakeLast(12).ToList();
+                        }
+                    }
+                    catch { }
+
                     var nowUtc = DateTime.UtcNow;
                     var last1hClose = new DateTime(nowUtc.Year, nowUtc.Month, nowUtc.Day, nowUtc.Hour, 0, 0, DateTimeKind.Utc);
                     int last1hAgeMinutes = (int)Math.Max(0, (nowUtc - last1hClose).TotalMinutes);
@@ -773,7 +895,9 @@ namespace CryptoSense.Worker
                         emittedSignals: emittedSignals,
                         dominantSkipName: dominantSkipName,
                         dominantSkipCount: dominantSkipCount,
-                        nextCheckMinutes: nextCheckMinutes
+                        nextCheckMinutes: nextCheckMinutes,
+                        recentBtc1hCandles: recentBtc1hCandles,
+                        skippedPassSignals: skippedPassSignals
                     );
 
                     await _telegramService.SendMessageReturnIdAsync(briefingMsg, superAdminId);
@@ -1577,6 +1701,8 @@ namespace CryptoSense.Worker
             {
                 Interlocked.Increment(ref _hourlyTelemetry.SkipCircuitBreaker);
                 Console.WriteLine($"[SCAN_CYCLE_SKIP] reason=CIRCUIT_BREAKER cbUntil={_circuitBreakerUntil:HH:mm:ss}UTC");
+                LatestTelemetrySnapshot = _hourlyTelemetry.Clone();
+                await MaybeSendHourlyHeartbeatAsync(stoppingToken);
                 return;
             }
             else if (_circuitBreakerUntil != DateTime.MinValue)
@@ -1596,22 +1722,23 @@ namespace CryptoSense.Worker
             {
                 Interlocked.Increment(ref _hourlyTelemetry.SkipMaxOpen);
                 Console.WriteLine($"[SCAN_CYCLE_SKIP] reason=MAX_OPEN count={openTradesCount} activeLocks={_coinActiveLocks.Count} max={MaxGlobalOpenPositions}");
+                LatestTelemetrySnapshot = _hourlyTelemetry.Clone();
+                await MaybeSendHourlyHeartbeatAsync(stoppingToken);
                 return;
             }
 
-            // Prioritet 4: Günlük -3.0% itki limiti çatdıqda yeni əməliyyat açılmır (Bakı vaxtı 00:00 ilə)
+            // Prioritet 4: Günlük -3.0% itki limiti çatdıqda yeni əməliyyat açılmır (Bakı vaxtı 00:00 ilə bağlı əməliyyatlar)
             try
             {
                 var bakuDayStartUtc = DateTime.UtcNow.AddHours(4).Date.AddHours(-4);
-                var todaySignals = await unitOfWork.Signals.GetSignalsSinceAsync(bakuDayStartUtc);
-                var todayClosedPnL = todaySignals
-                    .Where(s => (s.IsClosed || s.Status != SignalStatus.Open) && s.ResultPercent.HasValue)
-                    .Sum(s => s.ResultPercent!.Value);
+                var todayClosedPnL = await unitOfWork.Signals.GetClosedPnlSinceAsync(bakuDayStartUtc);
 
                 if (todayClosedPnL <= -3.0m)
                 {
                     Interlocked.Increment(ref _hourlyTelemetry.SkipDailyLoss);
                     Console.WriteLine($"[SCAN_CYCLE_SKIP] reason=DAILY_LOSS pnl={todayClosedPnL:F2}% threshold=-3.0%");
+                    LatestTelemetrySnapshot = _hourlyTelemetry.Clone();
+                    await MaybeSendHourlyHeartbeatAsync(stoppingToken);
                     return;
                 }
             }
@@ -2093,22 +2220,10 @@ namespace CryptoSense.Worker
 
                                     signal.Number = 0;
 
-                                    // Persist immediately to SQLite DB so it gets an ID before dispatching
-                                    if (signal.Id == 0)
+                                    var persistRes = await PersistOrRecoverSignalAsync(uow, signal, _lastAlertSent, _coinActiveLocks, alertKey, sym, ct);
+                                    if (!persistRes.Success || persistRes.ShouldBreak)
                                     {
-                                        try
-                                        {
-                                            await uow.Signals.AddAsync(signal);
-                                            await uow.SaveChangesAsync(ct);
-                                        }
-                                        catch (Exception dbEx)
-                                        {
-                                            Console.WriteLine($"[MarketScanner] Suppressed duplicate signal insert for {signal.Symbol}: {dbEx.Message}");
-                                            _lastAlertSent[alertKey] = DateTime.UtcNow;
-                                            _lastSymbolAlertTime[signal.Symbol] = DateTime.UtcNow;
-                                            _coinActiveLocks.TryAdd(sym, 1);
-                                            break;
-                                        }
+                                        break;
                                     }
 
                                     bool ok = false;
@@ -2155,24 +2270,21 @@ namespace CryptoSense.Worker
                                     {
                                         _lastAlertSent.TryRemove(alertKey, out _);
                                         SignalEngine.InvalidateCandleCache(signal.Symbol, signal.Timeframe, signal.SourceCandleOpenTimeUtc);
-                                        Console.WriteLine($"[EMIT_RETRY_ARMED] {signal.Symbol} {signal.Timeframe} candle={signal.SourceCandleOpenTimeUtc:yyyy-MM-dd HH:mm} reason=TELEGRAM_FAIL");
+                                        _coinActiveLocks.TryRemove(sym, out _);
+
+                                        Console.WriteLine($"[EMIT_RETRY_ARMED] {signal.Symbol} {signal.Timeframe} candle={signal.SourceCandleOpenTimeUtc:yyyy-MM-dd HH:mm} reason=TELEGRAM_FAIL_DELETED");
 
                                         Interlocked.Increment(ref _hourlyTelemetry.TelegramFail);
                                         Console.WriteLine($"[MarketScanner] TELEGRAM_FAIL: {signal.Symbol} {signal.Timeframe} — SendSignalAlert false (DataAge? R:R? UserFilter?)");
-                                        _coinActiveLocks.TryRemove(sym, out _);
 
-                                        // Clean up unsent signal from DB so it never remains as an open #0 position!
+                                        // DELETE unsent signal from DB so unique index is freed and it never blocks future retry
                                         try
                                         {
-                                            signal.IsClosed = true;
-                                            signal.ClosedAt = DateTime.UtcNow;
-                                            signal.Status = SignalStatus.Neutral;
-                                            signal.CloseReason = "ALERT_NEVER_SENT_FAILED";
-                                            await uow.SaveChangesAsync(ct);
+                                            await uow.Signals.DeleteUnsentForCandleAsync(signal.Symbol, signal.Timeframe, signal.SourceCandleOpenTimeUtc, signal.Direction);
                                         }
                                         catch (Exception cleanEx)
                                         {
-                                            Console.WriteLine($"[MarketScanner] Failed to clean unsent signal {signal.Id}: {cleanEx.Message}");
+                                            Console.WriteLine($"[MarketScanner] Failed to delete unsent signal {signal.Id}: {cleanEx.Message}");
                                         }
                                     }
                                 }
@@ -2280,87 +2392,7 @@ namespace CryptoSense.Worker
             }
 
             // 1) HEARTBEAT: Saat başı, 1 ədəd. Yalnız Bakı dəqiqə 0–2 (00:00, 01:00, ...). 30 dəq intervalı SİLİNDİ.
-            var nowUtc = DateTime.UtcNow;
-            var bakuNowHb = nowUtc.AddHours(4);
-            bool isHourlyWindow = bakuNowHb.Minute >= 0 && bakuNowHb.Minute <= 2;
-
-            if (isHourlyWindow)
-            {
-                foreach (var kvp in TelegramBotService.UserPreferences)
-                {
-                    var chatId = kvp.Key;
-                    var s = kvp.Value;
-                    if (!s.IsActive) continue;
-
-                    // Başqa user-in heartbeat-i SuperAdmin çatına GETMƏSİN — Tək qapı ilə yoxlanılır və yalnız bu chatId-yə göndərilir
-                    if (!await _telegramService.CanReceivePushAsync(chatId)) continue;
-
-                    // Eyni chatId-yə saatda 1 heartbeat. Cari Bakı saatında artıq göndərilibsə ötür
-                    if (s.LastHeartbeatSentUtc != default)
-                    {
-                        var lastSentBaku = s.LastHeartbeatSentUtc.AddHours(4);
-                        if (lastSentBaku.Date == bakuNowHb.Date && lastSentBaku.Hour == bakuNowHb.Hour)
-                        {
-                            continue;
-                        }
-                    }
-
-                    lock (_heartbeatLock)
-                    {
-                        if (s.LastHeartbeatSentUtc != default)
-                        {
-                            var lastSentBaku = s.LastHeartbeatSentUtc.AddHours(4);
-                            if (lastSentBaku.Date == bakuNowHb.Date && lastSentBaku.Hour == bakuNowHb.Hour)
-                            {
-                                continue;
-                            }
-                        }
-                        s.LastHeartbeatSentUtc = DateTime.UtcNow;
-                        TelegramBotService.SaveSettings();
-                    }
-
-                    var snapTelemetry = LatestTelemetrySnapshot ?? new ScanTelemetry();
-                    int activeLocksCount = Math.Max(snapTelemetry.SkipLock, _coinActiveLocks.Count);
-                    var btcSnapHb = _livePriceCache.GetSnapshot("BTCUSDT");
-                    var heartbeatMsg = TelegramMessageFormatter.FormatLiveHeartbeat(
-                        chase: snapTelemetry.SkipChase,
-                        corr: snapTelemetry.SkipCorr,
-                        slWide: snapTelemetry.SkipSL,
-                        lowRr: snapTelemetry.SkipRR,
-                        activeLocks: activeLocksCount,
-                        sent: snapTelemetry.Sent,
-                        nextCheckMinutes: 60,
-                        dataAgeMsBtc: btcSnapHb?.DataAgeMs ?? -1,
-                        skipStale: snapTelemetry.SkipStale,
-                        skipLag: snapTelemetry.SkipLag,
-                        skipConfluence: snapTelemetry.SkipConfluence,
-                        telegramFail: snapTelemetry.TelegramFail,
-                        skipGozleme: snapTelemetry.SkipGozleme,
-                        skipBtcGate: snapTelemetry.SkipBtcGate,
-                        skipBtcRange: snapTelemetry.SkipBtcRange,
-                        skipCircuitBreaker: snapTelemetry.SkipCircuitBreaker,
-                        skipMaxOpen: snapTelemetry.SkipMaxOpen,
-                        skipDailyLoss: snapTelemetry.SkipDailyLoss);
-
-                    // 1) HEARTBEAT: EditMessage ilə köhnə ℹ️-ni gizlin yeniləmə YOXDUR.
-                    // Saat başı YENİ mesaj. Telefon bildirişi gəlsin.
-                    if (s.LastHeartbeatMessageId.HasValue)
-                    {
-                        try
-                        {
-                            await _telegramService.DeleteMessageAsync(chatId, s.LastHeartbeatMessageId.Value);
-                        }
-                        catch { /* Köhnə mesaj silinə bilməsə belə yeni mesaj mütləq getməlidir */ }
-                    }
-
-                    var newMsgId = await _telegramService.SendMessageReturnIdAsync(heartbeatMsg, chatId);
-                    if (newMsgId.HasValue)
-                    {
-                        s.LastHeartbeatMessageId = newMsgId;
-                        TelegramBotService.SaveSettings();
-                    }
-                }
-            }
+            await MaybeSendHourlyHeartbeatAsync(stoppingToken);
 
             // QIZIL QAYDA: Gündəlik hesabat (Günün sonu - Bakı vaxtı ilə 00:00 - 00:30 pəncərəsi)
             var bakuNow = DateTime.UtcNow.AddHours(4);
@@ -2378,6 +2410,90 @@ namespace CryptoSense.Worker
                     {
                         Console.WriteLine($"[BackgroundMarketScanner] Daily Report error: {ex.Message}");
                     }
+                }
+            }
+        }
+
+        private async Task MaybeSendHourlyHeartbeatAsync(CancellationToken stoppingToken)
+        {
+            var nowUtc = DateTime.UtcNow;
+            var bakuNowHb = nowUtc.AddHours(4);
+            bool isHourlyWindow = bakuNowHb.Minute >= 0 && bakuNowHb.Minute <= 2;
+
+            if (!isHourlyWindow) return;
+
+            foreach (var kvp in TelegramBotService.UserPreferences)
+            {
+                var chatId = kvp.Key;
+                var s = kvp.Value;
+                if (!s.IsActive) continue;
+
+                // Başqa user-in heartbeat-i SuperAdmin çatına GETMƏSİN — Tək qapı ilə yoxlanılır və yalnız bu chatId-yə göndərilir
+                if (!await _telegramService.CanReceivePushAsync(chatId)) continue;
+
+                // Eyni chatId-yə saatda 1 heartbeat. Cari Bakı saatında artıq göndərilibsə ötür
+                if (s.LastHeartbeatSentUtc != default)
+                {
+                    var lastSentBaku = s.LastHeartbeatSentUtc.AddHours(4);
+                    if (lastSentBaku.Date == bakuNowHb.Date && lastSentBaku.Hour == bakuNowHb.Hour)
+                    {
+                        continue;
+                    }
+                }
+
+                lock (_heartbeatLock)
+                {
+                    if (s.LastHeartbeatSentUtc != default)
+                    {
+                        var lastSentBaku = s.LastHeartbeatSentUtc.AddHours(4);
+                        if (lastSentBaku.Date == bakuNowHb.Date && lastSentBaku.Hour == bakuNowHb.Hour)
+                        {
+                            continue;
+                        }
+                    }
+                    s.LastHeartbeatSentUtc = DateTime.UtcNow;
+                    TelegramBotService.SaveSettings();
+                }
+
+                var snapTelemetry = LatestTelemetrySnapshot ?? new ScanTelemetry();
+                int activeLocksCount = Math.Max(snapTelemetry.SkipLock, _coinActiveLocks.Count);
+                var btcSnapHb = _livePriceCache.GetSnapshot("BTCUSDT");
+                var heartbeatMsg = TelegramMessageFormatter.FormatLiveHeartbeat(
+                    chase: snapTelemetry.SkipChase,
+                    corr: snapTelemetry.SkipCorr,
+                    slWide: snapTelemetry.SkipSL,
+                    lowRr: snapTelemetry.SkipRR,
+                    activeLocks: activeLocksCount,
+                    sent: snapTelemetry.Sent,
+                    nextCheckMinutes: 60,
+                    dataAgeMsBtc: btcSnapHb?.DataAgeMs ?? -1,
+                    skipStale: snapTelemetry.SkipStale,
+                    skipLag: snapTelemetry.SkipLag,
+                    skipConfluence: snapTelemetry.SkipConfluence,
+                    telegramFail: snapTelemetry.TelegramFail,
+                    skipGozleme: snapTelemetry.SkipGozleme,
+                    skipBtcGate: snapTelemetry.SkipBtcGate,
+                    skipBtcRange: snapTelemetry.SkipBtcRange,
+                    skipCircuitBreaker: snapTelemetry.SkipCircuitBreaker,
+                    skipMaxOpen: snapTelemetry.SkipMaxOpen,
+                    skipDailyLoss: snapTelemetry.SkipDailyLoss);
+
+                // 1) HEARTBEAT: EditMessage ilə köhnə ℹ️-ni gizlin yeniləmə YOXDUR.
+                // Saat başı YENİ mesaj. Telefon bildirişi gəlsin.
+                if (s.LastHeartbeatMessageId.HasValue)
+                {
+                    try
+                    {
+                        await _telegramService.DeleteMessageAsync(chatId, s.LastHeartbeatMessageId.Value);
+                    }
+                    catch { /* Köhnə mesaj silinə bilməsə belə yeni mesaj mütləq getməlidir */ }
+                }
+
+                var newMsgId = await _telegramService.SendMessageReturnIdAsync(heartbeatMsg, chatId);
+                if (newMsgId.HasValue)
+                {
+                    s.LastHeartbeatMessageId = newMsgId;
+                    TelegramBotService.SaveSettings();
                 }
             }
         }

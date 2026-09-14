@@ -621,5 +621,66 @@ namespace CryptoSense.Infrastructure.Persistence.Repositories
                 .OrderByDescending(s => s.GeneratedAt)
                 .FirstOrDefaultAsync();
         }
+
+        public async Task DeleteAsync(FuturesSignal signal)
+        {
+            _context.Signals.Remove(signal);
+            await _context.SaveChangesAsync();
+        }
+
+        private static SignalDirection ParseDirection(string direction)
+        {
+            if (Enum.TryParse<SignalDirection>(direction, true, out var dir)) return dir;
+            if (direction.Equals("LONG", StringComparison.OrdinalIgnoreCase)) return SignalDirection.Buy;
+            if (direction.Equals("SHORT", StringComparison.OrdinalIgnoreCase)) return SignalDirection.Sell;
+            return SignalDirection.Buy;
+        }
+
+        public async Task<bool> DeleteUnsentForCandleAsync(string symbol, string timeframe, DateTime sourceCandleOpenTimeUtc, SignalDirection direction)
+        {
+            var unsent = await _context.Signals
+                .Where(s => s.Symbol == symbol && s.Timeframe == timeframe && s.SourceCandleOpenTimeUtc == sourceCandleOpenTimeUtc && s.Direction == direction && !s.SignalAlertSent)
+                .ToListAsync();
+
+            if (unsent.Count > 0)
+            {
+                _context.Signals.RemoveRange(unsent);
+                await _context.SaveChangesAsync();
+                return true;
+            }
+            return false;
+        }
+
+        public Task<bool> DeleteUnsentForCandleAsync(string symbol, string timeframe, DateTime sourceCandleOpenTimeUtc, string direction)
+        {
+            return DeleteUnsentForCandleAsync(symbol, timeframe, sourceCandleOpenTimeUtc, ParseDirection(direction));
+        }
+
+        public async Task<FuturesSignal?> GetUnsentSignalForCandleAsync(string symbol, string timeframe, DateTime sourceCandleOpenTimeUtc, SignalDirection direction)
+        {
+            return await _context.Signals
+                .Include(s => s.IndicatorSnapshots)
+                .FirstOrDefaultAsync(s => s.Symbol == symbol && s.Timeframe == timeframe && s.SourceCandleOpenTimeUtc == sourceCandleOpenTimeUtc && s.Direction == direction && !s.SignalAlertSent);
+        }
+
+        public Task<FuturesSignal?> GetUnsentSignalForCandleAsync(string symbol, string timeframe, DateTime sourceCandleOpenTimeUtc, string direction)
+        {
+            return GetUnsentSignalForCandleAsync(symbol, timeframe, sourceCandleOpenTimeUtc, ParseDirection(direction));
+        }
+
+        public async Task<decimal> GetClosedPnlSinceAsync(DateTime sinceUtc)
+        {
+            return await _context.Signals
+                .Where(s => s.ClosedAt >= sinceUtc && s.IsClosed && s.ResultPercent.HasValue && s.SignalAlertSent)
+                .SumAsync(s => s.ResultPercent ?? 0m);
+        }
+
+        public async Task<List<FuturesSignal>> GetClosedSignalsSinceAsync(DateTime sinceUtc)
+        {
+            return await _context.Signals
+                .Where(s => s.ClosedAt >= sinceUtc && s.IsClosed && s.ResultPercent.HasValue && s.SignalAlertSent)
+                .OrderByDescending(s => s.ClosedAt)
+                .ToListAsync();
+        }
     }
 }

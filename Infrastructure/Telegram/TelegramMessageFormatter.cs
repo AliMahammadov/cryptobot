@@ -684,9 +684,9 @@ namespace CryptoSense.Infrastructure.Telegram
                 {
                     sb.AppendLine("📌 <b>Səbəb:</b> Günlük itki limiti keçib (≤ -3.0%)");
                 }
-                else if (skipMaxOpen > 0 && activeLocks >= 20)
+                else if (skipMaxOpen > 0)
                 {
-                    sb.AppendLine($"📌 <b>Səbəb:</b> Maksimum açıq mövqe limiti ({activeLocks}/20)");
+                    sb.AppendLine($"📌 <b>Səbəb:</b> Maksimum açıq mövqe limitinə çatılıb ({activeLocks}/20)");
                 }
                 else
                 {
@@ -740,7 +740,9 @@ namespace CryptoSense.Infrastructure.Telegram
             List<FuturesSignal> emittedSignals,
             string dominantSkipName,
             int dominantSkipCount,
-            int nextCheckMinutes)
+            int nextCheckMinutes,
+            List<Kline>? recentBtc1hCandles = null,
+            List<(string Symbol, string Timeframe, string Direction, decimal EntryPrice, string Reason)>? skippedPassSignals = null)
         {
             var sb = new StringBuilder();
             sb.AppendLine("🚀 <b>CryptoSense v2.0 | Sistem Başlatma Brifinqi</b>");
@@ -765,6 +767,24 @@ namespace CryptoSense.Infrastructure.Telegram
             sb.AppendLine("⏱ <b>Son Bağlanmış Şamlar:</b>");
             sb.AppendLine($"• 1h şamın bağlanışından: <code>{last1hAgeMinutes} dəqiqə</code>");
             sb.AppendLine($"• 4h şamın bağlanışından: <code>{last4hAgeMinutes} dəqiqə</code>");
+
+            if (recentBtc1hCandles != null && recentBtc1hCandles.Count > 0)
+            {
+                sb.AppendLine("━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+                sb.AppendLine("📊 <b>Son 12 Bağlanmış BTC 1h Şamı:</b>");
+                sb.AppendLine("<pre>");
+                sb.AppendLine("Saat (AZT) |   Açılış   |   Bağlanış  |   Dəyişmə");
+                sb.AppendLine("-----------|------------|-------------|-----------");
+                foreach (var c in recentBtc1hCandles)
+                {
+                    var aztTime = DateTimeOffset.FromUnixTimeMilliseconds(c.OpenTime).UtcDateTime.AddHours(4).ToString("dd.MM HH:mm");
+                    decimal chgPct = c.Open > 0 ? ((c.Close - c.Open) / c.Open) * 100m : 0m;
+                    string sign = chgPct >= 0 ? "+" : "";
+                    sb.AppendLine($"{aztTime,-10} | ${c.Open,9:F1} | ${c.Close,10:F1} | {sign}{chgPct:F2}%");
+                }
+                sb.AppendLine("</pre>");
+            }
+
             sb.AppendLine("━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
             sb.AppendLine("🎯 <b>Catch-Up Skanı Nəticəsi:</b>");
             sb.AppendLine($"• Skan edilən cütlük sayı: <code>{scannedCount}</code>");
@@ -782,6 +802,17 @@ namespace CryptoSense.Infrastructure.Telegram
             }
             string skipInfo = dominantSkipCount > 0 ? $"{dominantSkipName}: {dominantSkipCount}" : "Yoxdur";
             sb.AppendLine($"• Dominant skip səbəbi: <code>{skipInfo}</code>");
+
+            if (skippedPassSignals != null && skippedPassSignals.Count > 0)
+            {
+                sb.AppendLine("━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+                sb.AppendLine("🛡️ <b>Filterlənən A+ Siqnallar (Maks 8):</b>");
+                foreach (var sk in skippedPassSignals.Take(8))
+                {
+                    sb.AppendLine($"• <b>{sk.Symbol}</b> ({sk.Timeframe} {sk.Direction} @ ${sk.EntryPrice}) &#8212; Səbəb: <code>{sk.Reason}</code>");
+                }
+            }
+
             sb.AppendLine("━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
             sb.AppendLine($"⏳ <b>Növbəti qrafik yoxlama:</b> <code>{nextCheckMinutes} dəqiqə sonra</code>");
             return sb.ToString();
