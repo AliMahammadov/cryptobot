@@ -442,25 +442,21 @@ namespace CryptoSense.Infrastructure.Telegram
             return sb.ToString();
         }
 
-        public static string FormatBotStatus(UserSettings settings, int userOpenPositionsCount, string? lastSignalTime, bool? canReceivePush = null)
+        public static string GetShortGitCommitHash()
         {
-            var sb = new StringBuilder();
-            sb.AppendLine("ℹ️ <b>CryptoSense Sistem Statusu:</b>");
-            sb.AppendLine("-----------------------------------");
-            sb.AppendLine("🤖 <b>Skaner Vəziyyəti:</b> İşləyir 🟢 (24/7 Canlı Rejim)");
-            var commitHash = "";
             try
             {
                 var envSha = Environment.GetEnvironmentVariable("RAILWAY_GIT_COMMIT_SHA")
                              ?? Environment.GetEnvironmentVariable("GIT_COMMIT_SHA");
                 if (!string.IsNullOrEmpty(envSha) && envSha.Length >= 7)
                 {
-                    commitHash = envSha.Substring(0, 7);
+                    return envSha.Substring(0, 7);
                 }
-                else
+
+                var searchDirs = new[] { AppDomain.CurrentDomain.BaseDirectory, Directory.GetCurrentDirectory() };
+                foreach (var startDir in searchDirs)
                 {
-                    var searchDirs = new[] { AppDomain.CurrentDomain.BaseDirectory, Directory.GetCurrentDirectory() };
-                    foreach (var startDir in searchDirs)
+                    if (Directory.Exists(startDir))
                     {
                         var dir = new DirectoryInfo(startDir);
                         while (dir != null)
@@ -479,7 +475,7 @@ namespace CryptoSense.Infrastructure.Telegram
                                         if (File.Exists(refPath))
                                         {
                                             var h = File.ReadAllText(refPath).Trim();
-                                            if (h.Length >= 7) { commitHash = h.Substring(0, 7); break; }
+                                            if (h.Length >= 7) return h.Substring(0, 7);
                                         }
                                         else
                                         {
@@ -491,7 +487,7 @@ namespace CryptoSense.Infrastructure.Telegram
                                                     if (line.EndsWith(refSubPath.Replace(Path.DirectorySeparatorChar, '/')))
                                                     {
                                                         var parts = line.Split(' ');
-                                                        if (parts[0].Length >= 7) { commitHash = parts[0].Substring(0, 7); break; }
+                                                        if (parts[0].Length >= 7) return parts[0].Substring(0, 7);
                                                     }
                                                 }
                                             }
@@ -499,44 +495,46 @@ namespace CryptoSense.Infrastructure.Telegram
                                     }
                                     else if (headContent.Length >= 7)
                                     {
-                                        commitHash = headContent.Substring(0, 7);
-                                        break;
+                                        return headContent.Substring(0, 7);
                                     }
                                 }
                             }
-                            if (!string.IsNullOrEmpty(commitHash)) break;
                             dir = dir.Parent;
                         }
-                        if (!string.IsNullOrEmpty(commitHash)) break;
                     }
                 }
             }
             catch { }
-            if (string.IsNullOrEmpty(commitHash))
+
+            try
             {
-                try
+                var proc = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
                 {
-                    var proc = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
-                    {
-                        FileName = "git",
-                        Arguments = "rev-parse --short HEAD",
-                        RedirectStandardOutput = true,
-                        UseShellExecute = false,
-                        CreateNoWindow = true
-                    });
-                    if (proc != null)
-                    {
-                        var outStr = proc.StandardOutput.ReadToEnd().Trim();
-                        proc.WaitForExit(1000);
-                        if (outStr.Length >= 7) commitHash = outStr.Substring(0, 7);
-                    }
+                    FileName = "git",
+                    Arguments = "rev-parse --short HEAD",
+                    RedirectStandardOutput = true,
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                });
+                if (proc != null)
+                {
+                    var outStr = proc.StandardOutput.ReadToEnd().Trim();
+                    proc.WaitForExit(1000);
+                    if (outStr.Length >= 7) return outStr.Substring(0, 7);
                 }
-                catch { }
             }
-            if (string.IsNullOrEmpty(commitHash))
-            {
-                commitHash = "2737c31";
-            }
+            catch { }
+
+            return "2737c31";
+        }
+
+        public static string FormatBotStatus(UserSettings settings, int userOpenPositionsCount, string? lastSignalTime, bool? canReceivePush = null)
+        {
+            var sb = new StringBuilder();
+            sb.AppendLine("ℹ️ <b>CryptoSense Sistem Statusu:</b>");
+            sb.AppendLine("-----------------------------------");
+            sb.AppendLine("🤖 <b>Skaner Vəziyyəti:</b> İşləyir 🟢 (24/7 Canlı Rejim)");
+            var commitHash = GetShortGitCommitHash();
             sb.AppendLine($"📌 <b>Deploy Versiyası:</b> <code>v2.0 (Commit: {commitHash})</code>");
             var tfDisplay = (settings.Timeframe == "Hamısı" || settings.Timeframe == "Hamisi") ? "1h, 4h" : (settings.Timeframe == "15m" ? "1h" : settings.Timeframe);
             sb.AppendLine($"⏱ <b>Aktiv Rejim:</b> <code>{tfDisplay}</code>");
@@ -667,7 +665,10 @@ namespace CryptoSense.Infrastructure.Telegram
             int telegramFail = 0,
             int skipGozleme = 0,
             int skipBtcGate = 0,
-            int skipBtcRange = 0)
+            int skipBtcRange = 0,
+            int skipCircuitBreaker = 0,
+            int skipMaxOpen = 0,
+            int skipDailyLoss = 0)
         {
             var sb = new StringBuilder();
             sb.AppendLine("&#8505;&#65039; <b>Bazar N&#601;zar&#601;ti (Heartbeat)</b>");
@@ -675,25 +676,40 @@ namespace CryptoSense.Infrastructure.Telegram
 
             if (sent == 0)
             {
-                var reasonsList = new List<(string Name, int Count, string Description)>
+                if (skipCircuitBreaker > 0)
                 {
-                    ("BtcGate", skipBtcGate, "BTC Ayı (Bearish) rejimindədir — Alt LONG-lar bloklandı"),
-                    ("Range", skipBtcRange, "BTC 1h Kompası Ranging (qeyri-müəyyən) rejimindədir"),
-                    ("Gözləmə", skipGozleme, "Bazar zəif konsolidasiyadadır (Gözləmə rejimi / ADX zəif)"),
-                    ("Confluence", skipConfluence, "Confluence balı tələb olunan 75%-dən aşağıdır"),
-                    ("SL", slWide, "Stop-Loss məsafəsi çox genişdir (> 2.8%)"),
-                    ("RR", lowRr, "Risk/Reward nisbəti qeyri-qənaətbəxşdir (< 1.30)"),
-                    ("Chase", chase, "Qiymət giriş zonasından uzaqlaşıb (Chase filtri)"),
-                    ("Lock", activeLocks, "Aktiv mövqe limitinə çatılıb"),
-                    ("Lag", skipLag, "Şam bağlanış gecikməsi (Lag filtri)"),
-                    ("Stale", skipStale, "Qiymət məlumatı köhnədir (Stale WebSocket)")
-                };
-                var dominant = reasonsList.OrderByDescending(r => r.Count).FirstOrDefault(r => r.Count > 0);
-                string reasonText = dominant.Count > 0 
-                    ? $"{dominant.Description} ({dominant.Name}: {dominant.Count})"
-                    : "Bazar konyukturası A+ siqnal meyarlarına uyğun gəlmir";
+                    sb.AppendLine("📌 <b>Səbəb:</b> CircuitBreaker aktivdir (Risk qorunması)");
+                }
+                else if (skipDailyLoss > 0)
+                {
+                    sb.AppendLine("📌 <b>Səbəb:</b> Günlük itki limiti keçib (≤ -3.0%)");
+                }
+                else if (skipMaxOpen > 0 && activeLocks >= 20)
+                {
+                    sb.AppendLine($"📌 <b>Səbəb:</b> Maksimum açıq mövqe limiti ({activeLocks}/20)");
+                }
+                else
+                {
+                    var reasonsList = new List<(string Name, int Count, string Description)>
+                    {
+                        ("BtcGate", skipBtcGate, "BTC Ayı (Bearish) rejimindədir — Alt LONG-lar bloklandı"),
+                        ("Range", skipBtcRange, "BTC 1h Kompası Ranging (qeyri-müəyyən) rejimindədir"),
+                        ("Gözləmə", skipGozleme, "Bazar zəif konsolidasiyadadır (Gözləmə rejimi / ADX zəif)"),
+                        ("Confluence", skipConfluence, "Confluence balı tələb olunan 75%-dən aşağıdır"),
+                        ("SL", slWide, "Stop-Loss məsafəsi çox genişdir (> 2.8%)"),
+                        ("RR", lowRr, "Risk/Reward nisbəti qeyri-qənaətbəxşdir (< 1.30)"),
+                        ("Chase", chase, "Qiymət giriş zonasından uzaqlaşıb (Chase filtri)"),
+                        ("Lock", activeLocks, "Aktiv mövqe limitinə çatılıb"),
+                        ("Lag", skipLag, "Şam bağlanış gecikməsi (Lag filtri)"),
+                        ("Stale", skipStale, "Qiymət məlumatı köhnədir (Stale WebSocket)")
+                    };
+                    var dominant = reasonsList.OrderByDescending(r => r.Count).FirstOrDefault(r => r.Count > 0);
+                    string reasonText = dominant.Count > 0 
+                        ? $"{dominant.Description} ({dominant.Name}: {dominant.Count})"
+                        : "Bazar konyukturası A+ siqnal meyarlarına uyğun gəlmir";
 
-                sb.AppendLine($"📌 <b>Səbəb:</b> {reasonText}");
+                    sb.AppendLine($"📌 <b>Səbəb:</b> {reasonText}");
+                }
             }
 
             if (telegramFail > 0)
@@ -705,6 +721,69 @@ namespace CryptoSense.Infrastructure.Telegram
             else
                 sb.AppendLine($"&#128994; BTC DataAge: <code>{dataAgeMsBtc}ms</code> (WS sa&#287;lam)");
             sb.AppendLine($"&#8987; <b>N&#246;vb&#601;ti yoxlama:</b> {nextCheckMinutes} d&#601;q");
+            return sb.ToString();
+        }
+
+        public static string FormatBootBriefing(
+            string commitHash,
+            long dataAgeMsBtc,
+            string btcTrend,
+            string btcRegime,
+            decimal btcAdx,
+            bool btcSuperTrendBullish,
+            bool btcCandleGreen,
+            bool ethCandleGreen,
+            bool ethFilterPassing,
+            int last1hAgeMinutes,
+            int last4hAgeMinutes,
+            int scannedCount,
+            List<FuturesSignal> emittedSignals,
+            string dominantSkipName,
+            int dominantSkipCount,
+            int nextCheckMinutes)
+        {
+            var sb = new StringBuilder();
+            sb.AppendLine("🚀 <b>CryptoSense v2.0 | Sistem Başlatma Brifinqi</b>");
+            sb.AppendLine("━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+            sb.AppendLine($"📌 <b>Deploy Versiyası:</b> <code>v2.0 ({commitHash})</code>");
+            sb.AppendLine($"🕒 <b>Boot Vaxtı (AZT):</b> <code>{CryptoSense.Domain.Common.TimeHelper.NowFormatted}</code>");
+            string wsStatus = (dataAgeMsBtc >= 0 && dataAgeMsBtc <= 3500) ? "Sağlam 🟢" : "Gecikir 🔴";
+            string wsText = dataAgeMsBtc >= 0 ? $"{dataAgeMsBtc}ms ({wsStatus})" : "Ölçülməyib 🟡";
+            sb.AppendLine($"⚡ <b>WebSocket Statusu:</b> <code>{wsText}</code>");
+            sb.AppendLine("━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+            sb.AppendLine("🪙 <b>BTC 1h Vəziyyəti:</b>");
+            string btcColor = btcCandleGreen ? "Yaşıl 🟢" : "Qırmızı 🔴";
+            string btcSt = btcSuperTrendBullish ? "Bullish 🟢" : "Bearish 🔴";
+            sb.AppendLine($"• Kompas: <b>{btcTrend}</b> ({btcRegime})");
+            sb.AppendLine($"• ADX: <code>{btcAdx:F1}</code> | SuperTrend: <b>{btcSt}</b> | Şam: <b>{btcColor}</b>");
+            sb.AppendLine();
+            sb.AppendLine("🔷 <b>ETH 1h Vəziyyəti:</b>");
+            string ethColor = ethCandleGreen ? "Yaşıl 🟢" : "Qırmızı 🔴";
+            string ethStatus = ethFilterPassing ? "Keçir 🟢" : "Bloklayır 🔴";
+            sb.AppendLine($"• Şam: <b>{ethColor}</b> | 1h Filter: <b>{ethStatus}</b>");
+            sb.AppendLine("━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+            sb.AppendLine("⏱ <b>Son Bağlanmış Şamlar:</b>");
+            sb.AppendLine($"• 1h şamın bağlanışından: <code>{last1hAgeMinutes} dəqiqə</code>");
+            sb.AppendLine($"• 4h şamın bağlanışından: <code>{last4hAgeMinutes} dəqiqə</code>");
+            sb.AppendLine("━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+            sb.AppendLine("🎯 <b>Catch-Up Skanı Nəticəsi:</b>");
+            sb.AppendLine($"• Skan edilən cütlük sayı: <code>{scannedCount}</code>");
+            if (emittedSignals != null && emittedSignals.Count > 0)
+            {
+                sb.AppendLine($"• Tapılan A+ siqnal: <b>{emittedSignals.Count} ədəd</b> (Göndərildi ✅)");
+                foreach (var sig in emittedSignals)
+                {
+                    sb.AppendLine($"  - <b>{sig.Symbol}</b> ({sig.Timeframe} {sig.Direction}) @ ${sig.EntryPrice}");
+                }
+            }
+            else
+            {
+                sb.AppendLine("• Tapılan A+ siqnal: <code>0 ədəd</code>");
+            }
+            string skipInfo = dominantSkipCount > 0 ? $"{dominantSkipName}: {dominantSkipCount}" : "Yoxdur";
+            sb.AppendLine($"• Dominant skip səbəbi: <code>{skipInfo}</code>");
+            sb.AppendLine("━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+            sb.AppendLine($"⏳ <b>Növbəti qrafik yoxlama:</b> <code>{nextCheckMinutes} dəqiqə sonra</code>");
             return sb.ToString();
         }
 

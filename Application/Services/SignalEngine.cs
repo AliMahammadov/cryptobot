@@ -22,6 +22,25 @@ namespace CryptoSense.Application.Services
         private static DateTime _btcCompassCacheTime = DateTime.MinValue;
         private static readonly SemaphoreSlim _btcCompassLock = new(1, 1);
         private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, FuturesSignal> _recentCandleSignals = new();
+        public static DateTime ProcessStartTimeUtc { get; set; } = DateTime.UtcNow;
+
+        public static void InvalidateCandleCache(string symbol, string timeframe, DateTime sourceCandleTime)
+        {
+            var candleKey = $"{symbol}_{timeframe}_{sourceCandleTime:yyyyMMddHHmmss}";
+            _recentCandleSignals.TryRemove(candleKey, out _);
+        }
+
+        public static void RecordSentSignalCandle(string symbol, string timeframe, DateTime sourceCandleTime, FuturesSignal signal)
+        {
+            var candleKey = $"{symbol}_{timeframe}_{sourceCandleTime:yyyyMMddHHmmss}";
+            _recentCandleSignals[candleKey] = signal;
+        }
+
+        public static bool IsInRecentCandleCache(string symbol, string timeframe, DateTime sourceCandleTime)
+        {
+            var candleKey = $"{symbol}_{timeframe}_{sourceCandleTime:yyyyMMddHHmmss}";
+            return _recentCandleSignals.ContainsKey(candleKey);
+        }
 
         public SignalEngine(
             IMarketDataProvider marketData,
@@ -426,6 +445,8 @@ namespace CryptoSense.Application.Services
                     compass.Rsi15m = ind1h.Rsi;
                     compass.MacdHist = ind1h.MacdHist;
                     compass.EmaStructure = ind1h.EmaTrend;
+                    compass.Btc1hAdx = ind1h.Adx;
+                    compass.Btc1hCandleColor = (closed1h.Count > 0 && closed1h.Last().Close >= closed1h.Last().Open) ? "Green" : "Red";
 
                     // Rejim təyini: BTC 1h SuperTrend + HH/HL = rejim (Problem 8)
                     if (isSuperTrendBullish && hasHhHl)
@@ -524,10 +545,11 @@ namespace CryptoSense.Application.Services
             {
                 var candleCloseTime = DateTimeOffset.FromUnixTimeMilliseconds(closedCandle.CloseTime).UtcDateTime;
                 var candleAge = DateTime.UtcNow - candleCloseTime;
+                bool isBootWindow = (DateTime.UtcNow - ProcessStartTimeUtc).TotalMinutes <= 15;
                 var maxLiveDelay = timeframe switch
                 {
                     "4h" => TimeSpan.FromHours(3),
-                    _ => TimeSpan.FromMinutes(50)
+                    _ => isBootWindow ? TimeSpan.FromMinutes(90) : TimeSpan.FromMinutes(50)
                 };
 
                 if (candleAge > maxLiveDelay)
@@ -555,9 +577,9 @@ namespace CryptoSense.Application.Services
 
             var candleKey = $"{symbol}_{timeframe}_{sourceCandleTime:yyyyMMddHHmmss}";
 
-            // Check if existing signal for this candle already created (Physical Dedup)
+            // Check if existing signal for this candle already created & delivered (Physical Dedup)
             var existingSignal = await _unitOfWork.Signals.GetExistingCandleSignalAsync(symbol, timeframe, sourceCandleTime);
-            if (existingSignal != null)
+            if (existingSignal != null && existingSignal.SignalAlertSent)
             {
                 existingSignal.CurrentPrice = calculationRefPrice;
                 _recentCandleSignals.TryAdd(candleKey, existingSignal);
@@ -589,29 +611,39 @@ namespace CryptoSense.Application.Services
 
             if (_recentCandleSignals.TryGetValue(candleKey, out var cachedSig))
             {
-                cachedSig.CurrentPrice = calculationRefPrice;
-                if (isLiveScan)
+                bool isDeliveredOrNeutral = cachedSig.SignalAlertSent ||
+                    (cachedSig.SignalType != null && cachedSig.SignalType.Contains("GÖZLƏMƏ"));
+
+                if (isDeliveredOrNeutral)
                 {
-                    return new FuturesSignal
+                    cachedSig.CurrentPrice = calculationRefPrice;
+                    if (isLiveScan)
                     {
-                        Symbol = symbol,
-                        Timeframe = timeframe,
-                        Direction = cachedSig.Direction,
-                        SignalType = "GÖZLƏMƏ (ŞAM İŞLƏNİB) ⚪",
-                        Status = cachedSig.Status,
-                        OutcomeStatus = cachedSig.OutcomeStatus,
-                        CurrentPrice = calculationRefPrice,
-                        EntryPrice = cachedSig.EntryPrice,
-                        ConfluenceScore = cachedSig.ConfluenceScore,
-                        Confidence = 50,
-                        SourceCandleOpenTimeUtc = sourceCandleTime,
-                        GeneratedAt = cachedSig.GeneratedAt,
-                        ExpiryTimeUtc = cachedSig.ExpiryTimeUtc,
-                        TimestampFormatted = cachedSig.TimestampFormatted,
-                        AnalysisReasons = new List<string> { $"Bu şam ({sourceCandleTime:dd.MM.yyyy HH:mm}) artıq keşdə mövcuddur." }
-                    };
+                        return new FuturesSignal
+                        {
+                            Symbol = symbol,
+                            Timeframe = timeframe,
+                            Direction = cachedSig.Direction,
+                            SignalType = "GÖZLƏMƏ (ŞAM İŞLƏNİB) ⚪",
+                            Status = cachedSig.Status,
+                            OutcomeStatus = cachedSig.OutcomeStatus,
+                            CurrentPrice = calculationRefPrice,
+                            EntryPrice = cachedSig.EntryPrice,
+                            ConfluenceScore = cachedSig.ConfluenceScore,
+                            Confidence = 50,
+                            SourceCandleOpenTimeUtc = sourceCandleTime,
+                            GeneratedAt = cachedSig.GeneratedAt,
+                            ExpiryTimeUtc = cachedSig.ExpiryTimeUtc,
+                            TimestampFormatted = cachedSig.TimestampFormatted,
+                            AnalysisReasons = new List<string> { $"Bu şam ({sourceCandleTime:dd.MM.yyyy HH:mm}) artıq keşdə mövcuddur." }
+                        };
+                    }
+                    return cachedSig;
                 }
-                return cachedSig;
+                else
+                {
+                    _recentCandleSignals.TryRemove(candleKey, out _);
+                }
             }
 
             var btcCompass = await GetBtcCompassAsync();
@@ -1036,7 +1068,15 @@ namespace CryptoSense.Application.Services
                 newSignal.SignalSwingHigh = srResult.SignalSwingHigh;
             }
 
-            _recentCandleSignals[candleKey] = newSignal;
+            bool isTradeQualifiedPass = newSignal.Confidence >= 75 && newSignal.SignalType != null &&
+                (newSignal.SignalType.Contains("LONG") || newSignal.SignalType.Contains("SHORT"));
+
+            // BUG 1 Fix: Do NOT cache trade-qualified PASS before Telegram emission!
+            // Only cache neutral/gözləmə results, or signals that have already been sent.
+            if (!isTradeQualifiedPass || newSignal.SignalAlertSent)
+            {
+                _recentCandleSignals[candleKey] = newSignal;
+            }
 
             // Create indicator snapshots
             newSignal.IndicatorSnapshots = new List<SignalIndicatorSnapshot>

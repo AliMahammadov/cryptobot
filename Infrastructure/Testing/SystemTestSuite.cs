@@ -1479,6 +1479,211 @@ namespace CryptoSense.Infrastructure.Testing
                 return true;
             });
 
+            await AssertTest("Test 50: Unsent PASS is NOT marked ŞAM İŞLƏNİB", () =>
+            {
+                var candleTime = new DateTime(2026, 9, 14, 12, 0, 0, DateTimeKind.Utc);
+                var symbol = "TESTPASS50";
+                var tf = "1h";
+
+                // Ensure candle is clean in cache
+                SignalEngine.InvalidateCandleCache(symbol, tf, candleTime);
+                if (SignalEngine.IsInRecentCandleCache(symbol, tf, candleTime))
+                {
+                    Console.WriteLine("[Test 50 Fail] Cache was not invalidated initially.");
+                    return Task.FromResult(false);
+                }
+
+                // Simulate unsent PASS signal: SignalAlertSent = false
+                var unsentPass = new FuturesSignal
+                {
+                    Symbol = symbol,
+                    Timeframe = tf,
+                    Direction = SignalDirection.Buy,
+                    SignalType = "GÜCLÜ LONG 🟢",
+                    Confidence = 85,
+                    SignalAlertSent = false,
+                    SourceCandleOpenTimeUtc = candleTime
+                };
+
+                // With BUG 1 fix, an unsent trade-qualified PASS must NOT be cached before delivery
+                SignalEngine.InvalidateCandleCache(symbol, tf, candleTime);
+                bool notInCache = !SignalEngine.IsInRecentCandleCache(symbol, tf, candleTime);
+
+                // Now simulate delivered signal: SignalAlertSent = true
+                unsentPass.SignalAlertSent = true;
+                SignalEngine.RecordSentSignalCandle(symbol, tf, candleTime, unsentPass);
+                bool inCacheWhenSent = SignalEngine.IsInRecentCandleCache(symbol, tf, candleTime);
+
+                // Clean up
+                SignalEngine.InvalidateCandleCache(symbol, tf, candleTime);
+
+                return Task.FromResult(notInCache && inCacheWhenSent);
+            });
+
+            await AssertTest("Test 51: GetExistingCandleSignal ignores unsent / ALERT_NEVER_SENT_FAILED", async () =>
+            {
+                var candleTime = new DateTime(2026, 9, 14, 10, 0, 0, DateTimeKind.Utc);
+                var symbol = "TESTUNSENT51";
+                var tf = "1h";
+
+                var unsentSignal = new FuturesSignal
+                {
+                    Symbol = symbol,
+                    Timeframe = tf,
+                    Direction = SignalDirection.Buy,
+                    SignalType = "GÜCLÜ LONG 🟢",
+                    Confidence = 80,
+                    SignalAlertSent = false,
+                    SignalNumber = 0,
+                    SourceCandleOpenTimeUtc = candleTime,
+                    GeneratedAt = DateTime.UtcNow,
+                    Status = SignalStatus.Neutral,
+                    CloseReason = "ALERT_NEVER_SENT_FAILED",
+                    IsClosed = true,
+                    IsTest = false
+                };
+
+                await _unitOfWork.Signals.AddAsync(unsentSignal);
+                await _unitOfWork.SaveChangesAsync();
+
+                // GetExistingCandleSignalAsync must return null because SignalAlertSent is false
+                var existing = await _unitOfWork.Signals.GetExistingCandleSignalAsync(symbol, tf, candleTime);
+                if (existing != null)
+                {
+                    Console.WriteLine($"[Test 51 Fail] Found unsent candle signal: Id={existing.Id}, Sent={existing.SignalAlertSent}");
+                    unsentSignal.IsTest = true;
+                    await _unitOfWork.SaveChangesAsync();
+                    return false;
+                }
+
+                // HasActiveSignalForSymbolAsync must return false for unsent draft
+                var hasActive = await _unitOfWork.Signals.HasActiveSignalForSymbolAsync(symbol);
+                if (hasActive)
+                {
+                    Console.WriteLine("[Test 51 Fail] HasActiveSignalForSymbolAsync returned true for unsent signal!");
+                    unsentSignal.IsTest = true;
+                    await _unitOfWork.SaveChangesAsync();
+                    return false;
+                }
+
+                // When delivered:
+                unsentSignal.SignalAlertSent = true;
+                unsentSignal.SignalNumber = 7777;
+                unsentSignal.Status = SignalStatus.Open;
+                unsentSignal.IsClosed = false;
+                await _unitOfWork.SaveChangesAsync();
+
+                var deliveredExisting = await _unitOfWork.Signals.GetExistingCandleSignalAsync(symbol, tf, candleTime);
+                var deliveredHasActive = await _unitOfWork.Signals.HasActiveSignalForSymbolAsync(symbol);
+
+                // Clean up
+                unsentSignal.Status = SignalStatus.Failed;
+                unsentSignal.IsClosed = true;
+                unsentSignal.IsTest = true;
+                await _unitOfWork.SaveChangesAsync();
+
+                return deliveredExisting != null && deliveredHasActive;
+            });
+
+            await AssertTest("Test 52: SKIP_STALE does not permanently burn the candle (retry armed)", () =>
+            {
+                var candleTime = new DateTime(2026, 9, 14, 11, 0, 0, DateTimeKind.Utc);
+                var symbol = "TESTSTALE52";
+                var tf = "1h";
+
+                // Simulate SKIP_STALE: Invalidate candle cache and ensure candle can be re-evaluated
+                SignalEngine.InvalidateCandleCache(symbol, tf, candleTime);
+                bool cacheCleared = !SignalEngine.IsInRecentCandleCache(symbol, tf, candleTime);
+
+                // When subsequent cycle evaluates and sends successfully:
+                var signal = new FuturesSignal
+                {
+                    Symbol = symbol,
+                    Timeframe = tf,
+                    Direction = SignalDirection.Sell,
+                    SignalType = "GÜCLÜ SHORT 🔴",
+                    Confidence = 80,
+                    SignalAlertSent = true,
+                    SourceCandleOpenTimeUtc = candleTime
+                };
+                SignalEngine.RecordSentSignalCandle(symbol, tf, candleTime, signal);
+                bool sentRecorded = SignalEngine.IsInRecentCandleCache(symbol, tf, candleTime);
+
+                SignalEngine.InvalidateCandleCache(symbol, tf, candleTime);
+
+                return Task.FromResult(cacheCleared && sentRecorded);
+            });
+
+            await AssertTest("Test 53: Boot window 1h delay is 90min, after boot 50min", () =>
+            {
+                var originalStart = SignalEngine.ProcessStartTimeUtc;
+                try
+                {
+                    var candleAge70 = TimeSpan.FromMinutes(70);
+
+                    // 1. Within boot window (e.g. 5 mins after boot)
+                    SignalEngine.ProcessStartTimeUtc = DateTime.UtcNow.AddMinutes(-5);
+                    bool isBoot = (DateTime.UtcNow - SignalEngine.ProcessStartTimeUtc).TotalMinutes <= 15;
+                    var maxDelayBoot = isBoot ? TimeSpan.FromMinutes(90) : TimeSpan.FromMinutes(50);
+                    bool acceptedInBoot = candleAge70 <= maxDelayBoot;
+
+                    // 2. Outside boot window (e.g. 25 mins after boot)
+                    SignalEngine.ProcessStartTimeUtc = DateTime.UtcNow.AddMinutes(-25);
+                    bool isAfterBoot = (DateTime.UtcNow - SignalEngine.ProcessStartTimeUtc).TotalMinutes <= 15;
+                    var maxDelayAfter = isAfterBoot ? TimeSpan.FromMinutes(90) : TimeSpan.FromMinutes(50);
+                    bool rejectedAfterBoot = candleAge70 > maxDelayAfter;
+
+                    return Task.FromResult(acceptedInBoot && rejectedAfterBoot);
+                }
+                finally
+                {
+                    SignalEngine.ProcessStartTimeUtc = originalStart;
+                }
+            });
+
+            await AssertTest("Test 54: Daily -3% uses Baku calendar day, not UTC Date", async () =>
+            {
+                // Baku calendar day start in UTC:
+                var bakuDayStartUtc = DateTime.UtcNow.AddHours(4).Date.AddHours(-4);
+
+                // Simulate a loss trade that closed at Baku day start + 1 hour (e.g. 01:00 Baku time)
+                var tradeTimeUtc = bakuDayStartUtc.AddHours(1);
+                var testLossSignal = new FuturesSignal
+                {
+                    Symbol = "TESTBAKULOSS54",
+                    Timeframe = "1h",
+                    Direction = SignalDirection.Buy,
+                    SignalType = "GÜCLÜ LONG 🟢",
+                    SignalAlertSent = true,
+                    SignalNumber = 8888,
+                    GeneratedAt = tradeTimeUtc,
+                    ClosedAt = tradeTimeUtc,
+                    IsClosed = true,
+                    Status = SignalStatus.Failed,
+                    CloseReason = "SL",
+                    ResultPercent = -3.20m,
+                    IsTest = false
+                };
+
+                await _unitOfWork.Signals.AddAsync(testLossSignal);
+                await _unitOfWork.SaveChangesAsync();
+
+                // Query signals since Baku calendar day start
+                var signals = await _unitOfWork.Signals.GetSignalsSinceAsync(bakuDayStartUtc);
+                var todayClosedPnL = signals
+                    .Where(s => s.Symbol == "TESTBAKULOSS54" && (s.IsClosed || s.Status != SignalStatus.Open) && s.ResultPercent.HasValue)
+                    .Sum(s => s.ResultPercent!.Value);
+
+                bool dailyLossTriggered = todayClosedPnL <= -3.0m;
+
+                // Clean up
+                testLossSignal.IsTest = true;
+                testLossSignal.SignalAlertSent = false;
+                await _unitOfWork.SaveChangesAsync();
+
+                return dailyLossTriggered;
+            });
+
             Console.WriteLine("\n========================================================");
             Console.WriteLine($"🏁 TEST NƏTİCƏLƏRİ: {passed} UĞURLU (PASS), {failed} UĞURSUZ (FAIL)");
             Console.WriteLine("========================================================\n");

@@ -30,7 +30,7 @@ namespace CryptoSense.Infrastructure.Persistence.Repositories
         {
             return await _context.Signals
                 .Include(s => s.IndicatorSnapshots)
-                .FirstOrDefaultAsync(s => s.Symbol == symbol && s.Timeframe == timeframe && s.SourceCandleOpenTimeUtc == sourceCandleOpenTimeUtc);
+                .FirstOrDefaultAsync(s => s.Symbol == symbol && s.Timeframe == timeframe && s.SourceCandleOpenTimeUtc == sourceCandleOpenTimeUtc && s.SignalAlertSent);
         }
 
         public async Task<List<FuturesSignal>> GetOpenTrackedSignalsAsync()
@@ -44,7 +44,7 @@ namespace CryptoSense.Infrastructure.Persistence.Repositories
         public async Task<bool> HasActiveSignalForSymbolAsync(string symbol)
         {
             return await _context.Signals
-                .AnyAsync(s => !s.IsTest && s.Symbol == symbol && s.Status == SignalStatus.Open && !s.IsClosed);
+                .AnyAsync(s => !s.IsTest && s.Symbol == symbol && s.Status == SignalStatus.Open && !s.IsClosed && s.SignalAlertSent && s.SignalNumber > 0);
         }
 
         public async Task<int> GetActiveSignalsCountAsync()
