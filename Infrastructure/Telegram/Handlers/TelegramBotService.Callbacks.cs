@@ -20,6 +20,12 @@ namespace CryptoSense.Infrastructure.Telegram
 
         private async Task HandleCallbackQueryAsync(string chatId, long messageId, string data, string fromUser, long? fromUserId)
         {
+            // Cyber-defense early return: Drop any callback from blocked IDs immediately before any DB query, state change, or answering callback
+            if (IsTelegramUserBlocked(fromUserId, chatId, fromUser))
+            {
+                return;
+            }
+
             var userSettings = GetSettings(chatId);
             using var scope = _serviceProvider.CreateScope();
             var unitOfWork = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
@@ -508,6 +514,97 @@ namespace CryptoSense.Infrastructure.Telegram
                 bool edited = await EditMessageTextAsync(chatId, messageId, resultMsg, TelegramKeyboards.BuildAdminTerminalInlineKeyboard());
                 if (!edited)
                     await SendMessageAsync(resultMsg, chatId, TelegramKeyboards.BuildAdminTerminalInlineKeyboard());
+            }
+            else if (data == "cb_admin_blocked_ids" || data == "cb_admin_unblock_no")
+            {
+                var db = scope.ServiceProvider.GetRequiredService<CryptoSense.Infrastructure.Persistence.AppDbContext>();
+                var blockedList = db.TelegramLoginBlocks
+                    .Where(b => b.IsBlocked)
+                    .OrderByDescending(b => b.BlockedAtUtc)
+                    .ToList();
+
+                if (blockedList.Count == 0)
+                {
+                    var emptyMsg = "🚫 <b>Bloklanmış Telegram ID-lər</b>\n\nHazırda bloklanmış Telegram ID yoxdur.";
+                    bool edited = await EditMessageTextAsync(chatId, messageId, emptyMsg, TelegramKeyboards.BuildBackToAdminKeyboard());
+                    if (!edited)
+                        await SendMessageAsync(emptyMsg, chatId, TelegramKeyboards.BuildBackToAdminKeyboard());
+                }
+                else
+                {
+                    var sb = new StringBuilder();
+                    sb.AppendLine("🚫 <b>Bloklanmış Telegram ID-lər</b>\n");
+                    var rows = new List<object[]>();
+                    foreach (var b in blockedList)
+                    {
+                        var uname = string.IsNullOrEmpty(b.TelegramUsername) ? "—" : "@" + b.TelegramUsername;
+                        var timeStr = b.BlockedAtUtc.HasValue ? TimeHelper.FormatAz(b.BlockedAtUtc.Value) : TimeHelper.FormatAz(b.LastAttemptAtUtc);
+                        sb.AppendLine($"• ID: <code>{b.TelegramUserId}</code> | {uname} | Son cəhd: <code>{b.LastAttemptUsername ?? "—"}</code> | Vaxt: {timeStr}");
+
+                        rows.Add(new object[]
+                        {
+                            new { text = $"🔓 Blokdan çıxar ({b.TelegramUserId})", callback_data = $"cb_admin_unblock_{b.TelegramUserId}" }
+                        });
+                    }
+
+                    rows.Add(new object[]
+                    {
+                        new { text = "⬅️ Admin Panelinə Qayıt", callback_data = "cb_admin_menu" }
+                    });
+
+                    var kb = new { inline_keyboard = rows.ToArray() };
+                    var msg = sb.ToString();
+                    bool edited = await EditMessageTextAsync(chatId, messageId, msg, kb);
+                    if (!edited)
+                        await SendMessageAsync(msg, chatId, kb);
+                }
+            }
+            else if (data.StartsWith("cb_admin_unblock_") && !data.StartsWith("cb_admin_unblock_yes_") && data != "cb_admin_unblock_no")
+            {
+                var idStr = data.Substring("cb_admin_unblock_".Length);
+                if (long.TryParse(idStr, out var targetId))
+                {
+                    var confirmMsg = $"Bu Telegram ID-ni blokdan çıxarmaq istəyirsiniz?\nID: <code>{targetId}</code>";
+                    var confirmKb = new
+                    {
+                        inline_keyboard = new[]
+                        {
+                            new[]
+                            {
+                                new { text = "✅ Bəli, çıxar", callback_data = $"cb_admin_unblock_yes_{targetId}" },
+                                new { text = "❌ Xeyr", callback_data = "cb_admin_unblock_no" }
+                            }
+                        }
+                    };
+
+                    bool edited = await EditMessageTextAsync(chatId, messageId, confirmMsg, confirmKb);
+                    if (!edited)
+                        await SendMessageAsync(confirmMsg, chatId, confirmKb);
+                }
+            }
+            else if (data.StartsWith("cb_admin_unblock_yes_"))
+            {
+                var idStr = data.Substring("cb_admin_unblock_yes_".Length);
+                if (long.TryParse(idStr, out var targetId))
+                {
+                    await UnblockTelegramUserAsync(targetId);
+                    var resultMsg = "✅ ID blokdan çıxarıldı.";
+                    var backKb = new
+                    {
+                        inline_keyboard = new[]
+                        {
+                            new[]
+                            {
+                                new { text = "🚫 Bloklanmış ID-lər", callback_data = "cb_admin_blocked_ids" },
+                                new { text = "⬅️ Admin Paneli", callback_data = "cb_admin_menu" }
+                            }
+                        }
+                    };
+
+                    bool edited = await EditMessageTextAsync(chatId, messageId, resultMsg, backKb);
+                    if (!edited)
+                        await SendMessageAsync(resultMsg, chatId, backKb);
+                }
             }
             else if (data == "cb_close_admin")
             {

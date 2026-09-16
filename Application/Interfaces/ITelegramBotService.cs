@@ -23,5 +23,9 @@ namespace CryptoSense.Application.Interfaces
         Task<bool> CanReceivePushAsync(string chatId);
         Task MirrorToChannelIfUserbotAsync(string? username, string sourceChatId, string messageText);
         string GetEffectiveUsername(string chatId, string? fallback = null);
+        bool IsTelegramUserBlocked(long? userId, string? chatId, string? username);
+        Task<bool> UnblockTelegramUserAsync(long userId);
+        Task<(bool IsNowBlocked, int AttemptCount)> RecordLoginFailureAsync(long userId, string chatId, string? username, string? inputUser);
+        Task ResetLoginFailedAttemptsAsync(long userId);
     }
 }

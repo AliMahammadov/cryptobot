@@ -249,6 +249,10 @@ namespace CryptoSense.Infrastructure.Telegram
                     },
                     new[]
                     {
+                        new { text = "🚫 Bloklanmış ID-lər", callback_data = "cb_admin_blocked_ids" }
+                    },
+                    new[]
+                    {
                         new { text = "🧹 Test Hesabları Sil", callback_data = "cb_admin_purge_test_users" }
                     },
                     new[]

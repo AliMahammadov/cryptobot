@@ -14,10 +14,16 @@ namespace CryptoSense.Infrastructure.Persistence
         public DbSet<UserSignalDelivery> UserSignalDeliveries => Set<UserSignalDelivery>();
         public DbSet<SignalIndicatorSnapshot> SignalIndicatorSnapshots => Set<SignalIndicatorSnapshot>();
         public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
+        public DbSet<TelegramLoginBlock> TelegramLoginBlocks => Set<TelegramLoginBlock>();
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
             base.OnModelCreating(modelBuilder);
+
+            modelBuilder.Entity<TelegramLoginBlock>(entity =>
+            {
+                entity.HasIndex(b => b.TelegramUserId).IsUnique();
+            });
 
             modelBuilder.Entity<UserAccount>(entity =>
             {

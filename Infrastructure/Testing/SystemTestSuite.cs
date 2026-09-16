@@ -2329,6 +2329,103 @@ namespace CryptoSense.Infrastructure.Testing
                 return userIsolated && adminGlobal;
             });
 
+            // 56. Cyber-defense Verification 1: 3 failed logins permanently block TelegramUserId & in-memory cache
+            await AssertTest("Test 64: Telegram ID Brute-Force Defense - 3 failed logins permanently block TelegramUserId", async () =>
+            {
+                if (_telegramBotService == null) return false;
+
+                long attackId = 7788990011L;
+                string attackChat = "7788990011";
+                string attackUser = "cyber_attacker_1";
+
+                // Ensure clean start
+                await _telegramBotService.UnblockTelegramUserAsync(attackId);
+
+                // Fail 1: count=1, not blocked
+                var (b1, c1) = await _telegramBotService.RecordLoginFailureAsync(attackId, attackChat, attackUser, "admin_fake1");
+                bool check1 = !b1 && c1 == 1 && !_telegramBotService.IsTelegramUserBlocked(attackId, attackChat, attackUser);
+
+                // Fail 2: count=2, not blocked
+                var (b2, c2) = await _telegramBotService.RecordLoginFailureAsync(attackId, attackChat, attackUser, "admin_fake2");
+                bool check2 = !b2 && c2 == 2 && !_telegramBotService.IsTelegramUserBlocked(attackId, attackChat, attackUser);
+
+                // Fail 3: count=3, PERMANENTLY BLOCKED
+                var (b3, c3) = await _telegramBotService.RecordLoginFailureAsync(attackId, attackChat, attackUser, "admin_fake3");
+                bool check3 = b3 && c3 == 3 && _telegramBotService.IsTelegramUserBlocked(attackId, attackChat, attackUser);
+
+                // Fast O(1) in-memory check without ID (using chatId string)
+                bool checkChatBlocked = _telegramBotService.IsTelegramUserBlocked(null, attackChat, null);
+
+                // Clean up
+                await _telegramBotService.UnblockTelegramUserAsync(attackId);
+
+                return check1 && check2 && check3 && checkChatBlocked;
+            });
+
+            // 57. Cyber-defense Verification 2: SuperAdmin (1219998176) and Userbot sticky immunity
+            await AssertTest("Test 65: Cyber-defense Immunity - SuperAdmin (1219998176) & Userbot Sticky are NEVER blocked", async () =>
+            {
+                if (_telegramBotService == null) return false;
+
+                long aliId = 1219998176L;
+                string aliChat = "1219998176";
+                string aliUser = "Ali_Mahammadov";
+
+                // SuperAdmin check
+                bool aliBlockedInitial = _telegramBotService.IsTelegramUserBlocked(aliId, aliChat, aliUser);
+                if (aliBlockedInitial) return false;
+
+                // Even if failed attempts are registered, Ali must NEVER be blocked or early return
+                for (int i = 0; i < 5; i++)
+                {
+                    await _telegramBotService.RecordLoginFailureAsync(aliId, aliChat, aliUser, "wrong_ali_pass");
+                }
+                bool aliBlockedAfterFails = _telegramBotService.IsTelegramUserBlocked(aliId, aliChat, aliUser);
+                if (aliBlockedAfterFails) return false;
+
+                // Userbot sticky immunity check
+                bool userbotBlocked = _telegramBotService.IsTelegramUserBlocked(88888888L, "88888888", "ChannelMirror.Username");
+                if (userbotBlocked) return false;
+
+                // Clean up any test records
+                await _telegramBotService.UnblockTelegramUserAsync(aliId);
+
+                return true;
+            });
+
+            // 58. Cyber-defense Verification 3: Counter resets on successful login & Admin Unblock workflow clears cache
+            await AssertTest("Test 66: Cyber-defense Lifecycle - Counter reset on valid login and Admin unblock workflow", async () =>
+            {
+                if (_telegramBotService == null) return false;
+
+                long userAId = 6655443322L;
+                string userAChat = "6655443322";
+                string userAUser = "normal_user_typo";
+
+                // 1. User typos password 2 times -> count=2, not blocked
+                await _telegramBotService.UnblockTelegramUserAsync(userAId);
+                var (_, c1) = await _telegramBotService.RecordLoginFailureAsync(userAId, userAChat, userAUser, "typo1");
+                var (_, c2) = await _telegramBotService.RecordLoginFailureAsync(userAId, userAChat, userAUser, "typo2");
+                bool twoFailsOk = c1 == 1 && c2 == 2 && !_telegramBotService.IsTelegramUserBlocked(userAId, userAChat, userAUser);
+
+                // 2. User enters correct credentials -> ResetLoginFailedAttemptsAsync
+                await _telegramBotService.ResetLoginFailedAttemptsAsync(userAId);
+                // Next fail should be attempt 1 again (not 3)
+                var (bAfterReset, cAfterReset) = await _telegramBotService.RecordLoginFailureAsync(userAId, userAChat, userAUser, "typo3");
+                bool resetOk = !bAfterReset && cAfterReset == 1;
+
+                // 3. User reaches 3 fails and gets blocked
+                await _telegramBotService.RecordLoginFailureAsync(userAId, userAChat, userAUser, "typo4");
+                var (blockedNow, _) = await _telegramBotService.RecordLoginFailureAsync(userAId, userAChat, userAUser, "typo5");
+                bool isBlockedNow = blockedNow && _telegramBotService.IsTelegramUserBlocked(userAId, userAChat, userAUser);
+
+                // 4. Admin unblocks the user via UnblockTelegramUserAsync
+                bool unblockResult = await _telegramBotService.UnblockTelegramUserAsync(userAId);
+                bool isUnblockedNow = !_telegramBotService.IsTelegramUserBlocked(userAId, userAChat, userAUser);
+
+                return twoFailsOk && resetOk && isBlockedNow && unblockResult && isUnblockedNow;
+            });
+
             Console.WriteLine("\n========================================================");
             Console.WriteLine($"🏁 TEST NƏTİCƏLƏRİ: {passed} UĞURLU (PASS), {failed} UĞURSUZ (FAIL)");
             Console.WriteLine("========================================================\n");

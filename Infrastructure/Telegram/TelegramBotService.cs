@@ -42,6 +42,7 @@ namespace CryptoSense.Infrastructure.Telegram
         private static readonly SemaphoreSlim _sendNumberLock = new(1, 1);
         private static readonly ConcurrentDictionary<string, DateTime> _lastPortfolioSummarySent = new();
         private static readonly ConcurrentDictionary<string, (string Content, DateTime CachedAt)> _portfolioSummaryCache = new();
+        public static readonly ConcurrentDictionary<long, bool> BlockedTelegramUserIds = new();
         private static readonly string DataDirectory = CryptoSense.Domain.Common.AppPaths.DataDirectory;
         private static readonly string SettingsFilePath = CryptoSense.Domain.Common.AppPaths.SettingsFilePath;
         private static readonly string SignalMapFilePath = CryptoSense.Domain.Common.AppPaths.SignalMapFilePath;
@@ -242,6 +243,29 @@ namespace CryptoSense.Infrastructure.Telegram
             {
                 Console.WriteLine($"[TelegramBotService] Startup hydration error: {ex.Message}");
             }
+
+            // Hydrate blocked Telegram user IDs into in-memory cache for O(1) cyber-defense without DB hits
+            try
+            {
+                using var scope = _serviceProvider.CreateScope();
+                var db = scope.ServiceProvider.GetRequiredService<CryptoSense.Infrastructure.Persistence.AppDbContext>();
+                var blockedIds = db.TelegramLoginBlocks
+                    .Where(b => b.IsBlocked)
+                    .Select(b => b.TelegramUserId)
+                    .ToList();
+                foreach (var id in blockedIds)
+                {
+                    BlockedTelegramUserIds[id] = true;
+                }
+                if (blockedIds.Count > 0)
+                {
+                    Console.WriteLine($"[TelegramBotService] Loaded {blockedIds.Count} blocked Telegram IDs into cyber-defense memory cache.");
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[TelegramBotService] Blocked IDs startup hydration notice: {ex.Message}");
+            }
         }
 
         public bool IsSuperAdmin(string chatId, long? userId, string telegramUsername)
@@ -269,6 +293,177 @@ namespace CryptoSense.Infrastructure.Telegram
                 }
             }
             return false;
+        }
+
+        public bool IsTelegramUserBlocked(long? userId, string? chatId, string? username)
+        {
+            // 1. SuperAdmin (1219998176, Ali_Mahammadov, SuperAdminChatId) is NEVER blocked and NEVER early-returns
+            if (userId.HasValue && (userId.Value == 1219998176 || userId.Value == _config.SuperAdminUserId))
+            {
+                return false;
+            }
+            if (!string.IsNullOrEmpty(username) && 
+                (username.Equals("Ali_Mahammadov", StringComparison.OrdinalIgnoreCase) || 
+                 username.Equals(_config.SuperAdminTelegram?.TrimStart('@'), StringComparison.OrdinalIgnoreCase)))
+            {
+                return false;
+            }
+            if (!string.IsNullOrEmpty(chatId) && 
+                (chatId == "1219998176" || chatId == _config.SuperAdminChatId || chatId == SuperAdminChatId))
+            {
+                return false;
+            }
+
+            // 2. Userbot is NEVER blocked and NEVER early-returns
+            if (IsStickyUsername(username))
+            {
+                return false;
+            }
+            if (userId.HasValue)
+            {
+                foreach (var pref in UserPreferences.Values)
+                {
+                    if (pref.TelegramUserId == userId.Value && IsStickyUsername(pref.Username))
+                    {
+                        return false;
+                    }
+                }
+            }
+            if (!string.IsNullOrEmpty(chatId))
+            {
+                if (_authenticatedSessions.TryGetValue(chatId, out var sessUser) && IsStickyUsername(sessUser))
+                {
+                    return false;
+                }
+                if (UserPreferences.TryGetValue(chatId, out var pref) && IsStickyUsername(pref.Username))
+                {
+                    return false;
+                }
+            }
+
+            // 3. Fast O(1) in-memory check without touching database
+            if (userId.HasValue && BlockedTelegramUserIds.TryGetValue(userId.Value, out var isBlockedById) && isBlockedById)
+            {
+                return true;
+            }
+            if (!string.IsNullOrEmpty(chatId) && long.TryParse(chatId, out var parsedChatId) && BlockedTelegramUserIds.TryGetValue(parsedChatId, out var isBlockedByChat) && isBlockedByChat)
+            {
+                return true;
+            }
+
+            return false;
+        }
+
+        public async Task<(bool IsNowBlocked, int AttemptCount)> RecordLoginFailureAsync(long userId, string chatId, string? username, string? inputUser)
+        {
+            if (userId == 1219998176 || userId == _config.SuperAdminUserId || 
+                string.Equals(username, "Ali_Mahammadov", StringComparison.OrdinalIgnoreCase) || 
+                IsStickyUsername(username) || IsStickyUsername(inputUser))
+            {
+                return (false, 0);
+            }
+
+            try
+            {
+                using var scope = _serviceProvider.CreateScope();
+                var db = scope.ServiceProvider.GetRequiredService<CryptoSense.Infrastructure.Persistence.AppDbContext>();
+
+                var blockRecord = await db.TelegramLoginBlocks.FirstOrDefaultAsync(b => b.TelegramUserId == userId);
+                if (blockRecord == null)
+                {
+                    blockRecord = new TelegramLoginBlock
+                    {
+                        TelegramUserId = userId,
+                        TelegramChatId = chatId,
+                        TelegramUsername = username,
+                        FailedAttemptCount = 1,
+                        IsBlocked = false,
+                        LastAttemptUsername = inputUser,
+                        LastAttemptAtUtc = DateTime.UtcNow
+                    };
+                    db.TelegramLoginBlocks.Add(blockRecord);
+                }
+                else
+                {
+                    blockRecord.TelegramChatId = chatId;
+                    if (!string.IsNullOrEmpty(username)) blockRecord.TelegramUsername = username;
+                    blockRecord.FailedAttemptCount++;
+                    blockRecord.LastAttemptUsername = inputUser;
+                    blockRecord.LastAttemptAtUtc = DateTime.UtcNow;
+                }
+
+                bool isNowBlocked = false;
+                if (blockRecord.FailedAttemptCount >= 3)
+                {
+                    blockRecord.IsBlocked = true;
+                    blockRecord.BlockedAtUtc = DateTime.UtcNow;
+                    isNowBlocked = true;
+                    BlockedTelegramUserIds[userId] = true;
+                }
+
+                await db.SaveChangesAsync();
+                return (isNowBlocked, blockRecord.FailedAttemptCount);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[TelegramBotService] RecordLoginFailureAsync error: {ex.Message}");
+                return (false, 0);
+            }
+        }
+
+        public async Task ResetLoginFailedAttemptsAsync(long userId)
+        {
+            try
+            {
+                using var scope = _serviceProvider.CreateScope();
+                var db = scope.ServiceProvider.GetRequiredService<CryptoSense.Infrastructure.Persistence.AppDbContext>();
+
+                var blockRecord = await db.TelegramLoginBlocks.FirstOrDefaultAsync(b => b.TelegramUserId == userId);
+                if (blockRecord != null && !blockRecord.IsBlocked && blockRecord.FailedAttemptCount > 0)
+                {
+                    blockRecord.FailedAttemptCount = 0;
+                    await db.SaveChangesAsync();
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[TelegramBotService] ResetLoginFailedAttemptsAsync error: {ex.Message}");
+            }
+        }
+
+        public async Task<bool> UnblockTelegramUserAsync(long userId)
+        {
+            try
+            {
+                using var scope = _serviceProvider.CreateScope();
+                var db = scope.ServiceProvider.GetRequiredService<CryptoSense.Infrastructure.Persistence.AppDbContext>();
+
+                var blockRecord = await db.TelegramLoginBlocks.FirstOrDefaultAsync(b => b.TelegramUserId == userId);
+                if (blockRecord != null)
+                {
+                    blockRecord.IsBlocked = false;
+                    blockRecord.FailedAttemptCount = 0;
+                    blockRecord.UnblockedAtUtc = DateTime.UtcNow;
+                    await db.SaveChangesAsync();
+
+                    if (!string.IsNullOrEmpty(blockRecord.TelegramChatId))
+                    {
+                        try
+                        {
+                            await SendMessageAsync("✅ Blokunuz Admin tərəfindən götürüldü. Yenidən daxil ola bilərsiniz.", blockRecord.TelegramChatId);
+                        }
+                        catch { }
+                    }
+                }
+
+                BlockedTelegramUserIds.TryRemove(userId, out _);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[TelegramBotService] UnblockTelegramUserAsync error: {ex.Message}");
+                return false;
+            }
         }
 
         public static UserSettings GetSettings(string chatId)
@@ -1663,9 +1858,29 @@ namespace CryptoSense.Infrastructure.Telegram
                             if (item.TryGetProperty("message", out var msg))
                             {
                                 var chatObj = msg.GetProperty("chat");
-                                var chatType = chatObj.TryGetProperty("type", out var ctEl) ? ctEl.GetString() : "private";
                                 var chatId = chatObj.GetProperty("id").GetInt64().ToString();
 
+                                var fromUser = "";
+                                long? fromUserId = null;
+                                if (msg.TryGetProperty("from", out var fromEl))
+                                {
+                                    if (fromEl.TryGetProperty("username", out var uNameEl))
+                                    {
+                                        fromUser = (uNameEl.GetString() ?? "").TrimStart('@');
+                                    }
+                                    if (fromEl.TryGetProperty("id", out var idEl))
+                                    {
+                                        fromUserId = idEl.GetInt64();
+                                    }
+                                }
+
+                                // Kiber-hücum / brute-force early return: bloklanan şəxs tam səssiz atılır
+                                if (IsTelegramUserBlocked(fromUserId, chatId, fromUser))
+                                {
+                                    continue;
+                                }
+
+                                var chatType = chatObj.TryGetProperty("type", out var ctEl) ? ctEl.GetString() : "private";
                                 if (chatType != "private")
                                 {
                                     Console.WriteLine($"[ChannelMirror Discovery] Non-private message ignored from ChatId: {chatId} (type={chatType})");
@@ -1688,20 +1903,6 @@ namespace CryptoSense.Infrastructure.Telegram
                                     foreach (var kvp in _processedMessageIds)
                                     {
                                         if (kvp.Value < cutoff) _processedMessageIds.TryRemove(kvp.Key, out _);
-                                    }
-                                }
-
-                                var fromUser = "";
-                                long? fromUserId = null;
-                                if (msg.TryGetProperty("from", out var fromEl))
-                                {
-                                    if (fromEl.TryGetProperty("username", out var uNameEl))
-                                    {
-                                        fromUser = (uNameEl.GetString() ?? "").TrimStart('@');
-                                    }
-                                    if (fromEl.TryGetProperty("id", out var idEl))
-                                    {
-                                        fromUserId = idEl.GetInt64();
                                     }
                                 }
 
@@ -1737,15 +1938,25 @@ namespace CryptoSense.Infrastructure.Telegram
                                 if (cb.TryGetProperty("message", out var cbMsg))
                                 {
                                     var cbChatObj = cbMsg.GetProperty("chat");
+                                    cbChatId = cbChatObj.GetProperty("id").GetInt64().ToString();
+                                    cbMessageId = cbMsg.GetProperty("message_id").GetInt64();
+                                }
+
+                                // Kiber-hücum / brute-force early return: bloklanan şəxs tam səssiz atılır (answerCallbackQuery belə çağırılmır)
+                                if (IsTelegramUserBlocked(fromUserId, cbChatId, fromUser))
+                                {
+                                    continue;
+                                }
+
+                                if (cb.TryGetProperty("message", out var cbMsgCheck))
+                                {
+                                    var cbChatObj = cbMsgCheck.GetProperty("chat");
                                     var cbChatType = cbChatObj.TryGetProperty("type", out var cbTypeEl) ? cbTypeEl.GetString() : "private";
                                     if (cbChatType != "private")
                                     {
                                         _ = AnswerCallbackQueryAsync(cbId);
                                         continue;
                                     }
-
-                                    cbChatId = cbChatObj.GetProperty("id").GetInt64().ToString();
-                                    cbMessageId = cbMsg.GetProperty("message_id").GetInt64();
                                 }
 
                                 if (!string.IsNullOrEmpty(cbChatId) && !string.IsNullOrEmpty(cbData))

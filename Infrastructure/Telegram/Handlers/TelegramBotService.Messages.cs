@@ -95,6 +95,12 @@ namespace CryptoSense.Infrastructure.Telegram
 
         private async Task HandleIncomingMessageAsync(string chatId, string telegramUsername, long? userId, long messageId, string text)
         {
+            // Kiber-hücum / brute-force early return: bloklanan şəxs tam səssiz atılır
+            if (IsTelegramUserBlocked(userId, chatId, telegramUsername))
+            {
+                return;
+            }
+
             // Action debouncer: ignore rapid double-taps/clicks of the exact same action within 1.5 seconds,
             // EXCEPT for toggle buttons (🎛 Əsas Terminal and 👑 Admin Paneli) which require immediate double-tap to collapse!
             bool isToggleCommand = text == "🎛 Əsas Terminal" || 
@@ -459,6 +465,11 @@ namespace CryptoSense.Infrastructure.Telegram
                     var (isValid, user) = await userManager.ValidateLoginAsync(inputUser, inputPass, userId, chatId, telegramUsername);
                     if (isValid && user != null)
                     {
+                        if (userId.HasValue)
+                        {
+                            await ResetLoginFailedAttemptsAsync(userId.Value);
+                        }
+
                         _authenticatedSessions[chatId] = user.Username;
                         _loggedOutChats.TryRemove(chatId, out _);
                         _userStates.TryRemove(chatId, out _);
@@ -515,14 +526,59 @@ namespace CryptoSense.Infrastructure.Telegram
                     else
                     {
                         _ = DeleteMessageAsync(chatId, messageId);
-                        var failMsg = "❌ <b>Giriş Uğursuz Oldu!</b>\n\n" +
-                                      "İstifadəçi adı və ya parol yalnışdır.\n" +
-                                      "Zəhmət olmasa məlumatlarınızı yoxlayıb yenidən daxil edin:\n\n" +
-                                      "💡 <b>Nümunə:</b> <code>Murad 123456</code>\n\n" +
-                                      "<i>Hesabınız yoxdursa, Admin (<a href=\"https://t.me/Ali_Mahammadov\">@Ali_Mahammadov</a>) ilə əlaqə saxlayın.</i>";
 
-                        await SendMessageAsync(failMsg, chatId, new { remove_keyboard = true });
-                        return;
+                        bool isImmune = IsSuperAdmin(chatId, userId, telegramUsername) || (userId.HasValue && userId.Value == 1219998176) || IsStickyUsername(inputUser);
+                        if (!userId.HasValue || isImmune)
+                        {
+                            var failMsg = "❌ <b>Giriş Uğursuz Oldu!</b>\n\n" +
+                                          "İstifadəçi adı və ya parol yalnışdır.\n" +
+                                          "Zəhmət olmasa məlumatlarınızı yoxlayıb yenidən daxil edin:\n\n" +
+                                          "💡 <b>Nümunə:</b> <code>Murad 123456</code>\n\n" +
+                                          "<i>Hesabınız yoxdursa, Admin (<a href=\"https://t.me/Ali_Mahammadov\">@Ali_Mahammadov</a>) ilə əlaqə saxlayın.</i>";
+
+                            await SendMessageAsync(failMsg, chatId, new { remove_keyboard = true });
+                            return;
+                        }
+
+                        var (isNowBlocked, attemptCount) = await RecordLoginFailureAsync(userId.Value, chatId, telegramUsername, inputUser);
+
+                        if (isNowBlocked)
+                        {
+                            var blockedMsg = "⛔ <b>Hesabınız 3 uğursuz giriş cəhdinə görə bloklanıb.</b>\n\n" +
+                                             "Admin təsdiqi olmadan yenidən daxil ola bilməzsiniz. Bundan sonra göndərdiyiniz mesajlar işlənməyəcək.\n\n" +
+                                             "Əlaqə: @Ali_Mahammadov";
+                            await SendMessageAsync(blockedMsg, chatId, new { remove_keyboard = true });
+
+                            var targetAdminChat = !string.IsNullOrEmpty(SuperAdminChatId) 
+                                ? SuperAdminChatId 
+                                : (!string.IsNullOrEmpty(_config.SuperAdminChatId) ? _config.SuperAdminChatId : "1219998176");
+
+                            if (!string.IsNullOrEmpty(targetAdminChat))
+                            {
+                                var uNameDisplay = string.IsNullOrWhiteSpace(telegramUsername) ? "—" : "@" + telegramUsername;
+                                var adminAlert = "🚫 <b>LOGIN BLOKU (kiber-qoruma)</b>\n" +
+                                                 $"Telegram ID: <code>{userId.Value}</code>\n" +
+                                                 $"Telegram: {uNameDisplay}\n" +
+                                                 $"Chat ID: <code>{chatId}</code>\n" +
+                                                 $"Son cəhd edilən istifadəçi adı: <code>{inputUser}</code>\n" +
+                                                 "Səbəb: 3 dəfə səhv username/parol\n" +
+                                                 $"Vaxt: {CryptoSense.Domain.Common.TimeHelper.NowFormatted}\n" +
+                                                 "<i>Bundan sonra həmin ID üçün növbəti update-lər early-return.</i>";
+                                await SendMessageAsync(adminAlert, targetAdminChat);
+                            }
+                            return;
+                        }
+                        else
+                        {
+                            var failMsg = "❌ <b>Giriş Uğursuz Oldu!</b>\n\n" +
+                                          "İstifadəçi adı və ya parol yalnışdır.\n" +
+                                          "Zəhmət olmasa məlumatlarınızı yoxlayıb yenidən daxil edin:\n\n" +
+                                          "💡 <b>Nümunə:</b> <code>Murad 123456</code>\n\n" +
+                                          "<i>Hesabınız yoxdursa, Admin (<a href=\"https://t.me/Ali_Mahammadov\">@Ali_Mahammadov</a>) ilə əlaqə saxlayın.</i>";
+
+                            await SendMessageAsync(failMsg, chatId, new { remove_keyboard = true });
+                            return;
+                        }
                     }
                 }
                 else

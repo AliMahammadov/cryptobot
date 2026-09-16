@@ -50,6 +50,27 @@ namespace CryptoSense.Infrastructure.Persistence.Repositories
             try { _context.Database.ExecuteSqlRaw("ALTER TABLE Signals ADD COLUMN IsTest INTEGER NOT NULL DEFAULT 0;"); } catch { }
             try { _context.Database.ExecuteSqlRaw("ALTER TABLE Users ADD COLUMN IsLoggedIn INTEGER NOT NULL DEFAULT 0;"); } catch { }
 
+            // Safe table creation for TelegramLoginBlocks (cyber-attack / brute-force protection)
+            try
+            {
+                _context.Database.ExecuteSqlRaw(@"
+                    CREATE TABLE IF NOT EXISTS TelegramLoginBlocks (
+                        Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        TelegramUserId INTEGER NOT NULL,
+                        TelegramChatId TEXT NULL,
+                        TelegramUsername TEXT NULL,
+                        FailedAttemptCount INTEGER NOT NULL DEFAULT 0,
+                        IsBlocked INTEGER NOT NULL DEFAULT 0,
+                        LastAttemptUsername TEXT NULL,
+                        LastAttemptAtUtc TEXT NOT NULL,
+                        BlockedAtUtc TEXT NULL,
+                        UnblockedAtUtc TEXT NULL
+                    );
+                    CREATE UNIQUE INDEX IF NOT EXISTS IX_TelegramLoginBlocks_TelegramUserId ON TelegramLoginBlocks (TelegramUserId);
+                ");
+            }
+            catch { }
+
             // Data cleanup: fix any corrupt signals where Status was Success but ResultPercent was negative or TakeProfit3 was 0
             try { _context.Database.ExecuteSqlRaw("UPDATE Signals SET Status = 2 WHERE Status = 1 AND (ResultPercent < 0 OR (TakeProfit3 <= 0 AND CloseReason = 'TP3'));"); } catch { }
 
