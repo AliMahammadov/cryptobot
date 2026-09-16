@@ -33,13 +33,18 @@ namespace CryptoSense.Infrastructure.Persistence.Repositories
         {
             if (!string.IsNullOrEmpty(chatId))
             {
-                var userByChat = await _context.Users.FirstOrDefaultAsync(u => u.TelegramChatId == chatId);
-                if (userByChat != null) return userByChat;
+                var activeUserByChat = await _context.Users
+                    .OrderByDescending(u => u.Role == UserRole.Admin)
+                    .FirstOrDefaultAsync(u => u.IsActive && u.TelegramChatId == chatId);
+                if (activeUserByChat != null) return activeUserByChat;
             }
 
             if (telegramUserId.HasValue && telegramUserId.Value > 0)
             {
-                return await _context.Users.FirstOrDefaultAsync(u => u.TelegramUserId == telegramUserId.Value);
+                var activeUserById = await _context.Users
+                    .OrderByDescending(u => u.Role == UserRole.Admin)
+                    .FirstOrDefaultAsync(u => u.IsActive && u.TelegramUserId == telegramUserId.Value);
+                if (activeUserById != null) return activeUserById;
             }
 
             return null;
@@ -84,8 +89,7 @@ namespace CryptoSense.Infrastructure.Persistence.Repositories
 
         public Task DeleteAsync(UserAccount user)
         {
-            user.IsActive = false;
-            _context.Users.Update(user);
+            _context.Users.Remove(user);
             return Task.CompletedTask;
         }
 

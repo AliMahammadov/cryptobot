@@ -31,7 +31,8 @@ namespace CryptoSense.Application.Services
             try
             {
                 var allUsers = _unitOfWork.Users.GetAllUsersAsync().GetAwaiter().GetResult();
-                var json = System.Text.Json.JsonSerializer.Serialize(allUsers, new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
+                var activeUsers = allUsers.Where(u => u.IsActive).ToList();
+                var json = System.Text.Json.JsonSerializer.Serialize(activeUsers, new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
                 foreach (var path in BackupFilePaths)
                 {
                     try
@@ -93,25 +94,8 @@ namespace CryptoSense.Application.Services
                         }
                     }
 
-                    // 2. Ensure Murad exists permanently
-                    var muradUser = _unitOfWork.Users.GetByUsernameAsync("Murad").GetAwaiter().GetResult();
-                    if (muradUser == null)
-                    {
-                        var newMurad = new UserAccount
-                        {
-                            Username = "Murad",
-                            PasswordHash = "$2a$11$rqAHb83ZUadJSdNAGGvTuu/ze535B8TvcCku4/6UrV6qctyOO6Sju",
-                            Role = UserRole.User,
-                            IsActive = true,
-                            IsLoggedIn = false,
-                            CreatedAtUtc = DateTime.UtcNow,
-                            LastLoginAt = DateTime.UtcNow
-                        };
-                        _unitOfWork.Users.AddAsync(newMurad).GetAwaiter().GetResult();
-                    }
-
-                    // 3. Restore all users from users_backup.json (survives container redeploy)
-                    // CRITICAL RULE: Backup restore only adds MISSING rows, NEVER forces IsLoggedIn=true
+                    // 2. Restore all users from users_backup.json (survives container redeploy)
+                    // CRITICAL RULE: Backup restore only adds MISSING ACTIVE rows, NEVER resurrects dead users
                     foreach (var path in BackupFilePaths)
                     {
                         if (File.Exists(path))
@@ -125,6 +109,7 @@ namespace CryptoSense.Application.Services
                                     foreach (var bu in backedUsers)
                                     {
                                         if (string.IsNullOrWhiteSpace(bu.Username)) continue;
+                                        if (!bu.IsActive) continue;
                                         var existing = _unitOfWork.Users.GetByUsernameAsync(bu.Username).GetAwaiter().GetResult();
                                         if (existing == null)
                                         {
@@ -136,7 +121,7 @@ namespace CryptoSense.Application.Services
                                                 TelegramUsername = bu.TelegramUsername,
                                                 TelegramUserId = bu.TelegramUserId,
                                                 TelegramChatId = bu.TelegramChatId,
-                                                IsActive = bu.IsActive,
+                                                IsActive = true,
                                                 IsLoggedIn = !string.IsNullOrWhiteSpace(bu.TelegramChatId), // Restore logged-in state if ChatId is bound
                                                 CreatedAtUtc = bu.CreatedAtUtc == default ? DateTime.UtcNow : bu.CreatedAtUtc,
                                                 LastLoginAt = bu.LastLoginAt == default ? DateTime.UtcNow : bu.LastLoginAt
@@ -207,6 +192,15 @@ namespace CryptoSense.Application.Services
                     adminUser.IsLoggedIn = true;
                     if (!string.IsNullOrEmpty(chatId))
                     {
+                        var othersWithSameChat = (await _unitOfWork.Users.GetAllUsersAsync())
+                            .Where(u => u.TelegramChatId == chatId && !u.Username.Equals("Ali", StringComparison.OrdinalIgnoreCase) && !u.Username.Equals("Ali Mahammadov", StringComparison.OrdinalIgnoreCase))
+                            .ToList();
+                        foreach (var other in othersWithSameChat)
+                        {
+                            other.TelegramChatId = "";
+                            other.IsLoggedIn = false;
+                            await _unitOfWork.Users.UpdateAsync(other);
+                        }
                         adminUser.TelegramChatId = chatId;
                     }
                     else if (string.IsNullOrEmpty(adminUser.TelegramChatId))
@@ -273,7 +267,19 @@ namespace CryptoSense.Application.Services
                 user.LastLoginAt = DateTime.UtcNow;
                 user.IsLoggedIn = true;
                 user.IsActive = true;
-                if (!string.IsNullOrEmpty(chatId)) user.TelegramChatId = chatId;
+                if (!string.IsNullOrEmpty(chatId))
+                {
+                    var othersWithSameChat = (await _unitOfWork.Users.GetAllUsersAsync())
+                        .Where(u => u.TelegramChatId == chatId && !u.Username.Equals(user.Username, StringComparison.OrdinalIgnoreCase))
+                        .ToList();
+                    foreach (var other in othersWithSameChat)
+                    {
+                        other.TelegramChatId = "";
+                        other.IsLoggedIn = false;
+                        await _unitOfWork.Users.UpdateAsync(other);
+                    }
+                    user.TelegramChatId = chatId;
+                }
                 if (telegramUserId.HasValue && telegramUserId.Value > 0) user.TelegramUserId = telegramUserId.Value;
                 if (!string.IsNullOrEmpty(telegramUsername)) user.TelegramUsername = telegramUsername;
 
@@ -372,14 +378,13 @@ namespace CryptoSense.Application.Services
             username = username.Trim();
             if (username.Equals("Ali", StringComparison.OrdinalIgnoreCase) || 
                 username.Equals("Ali Mahammadov", StringComparison.OrdinalIgnoreCase) ||
-                username.Equals("Admin", StringComparison.OrdinalIgnoreCase)) return false;
+                username.Equals("Admin", StringComparison.OrdinalIgnoreCase) ||
+                IsUserbotUsername(username)) return false;
 
             var user = await _unitOfWork.Users.GetByUsernameAsync(username);
             if (user == null) return false;
 
-            user.IsActive = false; // Soft-delete
-            user.IsLoggedIn = false;
-            await _unitOfWork.Users.UpdateAsync(user);
+            await _unitOfWork.Users.DeleteAsync(user);
             await _unitOfWork.AuditLogs.AddAsync(new AuditLog
             {
                 AdminUserId = adminUserId,

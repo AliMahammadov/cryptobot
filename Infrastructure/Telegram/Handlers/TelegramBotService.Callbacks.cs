@@ -135,17 +135,6 @@ namespace CryptoSense.Infrastructure.Telegram
                 userSettings.IsActive = true;
                 userSettings.LastResumeTime = DateTime.UtcNow;
                 SaveSettings();
-                try
-                {
-                    var dbUser = await unitOfWork.Users.GetByChatIdOrTelegramUserIdAsync(chatId, null);
-                    if (dbUser != null)
-                    {
-                        dbUser.IsActive = true;
-                        await unitOfWork.Users.UpdateAsync(dbUser);
-                        await unitOfWork.SaveChangesAsync();
-                    }
-                }
-                catch { }
                 var activeCount = await unitOfWork.Signals.GetUserOpenSignalsCountAsync(chatId);
                 var lastDeliveredUtc = await unitOfWork.Signals.GetLastDeliveredSignalTimeUtcAsync(chatId);
                 var lastTime = lastDeliveredUtc.HasValue ? Domain.Common.TimeHelper.FormatAz(lastDeliveredUtc.Value) : "";
@@ -164,17 +153,6 @@ namespace CryptoSense.Infrastructure.Telegram
             {
                 userSettings.IsActive = false;
                 SaveSettings();
-                try
-                {
-                    var dbUser = await unitOfWork.Users.GetByChatIdOrTelegramUserIdAsync(chatId, null);
-                    if (dbUser != null)
-                    {
-                        dbUser.IsActive = false;
-                        await unitOfWork.Users.UpdateAsync(dbUser);
-                        await unitOfWork.SaveChangesAsync();
-                    }
-                }
-                catch { }
                 var activeCount = await unitOfWork.Signals.GetUserOpenSignalsCountAsync(chatId);
                 var lastDeliveredUtc = await unitOfWork.Signals.GetLastDeliveredSignalTimeUtcAsync(chatId);
                 var lastTime = lastDeliveredUtc.HasValue ? Domain.Common.TimeHelper.FormatAz(lastDeliveredUtc.Value) : "";

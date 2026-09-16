@@ -169,10 +169,14 @@ namespace CryptoSense.Infrastructure.Telegram
                     _authenticatedSessions[chatId] = stickyUser.Username;
                     _loggedOutChats.TryRemove(chatId, out _);
 
+                    bool isNewPref = !UserPreferences.ContainsKey(chatId);
                     var uPref = GetSettings(chatId);
                     uPref.Username = stickyUser.Username;
                     uPref.TelegramUserId = userId ?? stickyUser.TelegramUserId;
-                    uPref.IsActive = true;
+                    if (isNewPref)
+                    {
+                        uPref.IsActive = true;
+                    }
                     if (uPref.Coins == null || uPref.Coins.Count == 0)
                     {
                         uPref.Coins = new List<string>(Default40Coins);

@@ -231,7 +231,6 @@ namespace CryptoSense.Infrastructure.Telegram
                         });
                         s.Username = u.Username;
                         s.TelegramUserId = u.TelegramUserId;
-                        s.IsActive = true;
                     }
                 }
                 if (anyUpdated)
@@ -292,48 +291,22 @@ namespace CryptoSense.Infrastructure.Telegram
         public async Task<bool> CanReceivePushAsync(string chatId)
         {
             if (string.IsNullOrWhiteSpace(chatId)) return false;
+            if (_loggedOutChats.ContainsKey(chatId)) return false;
 
             // 1. Session check: user must have active session in memory
             if (!_authenticatedSessions.ContainsKey(chatId))
             {
-                try
-                {
-                    using var checkScope = _serviceProvider.CreateScope();
-                    var checkUow = checkScope.ServiceProvider.GetRequiredService<IUnitOfWork>();
-                    var checkUser = await checkUow.Users.GetByChatIdOrTelegramUserIdAsync(chatId, null);
-                    if (checkUser != null && checkUser.IsActive && !string.IsNullOrWhiteSpace(checkUser.TelegramChatId) && checkUser.TelegramChatId == chatId)
-                    {
-                        _authenticatedSessions[chatId] = checkUser.Username;
-                        _loggedOutChats.TryRemove(chatId, out _);
-                    }
-                    else
-                    {
-                        return false;
-                    }
-                }
-                catch
-                {
-                    return false;
-                }
+                return false;
             }
 
-            if (_loggedOutChats.ContainsKey(chatId)) return false;
-
-            // 2. UserPreferences check: must exist and be active
+            // 2. UserPreferences check: must exist and notifications must be active (UserSettings.IsActive == true)
+            // If user paused notifications, return false without touching sessions or logging them out!
             if (!UserPreferences.TryGetValue(chatId, out var pref) || !pref.IsActive)
             {
-                if (_authenticatedSessions.TryGetValue(chatId, out _))
-                {
-                    pref = GetSettings(chatId);
-                    pref.IsActive = true;
-                }
-                else
-                {
-                    return false;
-                }
+                return false;
             }
 
-            // 3. Database check: IsLoggedIn==true AND TelegramChatId dolu & matches AND IsActive==true
+            // 3. Database check: Account must exist, be active (UserAccount.IsActive == true), and bound to this chatId
             try
             {
                 using var scope = _serviceProvider.CreateScope();
@@ -342,24 +315,10 @@ namespace CryptoSense.Infrastructure.Telegram
 
                 if (user != null && user.IsActive && !string.IsNullOrWhiteSpace(user.TelegramChatId) && user.TelegramChatId == chatId)
                 {
-                    if (!user.IsLoggedIn)
-                    {
-                        user.IsLoggedIn = true;
-                        await uow.Users.UpdateAsync(user);
-                        await uow.SaveChangesAsync();
-                    }
-                    _authenticatedSessions[chatId] = user.Username;
-                    _loggedOutChats.TryRemove(chatId, out _);
-                    pref.IsActive = true;
                     return true;
                 }
 
-                _loggedOutChats[chatId] = true;
-                _authenticatedSessions.TryRemove(chatId, out _);
-                if (UserPreferences.TryGetValue(chatId, out var stalePref))
-                {
-                    stalePref.IsActive = false;
-                }
+                // Never modify _loggedOutChats, _authenticatedSessions, or UserPreferences here! Pure read-only gate.
                 return false;
             }
             catch (Exception ex)
@@ -718,13 +677,46 @@ namespace CryptoSense.Infrastructure.Telegram
 
         public async Task RevokeUserSessionAsync(string username)
         {
-            using var scope = _serviceProvider.CreateScope();
-            var userManager = scope.ServiceProvider.GetRequiredService<IUserManagerService>();
-            var allUsers = await userManager.GetAllUsersAsync();
-            var target = allUsers.FirstOrDefault(u => u.Username.Equals(username, StringComparison.OrdinalIgnoreCase));
-            if (target != null && !string.IsNullOrEmpty(target.TelegramChatId))
+            string? chatId = null;
+
+            using (var scope = _serviceProvider.CreateScope())
             {
-                var chatId = target.TelegramChatId;
+                var userManager = scope.ServiceProvider.GetRequiredService<IUserManagerService>();
+                var allUsers = await userManager.GetAllUsersAsync();
+                var target = allUsers.FirstOrDefault(u => u.Username.Equals(username, StringComparison.OrdinalIgnoreCase));
+                if (target != null && !string.IsNullOrEmpty(target.TelegramChatId))
+                {
+                    chatId = target.TelegramChatId;
+                }
+            }
+
+            if (string.IsNullOrEmpty(chatId))
+            {
+                foreach (var kvp in _authenticatedSessions)
+                {
+                    if (kvp.Value.Equals(username, StringComparison.OrdinalIgnoreCase))
+                    {
+                        chatId = kvp.Key;
+                        break;
+                    }
+                }
+            }
+
+            if (string.IsNullOrEmpty(chatId))
+            {
+                foreach (var kvp in UserPreferences)
+                {
+                    if (kvp.Value.Username?.Equals(username, StringComparison.OrdinalIgnoreCase) == true)
+                    {
+                        chatId = kvp.Key;
+                        break;
+                    }
+                }
+            }
+
+            if (!string.IsNullOrEmpty(chatId))
+            {
+                _loggedOutChats[chatId] = true;
                 _authenticatedSessions.TryRemove(chatId, out _);
                 UserPreferences.TryRemove(chatId, out _);
                 _userStates.TryRemove(chatId, out _);
