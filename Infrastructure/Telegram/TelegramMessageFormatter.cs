@@ -374,11 +374,22 @@ namespace CryptoSense.Infrastructure.Telegram
             return sb.ToString();
         }
 
-        public static string FormatCoinPerformanceBreakdown(List<CryptoSense.Application.DTOs.CoinPerformanceBreakdownDto> breakdown, List<string> monitoredCoins)
+        public static string FormatCoinPerformanceBreakdown(
+            List<CryptoSense.Application.DTOs.CoinPerformanceBreakdownDto> breakdown, 
+            List<string> monitoredCoins, 
+            bool isPersonal = false)
         {
             var sb = new StringBuilder();
-            sb.AppendLine("📈 <b>Coinlər Üzrə Qlobal Win-Rate və Dərin Statistika</b>");
-            sb.AppendLine("<i>(Canlı verilənlər bazasındakı bütün tamamlanmış və açıq əməliyyatlar)</i>");
+            if (isPersonal)
+            {
+                sb.AppendLine("📈 <b>Coinlər Üzrə Şəxsi Win-Rate və Dərin Statistika</b>");
+                sb.AppendLine("<i>(Hesabınıza çatdırılmış bütün tamamlanmış və açıq əməliyyatlar)</i>");
+            }
+            else
+            {
+                sb.AppendLine("📈 <b>Coinlər Üzrə Qlobal Win-Rate və Dərin Statistika</b>");
+                sb.AppendLine("<i>(Canlı verilənlər bazasındakı bütün tamamlanmış və açıq əməliyyatlar)</i>");
+            }
             sb.AppendLine("-----------------------------------");
 
             var tradedCoins = breakdown.Where(c => c.TotalTrades > 0).ToList();

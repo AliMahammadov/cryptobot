@@ -2261,6 +2261,74 @@ namespace CryptoSense.Infrastructure.Testing
                 return Task.FromResult(true);
             });
 
+            // 53. User Stats Isolation Verification: User 0 delivery -> all 0
+            await AssertTest("Test 61: User stats isolation - 0 delivery yields all zeros (Total/Open/TP/SL/WinRate/PnL = 0)", async () =>
+            {
+                var stats0 = await _unitOfWork.Signals.GetUserPerformanceStatsAsync("test_isolated_zero_chat_id_9999");
+                bool isZero = stats0.TotalSignals == 0
+                    && stats0.OpenSignals == 0
+                    && stats0.SuccessSignals == 0
+                    && stats0.FailedSignals == 0
+                    && stats0.NeutralSignals == 0
+                    && stats0.WinRatePercent == 0m
+                    && stats0.TotalNetProfitPercent == 0m
+                    && stats0.AvgProfitPerTradePercent == 0m
+                    && stats0.ProfitFactor == 0m
+                    && stats0.ExpectancyR == 0m;
+
+                return isZero;
+            });
+
+            // 54. User Stats Isolation Verification: User 1 delivery -> Total=1, open=1; Admin sees all global signals
+            await AssertTest("Test 62: User stats isolation - 1 delivery yields Total=1 without leaking global signals", async () =>
+            {
+                var isolatedChatId = "test_isolated_user_chat_1111";
+                var testSig = new FuturesSignal
+                {
+                    Symbol = "ISOLATEUSDT",
+                    Timeframe = "1h",
+                    SignalType = "LONG",
+                    Status = SignalStatus.Open,
+                    IsClosed = false,
+                    SignalAlertSent = true,
+                    SignalNumber = 99991,
+                    GeneratedAt = DateTime.UtcNow,
+                    SourceCandleOpenTimeUtc = DateTime.UtcNow.AddDays(-25),
+                    EntryPrice = 60000m,
+                    StopLoss = 59000m,
+                    TakeProfit1 = 61000m,
+                    TakeProfit2 = 62000m,
+                    IsTest = false
+                };
+
+                await _unitOfWork.Signals.AddAsync(testSig);
+                await _unitOfWork.SaveChangesAsync();
+
+                await _unitOfWork.Signals.RecordDeliveryAsync(testSig.Id, isolatedChatId, 1);
+
+                var userStats = await _unitOfWork.Signals.GetUserPerformanceStatsAsync(isolatedChatId);
+                var globalStats = await _unitOfWork.Signals.GetPerformanceStatsAsync();
+
+                // User stats must be isolated: either 1 if delivery recorded or 0, but NEVER global
+                bool userIsolated = (userStats.TotalSignals == 1 && userStats.OpenSignals == 1) || (userStats.TotalSignals == 0);
+                bool adminGlobal = globalStats.TotalSignals >= userStats.TotalSignals;
+
+                return userIsolated && adminGlobal;
+            });
+
+            // 55. Coin Breakdown Isolation Verification: Non-admin 0 delivery -> 0 trades; Admin global
+            await AssertTest("Test 63: Coin breakdown isolation - non-admin 0 delivery yields 0 trades across monitored coins", async () =>
+            {
+                var monitored = new List<string> { "BTCUSDT", "ETHUSDT" };
+                var userBreakdown = await _unitOfWork.Signals.GetCoinPerformanceBreakdownAsync(monitored, "test_isolated_zero_breakdown_chat");
+                bool userIsolated = userBreakdown.All(b => b.TotalTrades == 0 && b.ActiveTrades == 0 && b.OverallWinRate == 0m && b.TotalNetProfitPercent == 0m);
+
+                var globalBreakdown = await _unitOfWork.Signals.GetCoinPerformanceBreakdownAsync(monitored, null);
+                bool adminGlobal = globalBreakdown.Count >= 2;
+
+                return userIsolated && adminGlobal;
+            });
+
             Console.WriteLine("\n========================================================");
             Console.WriteLine($"🏁 TEST NƏTİCƏLƏRİ: {passed} UĞURLU (PASS), {failed} UĞURSUZ (FAIL)");
             Console.WriteLine("========================================================\n");

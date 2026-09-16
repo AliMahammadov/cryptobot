@@ -230,11 +230,21 @@ namespace CryptoSense.Infrastructure.Persistence.Repositories
             var all = await query.ToListAsync();
             var closed = all.Where(s => s.Status != SignalStatus.Open || s.IsClosed).ToList();
 
-            // D BƏNDİ:
-            // TP (qismən/tam) = IsPartial1Closed VƏ ya CloseReason TP_A/TP_B/TP1 VƏ ya Status==Success
-            // BE ayrı, TIME ayrı, SL = CloseReason SL
-            // User panel və admin eyni DB sorğusu. TP_A-dan sonra BE olan UNI/TIA TP>0 göstərsin.
+            bool hasSpecificTf = !string.IsNullOrEmpty(specificTimeframe) && !BotConstants.Timeframe.IsAll(specificTimeframe);
 
+            int openSignalsCount = await _context.Signals.CountAsync(s =>
+                !s.IsTest
+                && (s.SignalType.Contains("LONG") || s.SignalType.Contains("SHORT"))
+                && s.Status == SignalStatus.Open && !s.IsClosed
+                && s.SignalAlertSent && s.SignalNumber > 0
+                && (userCoins == null || userCoins.Count == 0 || userCoins.Contains(s.Symbol))
+                && (!hasSpecificTf || s.Timeframe == specificTimeframe));
+
+            return CalculateStatsFromSignals(closed, openSignalsCount);
+        }
+
+        private static PerformanceStats CalculateStatsFromSignals(List<FuturesSignal> closed, int openSignalsCount)
+        {
             var timeSignals = closed.Where(s =>
                 !s.IsPartial1Closed
                 && s.CloseReason != "TP_A" && s.CloseReason != "TP_B"
@@ -264,20 +274,6 @@ namespace CryptoSense.Infrastructure.Persistence.Repositories
             int failedCount = slSignals.Count + otherFailed.Count;
             int beCount = beSignals.Count;
             int timeCount = timeSignals.Count;
-
-            bool hasSpecificTf = !string.IsNullOrEmpty(specificTimeframe) 
-                && specificTimeframe != "Hamısı" 
-                && specificTimeframe != "Hamisi" 
-                && specificTimeframe != "AllTime" 
-                && specificTimeframe != "Hamısı (Bütün Tarix)";
-
-            int openSignalsCount = await _context.Signals.CountAsync(s =>
-                !s.IsTest
-                && (s.SignalType.Contains("LONG") || s.SignalType.Contains("SHORT"))
-                && s.Status == SignalStatus.Open && !s.IsClosed
-                && s.SignalAlertSent && s.SignalNumber > 0
-                && (userCoins == null || userCoins.Count == 0 || userCoins.Contains(s.Symbol))
-                && (!hasSpecificTf || s.Timeframe == specificTimeframe));
 
             var stats = new PerformanceStats
             {
@@ -345,11 +341,54 @@ namespace CryptoSense.Infrastructure.Persistence.Repositories
             return stats;
         }
 
-        public async Task<List<CryptoSense.Application.DTOs.CoinPerformanceBreakdownDto>> GetCoinPerformanceBreakdownAsync(List<string>? monitoredCoins = null)
+        public async Task<List<CryptoSense.Application.DTOs.CoinPerformanceBreakdownDto>> GetCoinPerformanceBreakdownAsync(
+            List<string>? monitoredCoins = null, 
+            string? chatId = null)
         {
-            var signals = await _context.Signals
-                .Where(s => !s.IsTest && (s.SignalType.Contains("LONG") || s.SignalType.Contains("SHORT")) && s.SignalAlertSent)
-                .ToListAsync();
+            var query = _context.Signals
+                .Where(s => !s.IsTest && (s.SignalType.Contains("LONG") || s.SignalType.Contains("SHORT")) && s.SignalAlertSent);
+
+            if (!string.IsNullOrEmpty(chatId))
+            {
+                List<int> deliveredSignalIds;
+                try
+                {
+                    deliveredSignalIds = await _context.UserSignalDeliveries
+                        .Where(d => d.TelegramChatId == chatId)
+                        .Select(d => d.SignalId)
+                        .ToListAsync();
+                }
+                catch
+                {
+                    deliveredSignalIds = new List<int>();
+                }
+
+                if (deliveredSignalIds.Count == 0)
+                {
+                    var emptyResult = new List<CryptoSense.Application.DTOs.CoinPerformanceBreakdownDto>();
+                    var coinsToReport = monitoredCoins ?? TelegramBotService.Default40Coins;
+                    foreach (var c in coinsToReport.OrderBy(c => c))
+                    {
+                        var norm = c.Replace("USDT", "");
+                        if (norm.StartsWith("1000")) norm = norm.Substring(4);
+                        emptyResult.Add(new CryptoSense.Application.DTOs.CoinPerformanceBreakdownDto
+                        {
+                            Symbol = norm + "USDT",
+                            ActiveTrades = 0,
+                            TotalTrades = 0,
+                            SuccessTrades = 0,
+                            FailedTrades = 0,
+                            OverallWinRate = 0,
+                            TotalNetProfitPercent = 0
+                        });
+                    }
+                    return emptyResult;
+                }
+
+                query = query.Where(s => deliveredSignalIds.Contains(s.Id));
+            }
+
+            var signals = await query.ToListAsync();
 
             var closedSignals = signals.Where(s => s.IsClosed || s.Status != SignalStatus.Open).ToList();
             var openSignals = signals.Where(s => !s.IsClosed && s.Status == SignalStatus.Open).ToList();
@@ -452,18 +491,25 @@ namespace CryptoSense.Infrastructure.Persistence.Repositories
 
         public async Task RecordDeliveryAsync(int signalId, string chatId, int userSignalNumber)
         {
-            var exists = await _context.UserSignalDeliveries
-                .AnyAsync(d => d.SignalId == signalId && d.TelegramChatId == chatId);
-            if (!exists)
+            try
             {
-                _context.UserSignalDeliveries.Add(new UserSignalDelivery
+                var exists = await _context.UserSignalDeliveries
+                    .AnyAsync(d => d.SignalId == signalId && d.TelegramChatId == chatId);
+                if (!exists)
                 {
-                    SignalId = signalId,
-                    TelegramChatId = chatId,
-                    UserSignalNumber = userSignalNumber,
-                    DeliveredAtUtc = DateTime.UtcNow
-                });
-                await _context.SaveChangesAsync();
+                    _context.UserSignalDeliveries.Add(new UserSignalDelivery
+                    {
+                        SignalId = signalId,
+                        TelegramChatId = chatId,
+                        UserSignalNumber = userSignalNumber,
+                        DeliveredAtUtc = DateTime.UtcNow
+                    });
+                    await _context.SaveChangesAsync();
+                }
+            }
+            catch
+            {
+                // Defensive: in case UserSignalDeliveries table does not exist in local SQLite schema
             }
         }
 
@@ -522,33 +568,66 @@ namespace CryptoSense.Infrastructure.Persistence.Repositories
             DateTime? untilUtc = null, 
             bool isAllTime = false)
         {
-            var stats = await GetPerformanceStatsAsync(specificTimeframe, userCoins, sinceUtc, untilUtc, isAllTime);
-
-            var deliveredSignalIds = await _context.UserSignalDeliveries
-                .Where(d => d.TelegramChatId == chatId)
-                .Select(d => d.SignalId)
-                .ToListAsync();
-
-            bool hasSpecificTf = !string.IsNullOrEmpty(specificTimeframe) && !BotConstants.Timeframe.IsAll(specificTimeframe);
-
-            int userOpenCount = 0;
-            if (deliveredSignalIds.Count > 0)
+            List<int> deliveredSignalIds;
+            try
             {
-                userOpenCount = await _context.Signals.CountAsync(s =>
-                    !s.IsTest
-                    && (s.SignalType.Contains("LONG") || s.SignalType.Contains("SHORT"))
-                    && deliveredSignalIds.Contains(s.Id)
-                    && s.Status == SignalStatus.Open && !s.IsClosed
-                    && s.SignalAlertSent && s.SignalNumber > 0
-                    && (userCoins == null || userCoins.Count == 0 || userCoins.Contains(s.Symbol))
-                    && (!hasSpecificTf || s.Timeframe == specificTimeframe));
+                deliveredSignalIds = await _context.UserSignalDeliveries
+                    .Where(d => d.TelegramChatId == chatId)
+                    .Select(d => d.SignalId)
+                    .ToListAsync();
+            }
+            catch
+            {
+                deliveredSignalIds = new List<int>();
             }
 
-            int closedCount = stats.TotalSignals - stats.OpenSignals;
-            stats.OpenSignals = userOpenCount;
-            stats.TotalSignals = closedCount + userOpenCount;
+            if (deliveredSignalIds.Count == 0)
+            {
+                return new PerformanceStats();
+            }
 
-            return stats;
+            var query = _context.Signals
+                .Where(s => !s.IsTest
+                    && (s.SignalType.Contains("LONG") || s.SignalType.Contains("SHORT"))
+                    && s.SignalAlertSent
+                    && s.SignalNumber > 0
+                    && deliveredSignalIds.Contains(s.Id));
+
+            // Default: BUGÜN 00:00 Bakı (UtcNow+4). All-time rejimində süzgəc tətbiq edilmir.
+            if (!isAllTime && specificTimeframe != "AllTime" && specificTimeframe != "Hamısı (Bütün Tarix)")
+            {
+                if (sinceUtc.HasValue)
+                {
+                    query = query.Where(s => s.GeneratedAt >= sinceUtc.Value);
+                    if (untilUtc.HasValue)
+                    {
+                        query = query.Where(s => s.GeneratedAt < untilUtc.Value);
+                    }
+                }
+                else
+                {
+                    var bakuNow = DateTime.UtcNow.AddHours(4);
+                    var todayStartUtc = bakuNow.Date.AddHours(-4); // Bugün 00:00 Bakı UTC-də
+                    query = query.Where(s => s.GeneratedAt >= todayStartUtc);
+                }
+            }
+
+            if (!string.IsNullOrEmpty(specificTimeframe) && !BotConstants.Timeframe.IsAll(specificTimeframe))
+            {
+                query = query.Where(s => s.Timeframe == specificTimeframe);
+            }
+
+            if (userCoins != null && userCoins.Count > 0)
+            {
+                query = query.Where(s => userCoins.Contains(s.Symbol));
+            }
+
+            var userSignals = await query.ToListAsync();
+            var closed = userSignals.Where(s => s.Status != SignalStatus.Open || s.IsClosed).ToList();
+            var openList = userSignals.Where(s => s.Status == SignalStatus.Open && !s.IsClosed).ToList();
+            int openSignalsCount = openList.Count;
+
+            return CalculateStatsFromSignals(closed, openSignalsCount);
         }
 
         public async Task<int> CleanupOrphanedSignalsAsync()

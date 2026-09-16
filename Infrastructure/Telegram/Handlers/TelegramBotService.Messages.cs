@@ -1642,18 +1642,14 @@ namespace CryptoSense.Infrastructure.Telegram
             else if (text.Contains("Dərin") || text.Contains("Derin") || text == "📈 Dərin Statistika" || text == "📈 Coinlər Üzrə Dərin Statistika" || text == "/coin_stats")
             {
                 _userStates.TryRemove(chatId, out _);
-                if (!isAdmin)
-                {
-                    await SendMessageAsync("⛔ Bu bölmə yalnız SuperAdmin üçündür", chatId, TelegramKeyboards.BuildUserKeyboard(userSettings, false));
-                    return;
-                }
+                bool isCallerAdmin = isAdmin || chatId == SuperAdminChatId;
 
-                await SendMessageAsync("⏳ <b>Bütün coinlər və zaman çərçivələri üzrə dərin nəticələr hesablanır...</b>", chatId);
+                await SendMessageAsync("⏳ <b>Nəticələr hesablanır...</b>", chatId);
 
-                var monitored = Default40Coins;
-
-                var breakdown = await signalEngine.GetCoinPerformanceBreakdownAsync(monitored);
-                var report = TelegramMessageFormatter.FormatCoinPerformanceBreakdown(breakdown, monitored);
+                var monitored = isCallerAdmin ? Default40Coins : (userSettings.Coins.Count > 0 ? userSettings.Coins : Default40Coins);
+                var unitOfWork = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
+                var breakdown = await unitOfWork.Signals.GetCoinPerformanceBreakdownAsync(monitored, isCallerAdmin ? null : chatId);
+                var report = TelegramMessageFormatter.FormatCoinPerformanceBreakdown(breakdown, monitored, isPersonal: !isCallerAdmin);
                 await SendMessageAsync(report, chatId, TelegramKeyboards.BuildUserKeyboard(userSettings, isAdmin));
                 return;
             }
