@@ -32,6 +32,8 @@ namespace CryptoSense.Worker
         public const int MaxGlobalOpenPositions = BotConstants.Thresholds.MaxGlobalOpenPositions;
 
         private static int _consecutiveLosses = 0;
+        private static readonly object _lossLock = new();
+        private static readonly List<int> _consecutiveLossSignalIds = new();
         private static DateTime _circuitBreakerUntil = DateTime.MinValue;
         private static DateTime _lastCircuitBreakerAlertSent = DateTime.MinValue;
 

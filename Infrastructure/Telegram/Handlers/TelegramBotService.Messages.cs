@@ -6,6 +6,7 @@ using System.Text;
 using System.Threading.Tasks;
 using CryptoSense.Application.DTOs;
 using CryptoSense.Application.Interfaces;
+using CryptoSense.Domain.Common;
 using CryptoSense.Domain.Entities;
 using CryptoSense.Domain.Enums;
 using CryptoSense.Domain.Interfaces;
@@ -1662,7 +1663,7 @@ namespace CryptoSense.Infrastructure.Telegram
                 var stats = (isAdmin || chatId == SuperAdminChatId)
                     ? await unitOfWork.Signals.GetPerformanceStatsAsync(userSettings.Timeframe)
                     : await signalEngine.GetUserPerformanceStatsAsync(chatId, userSettings.Timeframe, userSettings.Coins);
-                var tfLabel = (string.IsNullOrWhiteSpace(userSettings.Timeframe) || userSettings.Timeframe == "Təyin olunmayıb" || userSettings.Timeframe == "Hamısı" || userSettings.Timeframe == "Hamisi") ? "1h, 4h" : userSettings.Timeframe;
+                var tfLabel = (string.IsNullOrWhiteSpace(userSettings.Timeframe) || userSettings.Timeframe == "Təyin olunmayıb" || BotConstants.Timeframe.IsAll(userSettings.Timeframe)) ? "1h, 4h" : userSettings.Timeframe;
                 var msg = TelegramMessageFormatter.FormatPerformanceStats(stats, tfLabel);
                 await SendMessageAsync(msg, chatId, TelegramKeyboards.BuildUserKeyboard(userSettings, isAdmin));
             }
@@ -1694,7 +1695,7 @@ namespace CryptoSense.Infrastructure.Telegram
             {
                 var potentialSym = text.ToUpper();
                 if (!potentialSym.EndsWith("USDT")) potentialSym += "USDT";
-                var tf = (userSettings.Timeframe == "Hamısı" || userSettings.Timeframe == "Hamisi") ? "1h" : userSettings.Timeframe;
+                var tf = BotConstants.Timeframe.IsAll(userSettings.Timeframe) ? "1h" : userSettings.Timeframe;
                 var sig = await signalEngine.AnalyzeCoinAsync(potentialSym, tf);
                 if (sig.SignalType.Contains("LONG") || sig.SignalType.Contains("SHORT"))
                 {
@@ -1752,7 +1753,7 @@ namespace CryptoSense.Infrastructure.Telegram
                 decimal sl = isShort ? Math.Round(entry * 1.0150m, 2) : Math.Round(entry * 0.9850m, 2);
                 decimal tp1 = isShort ? Math.Round(entry * 0.9850m, 2) : Math.Round(entry * 1.0150m, 2);
                 decimal tp2 = isShort ? Math.Round(entry * 0.9700m, 2) : Math.Round(entry * 1.0300m, 2);
-                string tf = (userSettings.Timeframe != "Hamısı" && !string.IsNullOrWhiteSpace(userSettings.Timeframe) && userSettings.Timeframe != "Təyin olunmayıb") 
+                string tf = (!BotConstants.Timeframe.IsAll(userSettings.Timeframe) && !string.IsNullOrWhiteSpace(userSettings.Timeframe) && userSettings.Timeframe != "Təyin olunmayıb") 
                     ? userSettings.Timeframe 
                     : "1h";
 

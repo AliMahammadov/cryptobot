@@ -17,6 +17,7 @@ namespace CryptoSense.Application.Interfaces
         Task NotifySuperAdminUserLoginAsync(string username, string platform);
         Task RevokeUserSessionAsync(string username);
         Task BroadcastSystemAlertAsync(string message);
+        Task SendCircuitBreakerAlertAsync(string message, IEnumerable<int> lossSignalIds);
         Task SendDailyReportAsync();
         Task<bool> SendDocumentAsync(string filePath, string targetChatId, string caption = "");
         Task<bool> CanReceivePushAsync(string chatId);

@@ -42,6 +42,10 @@ namespace CryptoSense.Worker
             }
             else if (_circuitBreakerUntil != DateTime.MinValue)
             {
+                lock (_lossLock)
+                {
+                    _consecutiveLossSignalIds.Clear();
+                }
                 Interlocked.Exchange(ref _consecutiveLosses, 0);
                 _circuitBreakerUntil = DateTime.MinValue;
             }

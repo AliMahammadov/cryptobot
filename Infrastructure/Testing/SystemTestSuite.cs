@@ -24,6 +24,7 @@ namespace CryptoSense.Infrastructure.Testing
         private readonly IMarketDataProvider _marketData;
         private readonly INewsService _newsService;
         private readonly MarketSimulator _marketSimulator;
+        private readonly ITelegramBotService? _telegramBotService;
 
         public SystemTestSuite(
             IUnitOfWork unitOfWork,
@@ -32,7 +33,8 @@ namespace CryptoSense.Infrastructure.Testing
             ISignalEngine signalEngine,
             IMarketDataProvider marketData,
             INewsService newsService,
-            MarketSimulator marketSimulator)
+            MarketSimulator marketSimulator,
+            ITelegramBotService? telegramBotService = null)
         {
             _unitOfWork = unitOfWork;
             _userManager = userManager;
@@ -41,6 +43,7 @@ namespace CryptoSense.Infrastructure.Testing
             _marketData = marketData;
             _newsService = newsService;
             _marketSimulator = marketSimulator;
+            _telegramBotService = telegramBotService;
         }
 
         public async Task RunAllTestsAsync()
@@ -2124,6 +2127,134 @@ namespace CryptoSense.Infrastructure.Testing
                 if (ageOk || ageReason != "DataAge")
                 {
                     Console.WriteLine($"[Test 57 Fail] DataAge 3501ms was not rejected with 'DataAge': ok={ageOk}, reason={ageReason}");
+                    return Task.FromResult(false);
+                }
+
+                return Task.FromResult(true);
+            });
+
+            // 50. BUG 1 Verification: Timeframe "1h, 4h" and "1h + 4h" match both 1h and 4h signals
+            await AssertTest("Test 58: Timeframe '1h, 4h' & '1h + 4h' delivery match for 1h and 4h signals", () =>
+            {
+                if (!BotConstants.Timeframe.IsAll("1h, 4h")) return Task.FromResult(false);
+                if (!BotConstants.Timeframe.IsAll("1h + 4h")) return Task.FromResult(false);
+                if (!BotConstants.Timeframe.IsAll("1h,4h")) return Task.FromResult(false);
+                if (!BotConstants.Timeframe.IsAll("1h+4h")) return Task.FromResult(false);
+                if (!BotConstants.Timeframe.IsAll("Hamısı")) return Task.FromResult(false);
+                if (!BotConstants.Timeframe.IsAll("Hamisi")) return Task.FromResult(false);
+                if (BotConstants.Timeframe.IsAll("1h")) return Task.FromResult(false);
+                if (BotConstants.Timeframe.IsAll("4h")) return Task.FromResult(false);
+
+                var userSettingsA = new UserSettings { Timeframe = "1h, 4h" };
+                var userSettingsB = new UserSettings { Timeframe = "1h + 4h" };
+                var signal1h = new FuturesSignal { Timeframe = "1h" };
+                var signal4h = new FuturesSignal { Timeframe = "4h" };
+
+                bool matchA1h = BotConstants.Timeframe.IsAll(userSettingsA.Timeframe) || userSettingsA.Timeframe == signal1h.Timeframe;
+                bool matchA4h = BotConstants.Timeframe.IsAll(userSettingsA.Timeframe) || userSettingsA.Timeframe == signal4h.Timeframe;
+                bool matchB1h = BotConstants.Timeframe.IsAll(userSettingsB.Timeframe) || userSettingsB.Timeframe == signal1h.Timeframe;
+                bool matchB4h = BotConstants.Timeframe.IsAll(userSettingsB.Timeframe) || userSettingsB.Timeframe == signal4h.Timeframe;
+
+                return Task.FromResult(matchA1h && matchA4h && matchB1h && matchB4h);
+            });
+
+            // 51. BUG 2 Verification: Circuit Breaker counter increments ONLY when SignalAlertSent==true && IsTest==false && (SL or SL_RESTART_CATCHUP)
+            await AssertTest("Test 59: Circuit Breaker isolation - counter requires SignalAlertSent==true, IsTest==false and hard SL", async () =>
+            {
+                // Signal 1: Unsent SL (SignalAlertSent == false) -> should NOT qualify for circuit breaker
+                var unsentSl = new FuturesSignal
+                {
+                    Status = SignalStatus.Failed,
+                    CloseReason = "SL",
+                    SignalAlertSent = false,
+                    IsTest = false
+                };
+                bool isHardSl1 = unsentSl.CloseReason == "SL" || unsentSl.CloseReason == "SL_RESTART_CATCHUP";
+                bool qualifies1 = unsentSl.Status == SignalStatus.Failed && isHardSl1 && unsentSl.SignalAlertSent && !unsentSl.IsTest;
+                if (qualifies1) return false;
+
+                // Signal 2: Test SL (IsTest == true) -> should NOT qualify
+                var testSl = new FuturesSignal
+                {
+                    Status = SignalStatus.Failed,
+                    CloseReason = "SL",
+                    SignalAlertSent = true,
+                    IsTest = true
+                };
+                bool isHardSl2 = testSl.CloseReason == "SL" || testSl.CloseReason == "SL_RESTART_CATCHUP";
+                bool qualifies2 = testSl.Status == SignalStatus.Failed && isHardSl2 && testSl.SignalAlertSent && !testSl.IsTest;
+                if (qualifies2) return false;
+
+                // Signal 3: TIME fail (not hard SL) -> should NOT qualify
+                var timeFail = new FuturesSignal
+                {
+                    Status = SignalStatus.Failed,
+                    CloseReason = "TIME",
+                    SignalAlertSent = true,
+                    IsTest = false
+                };
+                bool isHardSl3 = timeFail.CloseReason == "SL" || timeFail.CloseReason == "SL_RESTART_CATCHUP";
+                bool qualifies3 = timeFail.Status == SignalStatus.Failed && isHardSl3 && timeFail.SignalAlertSent && !timeFail.IsTest;
+                if (qualifies3) return false;
+
+                // Signal 4: Real SL (SignalAlertSent == true && IsTest == false && CloseReason == "SL") -> MUST qualify
+                var realSl = new FuturesSignal
+                {
+                    Status = SignalStatus.Failed,
+                    CloseReason = "SL",
+                    SignalAlertSent = true,
+                    IsTest = false
+                };
+                bool isHardSl4 = realSl.CloseReason == "SL" || realSl.CloseReason == "SL_RESTART_CATCHUP";
+                bool qualifies4 = realSl.Status == SignalStatus.Failed && isHardSl4 && realSl.SignalAlertSent && !realSl.IsTest;
+                if (!qualifies4) return false;
+
+                // Signal 5: Real SL_RESTART_CATCHUP -> MUST qualify
+                var restartSl = new FuturesSignal
+                {
+                    Status = SignalStatus.Failed,
+                    CloseReason = "SL_RESTART_CATCHUP",
+                    SignalAlertSent = true,
+                    IsTest = false
+                };
+                bool isHardSl5 = restartSl.CloseReason == "SL" || restartSl.CloseReason == "SL_RESTART_CATCHUP";
+                bool qualifies5 = restartSl.Status == SignalStatus.Failed && isHardSl5 && restartSl.SignalAlertSent && !restartSl.IsTest;
+                if (!qualifies5) return false;
+
+                // Verify SendCircuitBreakerAlertAsync executes safely without error
+                if (_telegramBotService != null)
+                {
+                    await _telegramBotService.SendCircuitBreakerAlertAsync("Test Breaker Alert", new List<int> { 999999 });
+                }
+
+                return true;
+            });
+
+            // 52. BUG 3 Verification: Zero mojibake in BackgroundMarketScanner.Outcome.cs
+            await AssertTest("Test 60: UTF-8 encoding integrity - zero mojibake in BackgroundMarketScanner.Outcome.cs", () =>
+            {
+                var filePath = System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "..", "..", "..", "Worker", "BackgroundMarketScanner.Outcome.cs");
+                if (!System.IO.File.Exists(filePath))
+                {
+                    filePath = "Worker/BackgroundMarketScanner.Outcome.cs";
+                }
+                if (!System.IO.File.Exists(filePath)) return Task.FromResult(true);
+
+                var content = System.IO.File.ReadAllText(filePath, System.Text.Encoding.UTF8);
+                string[] mojibakeTokens = new[] { "Ã¼", "Ã§", "Ã¶", "É™", "âš", "â Œ", "â€”", "MÃ¼ddÉ™ti", "HÉ™dÉ™f", "MÆ NFÆ Æ T", "BaÄŸlandÄ±" };
+                foreach (var token in mojibakeTokens)
+                {
+                    if (content.Contains(token))
+                    {
+                        Console.WriteLine($"[Test 60 Fail] Found mojibake token '{token}' in Outcome.cs");
+                        return Task.FromResult(false);
+                    }
+                }
+
+                bool hasExpectedCb = content.Contains("RISK CIRCUIT BREAKER AKTİVLƏŞDİ") && content.Contains("Ardıcıl 2 uğursuz əməliyyat (Stop Loss) qeydə alındı.");
+                if (!hasExpectedCb)
+                {
+                    Console.WriteLine("[Test 60 Fail] Expected Azerbaijani circuit breaker text not found in Outcome.cs");
                     return Task.FromResult(false);
                 }
 

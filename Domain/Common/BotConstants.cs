@@ -38,6 +38,20 @@ namespace CryptoSense.Domain.Common
             public const string FourHour = "4h";
             public const string All      = "Hamısı";
             public const string Unset    = "Təyin olunmayıb";
+
+            public static bool IsAll(string? tf)
+            {
+                if (string.IsNullOrWhiteSpace(tf)) return false;
+                var clean = tf.Trim();
+                return clean.Equals("Hamısı", System.StringComparison.OrdinalIgnoreCase)
+                    || clean.Equals("Hamisi", System.StringComparison.OrdinalIgnoreCase)
+                    || clean.Equals("1h, 4h", System.StringComparison.OrdinalIgnoreCase)
+                    || clean.Equals("1h,4h", System.StringComparison.OrdinalIgnoreCase)
+                    || clean.Equals("1h + 4h", System.StringComparison.OrdinalIgnoreCase)
+                    || clean.Equals("1h+4h", System.StringComparison.OrdinalIgnoreCase)
+                    || clean.Equals("AllTime", System.StringComparison.OrdinalIgnoreCase)
+                    || clean.Equals("Hamısı (Bütün Tarix)", System.StringComparison.OrdinalIgnoreCase);
+            }
         }
 
         // Signal Type Labels

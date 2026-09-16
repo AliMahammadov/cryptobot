@@ -66,7 +66,7 @@ namespace CryptoSense.Worker
                 var snap = _livePriceCache.GetSnapshot(sig.Symbol);
                 var nowUtc = DateTime.UtcNow;
 
-                // DataAge > 3500: REST last gÃ¶tÃ¼r, skip etmÉ™ â€” SL buraxÄ±lmasÄ±n
+                // DataAge > 3500: REST last götür, skip etmə — SL buraxılmasın
                 if (snap == null || snap.DataAgeMs > BotConstants.Thresholds.MaxDataAgeMs)
                 {
                     _lastRestFallbackTime[sig.Symbol] = nowUtc;
@@ -104,7 +104,7 @@ namespace CryptoSense.Worker
                 var openSignals = await uow.Signals.GetOpenTrackedSignalsAsync();
                 if (openSignals.Count == 0) return;
 
-                Console.WriteLine($"[StartupCatchUp] {openSignals.Count} aktiv siqnal Ã¼zrÉ™ restart catch-up yoxlanÄ±ÅŸÄ± baÅŸladÄ±...");
+                Console.WriteLine($"[StartupCatchUp] {openSignals.Count} aktiv siqnal üzrə restart catch-up yoxlanışı başladı...");
 
                 foreach (var sig in openSignals)
                 {
@@ -143,7 +143,7 @@ namespace CryptoSense.Worker
                         sig.ClosedAt = DateTime.UtcNow;
                         sig.CloseReason = "SL_RESTART_CATCHUP";
                         sig.Status = SignalStatus.Failed;
-                        sig.OutcomeStatus = "Stop Loss (SL) (Restart Catch-up) âŒ";
+                        sig.OutcomeStatus = "Stop Loss (SL) (Restart Catch-up) ❌";
 
                         decimal exitPnl = isLong
                             ? Math.Round(((sig.StopLoss - sig.EntryPrice) / sig.EntryPrice) * 100, 2)
@@ -157,7 +157,7 @@ namespace CryptoSense.Worker
 
                         if (sig.SignalAlertSent)
                         {
-                            await _telegramService.SendOutcomeAlertAsync(sig, "Stop Loss (SL) [Restart AÅŸkarlanmasÄ±]", sig.StopLoss, sig.ResultPercent.Value);
+                            await _telegramService.SendOutcomeAlertAsync(sig, "Stop Loss (SL) [Restart Aşkarlanması]", sig.StopLoss, sig.ResultPercent.Value);
                         }
                         Console.WriteLine($"[StartupCatchUp] SL caught up for {sig.Symbol} (Id={sig.Id}, NetPnL={sig.ResultPercent}%)");
                     }
@@ -188,7 +188,7 @@ namespace CryptoSense.Worker
                             sig.RealizedProfitPercent = pnl1;
                             sig.ResultPercent = Math.Round(sig.RealizedProfitPercent - 0.10m, 2);
                             sig.Status = (sig.ResultPercent >= 0) ? SignalStatus.Success : SignalStatus.Failed;
-                            sig.OutcomeStatus = "HÉ™dÉ™f A (TP_A 1.0R) (TAM MÆNFÆÆT) [Restart Catch-up] âœ…";
+                            sig.OutcomeStatus = "Hədəf A (TP_A 1.0R) (TAM MƏNFƏƏT) [Restart Catch-up] ✅";
 
                             await uow.Signals.UpdateAsync(sig);
                             await uow.SaveChangesAsync(CancellationToken.None);
@@ -196,7 +196,7 @@ namespace CryptoSense.Worker
 
                             if (sig.SignalAlertSent)
                             {
-                                await _telegramService.SendOutcomeAlertAsync(sig, "HÉ™dÉ™f A (TP_A 1.0R) [Restart Catch-up]", sig.TakeProfit1, sig.ResultPercent.Value);
+                                await _telegramService.SendOutcomeAlertAsync(sig, "Hədəf A (TP_A 1.0R) [Restart Catch-up]", sig.TakeProfit1, sig.ResultPercent.Value);
                             }
                         }
                         else
@@ -205,7 +205,7 @@ namespace CryptoSense.Worker
                             await uow.SaveChangesAsync(CancellationToken.None);
                             if (sig.SignalAlertSent)
                             {
-                                await _telegramService.SendOutcomeAlertAsync(sig, "HÉ™dÉ™f A (TP_A 1.0R) [Restart Catch-up + BE Aktiv]", sig.TakeProfit1, pnl1);
+                                await _telegramService.SendOutcomeAlertAsync(sig, "Hədəf A (TP_A 1.0R) [Restart Catch-up + BE Aktiv]", sig.TakeProfit1, pnl1);
                             }
                         }
                         Console.WriteLine($"[StartupCatchUp] TP1 caught up for {sig.Symbol} (Id={sig.Id})");
@@ -232,13 +232,13 @@ namespace CryptoSense.Worker
             {
                 if (sig.OutcomeAlertSent || sig.IsClosed) return;
 
-                // Maksimum Ã¶mÃ¼r yalnÄ±z timeframe TTL ilÉ™: 1h -> 8 saat (480 dÉ™q), 4h -> 24 saat (1440 dÉ™q).
+                // Maksimum ömür yalnız timeframe TTL ilə: 1h -> 8 saat (480 dəq), 4h -> 24 saat (1440 dəq).
                 int ttlMinutes = sig.Timeframe == "4h" ? 1440 : 480;
                 DateTime expiryUtc = (sig.ExpiryTimeUtc != default && sig.ExpiryTimeUtc > sig.GeneratedAt)
                     ? sig.ExpiryTimeUtc
                     : sig.GeneratedAt.AddMinutes(ttlMinutes);
 
-                // AÃ§Ä±q siqnallarÄ±n (o cÃ¼mlÉ™dÉ™n cari 4h BTC/DOGE) 3 saatda kÉ™silmÉ™mÉ™si Ã¼Ã§Ã¼n timeframe TTL tÉ™min edilir:
+                // Açıq siqnalların (o cümlədən cari 4h BTC/DOGE) 3 saatda kəsilməməsi üçün timeframe TTL təmin edilir:
                 if (sig.Timeframe == "4h" && (expiryUtc - sig.GeneratedAt).TotalMinutes < 1440)
                 {
                     expiryUtc = sig.GeneratedAt.AddMinutes(1440);
@@ -281,7 +281,7 @@ namespace CryptoSense.Worker
 
                 if (isLong)
                 {
-                    // 1. Long TP1 (TP_A 1.0R) Hit - 50% baÄŸlandÄ± + BE AktivlÉ™ÅŸdi
+                    // 1. Long TP1 (TP_A 1.0R) Hit - 50% bağlandı + BE Aktivləşdi
                     if (sig.TakeProfit1 > 0 && !sig.Tp1Notified && (snap.SessionHigh >= sig.TakeProfit1 || snap.Last >= (sig.TakeProfit1 - tickSize)))
                     {
                         sig.Tp1Notified = true;
@@ -293,7 +293,7 @@ namespace CryptoSense.Worker
                         sig.RealizedProfitPercent = Math.Round(0.50m * pnl1, 2);
                         sig.ProfitPercentAchieved = pnl1;
 
-                        // BÆND 3: Qalan 50%: SL-i BE-yÉ™ Ã§É™k YALNIZ TP_A (1.0R) vurulandan SONRA.
+                        // BƏND 3: Qalan 50%: SL-i BE-yə çək YALNIZ TP_A (1.0R) vurulandan SONRA.
                         sig.StopLoss = SignalEngine.RoundToCoinPrecision(sig.EntryPrice, sig.EntryPrice * 1.0012m);
                         sig.BreakevenTriggered = true;
 
@@ -307,7 +307,7 @@ namespace CryptoSense.Worker
                             sig.RealizedProfitPercent = pnl1;
                             sig.ResultPercent = Math.Round(sig.RealizedProfitPercent - 0.10m, 2);
                             sig.Status = (sig.ResultPercent >= 0) ? SignalStatus.Success : SignalStatus.Failed;
-                            sig.OutcomeStatus = "HÉ™dÉ™f A (TP_A 1.0R) (TAM MÆNFÆÆT) âœ…";
+                            sig.OutcomeStatus = "Hədəf A (TP_A 1.0R) (TAM MƏNFƏƏT) ✅";
 
                             await unitOfWork.Signals.UpdateAsync(sig);
                             await unitOfWork.SaveChangesAsync(stoppingToken);
@@ -315,7 +315,7 @@ namespace CryptoSense.Worker
                             string dedupKey = $"{sig.Id}_TP1";
                             if (_sentOutcomeDeduplication.TryAdd(dedupKey, DateTime.UtcNow))
                             {
-                                if (sig.SignalAlertSent) await _telegramService.SendOutcomeAlertAsync(sig, "HÉ™dÉ™f A (TP_A 1.0R) (TAM MÆNFÆÆT)", exitPrice, sig.ResultPercent.Value);
+                                if (sig.SignalAlertSent) await _telegramService.SendOutcomeAlertAsync(sig, "Hədəf A (TP_A 1.0R) (TAM MƏNFƏƏT)", exitPrice, sig.ResultPercent.Value);
                             }
                         }
                         else
@@ -326,11 +326,11 @@ namespace CryptoSense.Worker
                             string dedupKey = $"{sig.Id}_TP1";
                             if (_sentOutcomeDeduplication.TryAdd(dedupKey, DateTime.UtcNow))
                             {
-                                if (sig.SignalAlertSent) await _telegramService.SendOutcomeAlertAsync(sig, "HÉ™dÉ™f A (TP_A 1.0R) [50% Qazanc BaÄŸlandÄ± + BE Aktiv]", exitPrice, pnl1);
+                                if (sig.SignalAlertSent) await _telegramService.SendOutcomeAlertAsync(sig, "Hədəf A (TP_A 1.0R) [50% Qazanc Bağlandı + BE Aktiv]", exitPrice, pnl1);
                             }
                         }
                     }
-                    // 2. Long TP2 (TP_B) Hit - YalnÄ±z TP1-dÉ™n sonra qalan 50% baÄŸlanÄ±r
+                    // 2. Long TP2 (TP_B) Hit - Yalnız TP1-dən sonra qalan 50% bağlanır
                     else if (sig.Tp1Notified && !sig.OutcomeAlertSent && sig.TakeProfit2 > 0 && (snap.SessionHigh >= sig.TakeProfit2 || snap.Last >= (sig.TakeProfit2 - tickSize)))
                     {
                         sig.OutcomeAlertSent = true;
@@ -344,7 +344,7 @@ namespace CryptoSense.Worker
                         sig.RemainingPositionRatio = 0m;
                         sig.ResultPercent = Math.Round(sig.RealizedProfitPercent - 0.10m, 2);
                         sig.Status = (sig.ResultPercent >= 0) ? SignalStatus.Success : SignalStatus.Failed;
-                        sig.OutcomeStatus = "HÉ™dÉ™f B (TP_B) (TAM MÆNFÆÆT) âœ…";
+                        sig.OutcomeStatus = "Hədəf B (TP_B) (TAM MƏNFƏƏT) ✅";
 
                         await unitOfWork.Signals.UpdateAsync(sig);
                         await unitOfWork.SaveChangesAsync(stoppingToken);
@@ -352,10 +352,10 @@ namespace CryptoSense.Worker
                         string dedupKey = $"{sig.Id}_TP2";
                         if (_sentOutcomeDeduplication.TryAdd(dedupKey, DateTime.UtcNow))
                         {
-                            if (sig.SignalAlertSent) await _telegramService.SendOutcomeAlertAsync(sig, "HÉ™dÉ™f B (TP_B) [Qalan 50% Tam MÉ™nfÉ™É™t]", exitPrice, sig.ResultPercent.Value);
+                            if (sig.SignalAlertSent) await _telegramService.SendOutcomeAlertAsync(sig, "Hədəf B (TP_B) [Qalan 50% Tam Mənfəət]", exitPrice, sig.ResultPercent.Value);
                         }
                     }
-                    // 3. Long Breakeven Hit (YALNIZ TP1-dÉ™n sonra qalan 50% BE stopuna dÉ™yÉ™rsÉ™)
+                    // 3. Long Breakeven Hit (YALNIZ TP1-dən sonra qalan 50% BE stopuna dəyərsə)
                     else if (sig.Tp1Notified && !sig.OutcomeAlertSent && !sig.IsClosed && (snap.Last <= sig.StopLoss || snap.SessionLow <= sig.StopLoss))
                     {
                         sig.OutcomeAlertSent = true;
@@ -369,11 +369,11 @@ namespace CryptoSense.Worker
                         sig.RemainingPositionRatio = 0m;
                         sig.ResultPercent = Math.Round(sig.RealizedProfitPercent - 0.10m, 2);
 
-                        // BÆND 4: BE-yÉ™ qayÄ±dÄ±b baÄŸlandÄ± (NEYTRAL, net |PnL|<0.20% win rate-É™ yox)
+                        // BƏND 4: BE-yə qayıdıb bağlandı (NEYTRAL, net |PnL|<0.20% win rate-ə yox)
                         sig.Status = SignalStatus.Neutral;
                         string pnlSign = sig.ResultPercent >= 0 ? "+" : "";
                         string pnlFormatted = sig.ResultPercent.HasValue ? sig.ResultPercent.Value.ToString("F2", CultureInfo.InvariantCulture) : "0.00";
-                        sig.OutcomeStatus = $"QorunmuÅŸ Breakeven ilÉ™ BaÄŸlandÄ± (BE {pnlSign}{pnlFormatted}% NEYTRAL) âšª";
+                        sig.OutcomeStatus = $"Qorunmuş Breakeven ilə Bağlandı (BE {pnlSign}{pnlFormatted}% NEYTRAL) ⚪";
 
                         await unitOfWork.Signals.UpdateAsync(sig);
                         await unitOfWork.SaveChangesAsync(stoppingToken);
@@ -385,7 +385,7 @@ namespace CryptoSense.Worker
                             if (sig.SignalAlertSent) await _telegramService.SendOutcomeAlertAsync(sig, beOutcomeText, exitPrice, sig.ResultPercent.Value);
                         }
                     }
-                    // 4. Long Initial Stop Loss Hit (TP1 vurulmadan É™vvÉ™l)
+                    // 4. Long Initial Stop Loss Hit (TP1 vurulmadan əvvəl)
                     else if (!sig.Tp1Notified && !sig.OutcomeAlertSent && !sig.IsClosed && (snap.SessionLow <= sig.StopLoss || snap.Last <= sig.StopLoss))
                     {
                         sig.OutcomeAlertSent = true;
@@ -394,7 +394,7 @@ namespace CryptoSense.Worker
                         sig.ClosedAt = DateTime.UtcNow;
                         sig.CloseReason = "SL";
                         sig.Status = SignalStatus.Failed;
-                        sig.OutcomeStatus = "Stop Loss (SL) (UÄURSUZ) âŒ";
+                        sig.OutcomeStatus = "Stop Loss (SL) (UĞURSUZ) ❌";
                         sig.ResultPercent = Math.Round(netPnl, 2);
 
                         await unitOfWork.Signals.UpdateAsync(sig);
@@ -406,8 +406,7 @@ namespace CryptoSense.Worker
                             if (sig.SignalAlertSent) await _telegramService.SendOutcomeAlertAsync(sig, "Stop Loss (SL)", exitPrice, sig.ResultPercent.Value);
                         }
                     }
-                    // 5. Long Time Expiry
-                    // 5. Long Time Expiry (YalnÄ±z timeframe TTL Ã§atanda)
+                    // 5. Long Time Expiry (Yalnız timeframe TTL çatanda)
                     else if (isMaxTimeReached && !sig.OutcomeAlertSent)
                     {
                         sig.OutcomeAlertSent = true;
@@ -423,7 +422,7 @@ namespace CryptoSense.Worker
                             sig.RemainingPositionRatio = 0m;
                             sig.ResultPercent = Math.Round(sig.RealizedProfitPercent - 0.10m, 2);
                             sig.Status = (sig.ResultPercent >= 0) ? SignalStatus.Success : SignalStatus.Failed;
-                            sig.OutcomeStatus = $"{sig.Timeframe} MÃ¼ddÉ™ti Bitdi (TP1 SonrasÄ± TIME ilÉ™ Tam BaÄŸlandÄ±: +{sig.ResultPercent}%) âšª";
+                            sig.OutcomeStatus = $"{sig.Timeframe} Müddəti Bitdi (TP1 Sonrası TIME ilə Tam Bağlandı: +{sig.ResultPercent}%) ⚪";
                         }
                         else
                         {
@@ -431,17 +430,17 @@ namespace CryptoSense.Worker
                             if (netPnl > 0.2m)
                             {
                                 sig.Status = SignalStatus.Success;
-                                sig.OutcomeStatus = $"{sig.Timeframe} MÃ¼ddÉ™ti Bitdi (KiÃ§ik Bazar Ã‡Ä±xÄ±ÅŸÄ±: +{netPnl}%) âšª";
+                                sig.OutcomeStatus = $"{sig.Timeframe} Müddəti Bitdi (Kiçik Bazar Çıxışı: +{netPnl}%) ⚪";
                             }
                             else if (Math.Abs(netPnl) <= 0.2m)
                             {
                                 sig.Status = SignalStatus.Neutral;
-                                sig.OutcomeStatus = $"{sig.Timeframe} MÃ¼ddÉ™ti Bitdi (Neytral/Konsolidasiya) âšª";
+                                sig.OutcomeStatus = $"{sig.Timeframe} Müddəti Bitdi (Neytral/Konsolidasiya) ⚪";
                             }
                             else
                             {
                                 sig.Status = SignalStatus.Failed;
-                                sig.OutcomeStatus = $"{sig.Timeframe} MÃ¼ddÉ™ti Bitdi (UÄURSUZ: {netPnl}%) âŒ";
+                                sig.OutcomeStatus = $"{sig.Timeframe} Müddəti Bitdi (UĞURSUZ: {netPnl}%) ❌";
                             }
                         }
 
@@ -452,13 +451,13 @@ namespace CryptoSense.Worker
                         if (_sentOutcomeDeduplication.TryAdd(dedupKey, DateTime.UtcNow))
                         {
                             decimal finalPnl = sig.ResultPercent ?? netPnl;
-                            if (sig.SignalAlertSent) await _telegramService.SendOutcomeAlertAsync(sig, $"{sig.Timeframe} MÃ¼ddÉ™ti Bitdi", exitPrice, finalPnl);
+                            if (sig.SignalAlertSent) await _telegramService.SendOutcomeAlertAsync(sig, $"{sig.Timeframe} Müddəti Bitdi", exitPrice, finalPnl);
                         }
                     }
                 }
                 else // SHORT
                 {
-                    // 1. Short TP1 (TP_A 1.0R) Hit - 50% baÄŸlandÄ± + BE AktivlÉ™ÅŸdi
+                    // 1. Short TP1 (TP_A 1.0R) Hit - 50% bağlandı + BE Aktivləşdi
                     if (sig.TakeProfit1 > 0 && !sig.Tp1Notified && (snap.SessionLow <= sig.TakeProfit1 || snap.Last <= (sig.TakeProfit1 + tickSize)))
                     {
                         sig.Tp1Notified = true;
@@ -470,7 +469,7 @@ namespace CryptoSense.Worker
                         sig.RealizedProfitPercent = Math.Round(0.50m * pnl1, 2);
                         sig.ProfitPercentAchieved = pnl1;
 
-                        // BÆND 3: Qalan 50%: SL-i BE-yÉ™ Ã§É™k YALNIZ TP_A (1.0R) vurulandan SONRA.
+                        // BƏND 3: Qalan 50%: SL-i BE-yə çək YALNIZ TP_A (1.0R) vurulandan SONRA.
                         sig.StopLoss = SignalEngine.RoundToCoinPrecision(sig.EntryPrice, sig.EntryPrice * 0.9988m);
                         sig.BreakevenTriggered = true;
 
@@ -484,7 +483,7 @@ namespace CryptoSense.Worker
                             sig.RealizedProfitPercent = pnl1;
                             sig.ResultPercent = Math.Round(sig.RealizedProfitPercent - 0.10m, 2);
                             sig.Status = (sig.ResultPercent >= 0) ? SignalStatus.Success : SignalStatus.Failed;
-                            sig.OutcomeStatus = "HÉ™dÉ™f A (TP_A 1.0R) (TAM MÆNFÆÆT) âœ…";
+                            sig.OutcomeStatus = "Hədəf A (TP_A 1.0R) (TAM MƏNFƏƏT) ✅";
 
                             await unitOfWork.Signals.UpdateAsync(sig);
                             await unitOfWork.SaveChangesAsync(stoppingToken);
@@ -492,7 +491,7 @@ namespace CryptoSense.Worker
                             string dedupKey = $"{sig.Id}_TP1";
                             if (_sentOutcomeDeduplication.TryAdd(dedupKey, DateTime.UtcNow))
                             {
-                                if (sig.SignalAlertSent) await _telegramService.SendOutcomeAlertAsync(sig, "HÉ™dÉ™f A (TP_A 1.0R) (TAM MÆNFÆÆT)", exitPrice, sig.ResultPercent.Value);
+                                if (sig.SignalAlertSent) await _telegramService.SendOutcomeAlertAsync(sig, "Hədəf A (TP_A 1.0R) (TAM MƏNFƏƏT)", exitPrice, sig.ResultPercent.Value);
                             }
                         }
                         else
@@ -503,11 +502,11 @@ namespace CryptoSense.Worker
                             string dedupKey = $"{sig.Id}_TP1";
                             if (_sentOutcomeDeduplication.TryAdd(dedupKey, DateTime.UtcNow))
                             {
-                                if (sig.SignalAlertSent) await _telegramService.SendOutcomeAlertAsync(sig, "HÉ™dÉ™f A (TP_A 1.0R) [50% Qazanc BaÄŸlandÄ± + BE Aktiv]", exitPrice, pnl1);
+                                if (sig.SignalAlertSent) await _telegramService.SendOutcomeAlertAsync(sig, "Hədəf A (TP_A 1.0R) [50% Qazanc Bağlandı + BE Aktiv]", exitPrice, pnl1);
                             }
                         }
                     }
-                    // 2. Short TP2 (TP_B) Hit - YalnÄ±z TP1-dÉ™n sonra qalan 50% baÄŸlanÄ±r
+                    // 2. Short TP2 (TP_B) Hit - Yalnız TP1-dən sonra qalan 50% bağlanır
                     else if (sig.Tp1Notified && !sig.OutcomeAlertSent && sig.TakeProfit2 > 0 && (snap.SessionLow <= sig.TakeProfit2 || snap.Last <= (sig.TakeProfit2 + tickSize)))
                     {
                         sig.OutcomeAlertSent = true;
@@ -521,7 +520,7 @@ namespace CryptoSense.Worker
                         sig.RemainingPositionRatio = 0m;
                         sig.ResultPercent = Math.Round(sig.RealizedProfitPercent - 0.10m, 2);
                         sig.Status = (sig.ResultPercent >= 0) ? SignalStatus.Success : SignalStatus.Failed;
-                        sig.OutcomeStatus = "HÉ™dÉ™f B (TP_B) (TAM MÆNFÆÆT) âœ…";
+                        sig.OutcomeStatus = "Hədəf B (TP_B) (TAM MƏNFƏƏT) ✅";
 
                         await unitOfWork.Signals.UpdateAsync(sig);
                         await unitOfWork.SaveChangesAsync(stoppingToken);
@@ -529,10 +528,10 @@ namespace CryptoSense.Worker
                         string dedupKey = $"{sig.Id}_TP2";
                         if (_sentOutcomeDeduplication.TryAdd(dedupKey, DateTime.UtcNow))
                         {
-                            if (sig.SignalAlertSent) await _telegramService.SendOutcomeAlertAsync(sig, "HÉ™dÉ™f B (TP_B) [Qalan 50% Tam MÉ™nfÉ™É™t]", exitPrice, sig.ResultPercent.Value);
+                            if (sig.SignalAlertSent) await _telegramService.SendOutcomeAlertAsync(sig, "Hədəf B (TP_B) [Qalan 50% Tam Mənfəət]", exitPrice, sig.ResultPercent.Value);
                         }
                     }
-                    // 3. Short Breakeven Hit (YALNIZ TP1-dÉ™n sonra qalan 50% BE stopuna dÉ™yÉ™rsÉ™)
+                    // 3. Short Breakeven Hit (YALNIZ TP1-dən sonra qalan 50% BE stopuna dəyərsə)
                     else if (sig.Tp1Notified && !sig.OutcomeAlertSent && !sig.IsClosed && (snap.Last >= sig.StopLoss || snap.SessionHigh >= sig.StopLoss))
                     {
                         sig.OutcomeAlertSent = true;
@@ -546,11 +545,11 @@ namespace CryptoSense.Worker
                         sig.RemainingPositionRatio = 0m;
                         sig.ResultPercent = Math.Round(sig.RealizedProfitPercent - 0.10m, 2);
 
-                        // BÆND 4: BE-yÉ™ qayÄ±dÄ±b baÄŸlandÄ± (NEYTRAL, net |PnL|<0.20% win rate-É™ yox)
+                        // BƏND 4: BE-yə qayıdıb bağlandı (NEYTRAL, net |PnL|<0.20% win rate-ə yox)
                         sig.Status = SignalStatus.Neutral;
                         string pnlSign = sig.ResultPercent >= 0 ? "+" : "";
                         string pnlFormatted = sig.ResultPercent.HasValue ? sig.ResultPercent.Value.ToString("F2", CultureInfo.InvariantCulture) : "0.00";
-                        sig.OutcomeStatus = $"QorunmuÅŸ Breakeven ilÉ™ BaÄŸlandÄ± (BE {pnlSign}{pnlFormatted}% NEYTRAL) âšª";
+                        sig.OutcomeStatus = $"Qorunmuş Breakeven ilə Bağlandı (BE {pnlSign}{pnlFormatted}% NEYTRAL) ⚪";
 
                         await unitOfWork.Signals.UpdateAsync(sig);
                         await unitOfWork.SaveChangesAsync(stoppingToken);
@@ -562,7 +561,7 @@ namespace CryptoSense.Worker
                             if (sig.SignalAlertSent) await _telegramService.SendOutcomeAlertAsync(sig, beOutcomeText, exitPrice, sig.ResultPercent.Value);
                         }
                     }
-                    // 4. Short Initial Stop Loss Hit (TP1 vurulmadan É™vvÉ™l)
+                    // 4. Short Initial Stop Loss Hit (TP1 vurulmadan əvvəl)
                     else if (!sig.Tp1Notified && !sig.OutcomeAlertSent && !sig.IsClosed && (snap.SessionHigh >= sig.StopLoss || snap.Last >= sig.StopLoss))
                     {
                         sig.OutcomeAlertSent = true;
@@ -571,7 +570,7 @@ namespace CryptoSense.Worker
                         sig.ClosedAt = DateTime.UtcNow;
                         sig.CloseReason = "SL";
                         sig.Status = SignalStatus.Failed;
-                        sig.OutcomeStatus = "Stop Loss (SL) (UÄURSUZ) âŒ";
+                        sig.OutcomeStatus = "Stop Loss (SL) (UĞURSUZ) ❌";
                         sig.ResultPercent = Math.Round(netPnl, 2);
 
                         await unitOfWork.Signals.UpdateAsync(sig);
@@ -583,8 +582,7 @@ namespace CryptoSense.Worker
                             if (sig.SignalAlertSent) await _telegramService.SendOutcomeAlertAsync(sig, "Stop Loss (SL)", exitPrice, sig.ResultPercent.Value);
                         }
                     }
-                    // 5. Short Time Expiry
-                    // 5. Short Time Expiry (YalnÄ±z timeframe TTL Ã§atanda)
+                    // 5. Short Time Expiry (Yalnız timeframe TTL çatanda)
                     else if (isMaxTimeReached && !sig.OutcomeAlertSent)
                     {
                         sig.OutcomeAlertSent = true;
@@ -600,7 +598,7 @@ namespace CryptoSense.Worker
                             sig.RemainingPositionRatio = 0m;
                             sig.ResultPercent = Math.Round(sig.RealizedProfitPercent - 0.10m, 2);
                             sig.Status = (sig.ResultPercent >= 0) ? SignalStatus.Success : SignalStatus.Failed;
-                            sig.OutcomeStatus = $"{sig.Timeframe} MÃ¼ddÉ™ti Bitdi (TP1 SonrasÄ± TIME ilÉ™ Tam BaÄŸlandÄ±: +{sig.ResultPercent}%) âšª";
+                            sig.OutcomeStatus = $"{sig.Timeframe} Müddəti Bitdi (TP1 Sonrası TIME ilə Tam Bağlandı: +{sig.ResultPercent}%) ⚪";
                         }
                         else
                         {
@@ -608,17 +606,17 @@ namespace CryptoSense.Worker
                             if (netPnl > 0.2m)
                             {
                                 sig.Status = SignalStatus.Success;
-                                sig.OutcomeStatus = $"{sig.Timeframe} MÃ¼ddÉ™ti Bitdi (KiÃ§ik Bazar Ã‡Ä±xÄ±ÅŸÄ±: +{netPnl}%) âšª";
+                                sig.OutcomeStatus = $"{sig.Timeframe} Müddəti Bitdi (Kiçik Bazar Çıxışı: +{netPnl}%) ⚪";
                             }
                             else if (Math.Abs(netPnl) <= 0.2m)
                             {
                                 sig.Status = SignalStatus.Neutral;
-                                sig.OutcomeStatus = $"{sig.Timeframe} MÃ¼ddÉ™ti Bitdi (Neytral/Konsolidasiya) âšª";
+                                sig.OutcomeStatus = $"{sig.Timeframe} Müddəti Bitdi (Neytral/Konsolidasiya) ⚪";
                             }
                             else
                             {
                                 sig.Status = SignalStatus.Failed;
-                                sig.OutcomeStatus = $"{sig.Timeframe} MÃ¼ddÉ™ti Bitdi (UÄURSUZ: {netPnl}%) âŒ";
+                                sig.OutcomeStatus = $"{sig.Timeframe} Müddəti Bitdi (UĞURSUZ: {netPnl}%) ❌";
                             }
                         }
 
@@ -629,19 +627,29 @@ namespace CryptoSense.Worker
                         if (_sentOutcomeDeduplication.TryAdd(dedupKey, DateTime.UtcNow))
                         {
                             decimal finalPnl = sig.ResultPercent ?? netPnl;
-                            if (sig.SignalAlertSent) await _telegramService.SendOutcomeAlertAsync(sig, $"{sig.Timeframe} MÃ¼ddÉ™ti Bitdi", exitPrice, finalPnl);
+                            if (sig.SignalAlertSent) await _telegramService.SendOutcomeAlertAsync(sig, $"{sig.Timeframe} Müddəti Bitdi", exitPrice, finalPnl);
                         }
                     }
                 }
 
                 if (sig.IsClosed)
                 {
-                    // YalnÄ±z real Stop Loss streak-i breaker-É™ dÃ¼ÅŸÃ¼r.
-                    // TIME / NO_EDGE / BE / ALERT_NEVER_SENT Failed sayÄ±lsa belÉ™ breaker-É™ GETMÆSÄ°N.
+                    // Yalnız real Stop Loss streak-i breaker-ə düşür.
+                    // TIME / NO_EDGE / BE / ALERT_NEVER_SENT Failed sayılsa belə breaker-ə GETMƏSİN.
+                    // BUG 2: Sayğac YALNIZ SignalAlertSent==true VƏ IsTest==false VƏ CloseReason SL/SL_RESTART_CATCHUP.
                     bool isHardStopLoss = sig.CloseReason == "SL" || sig.CloseReason == "SL_RESTART_CATCHUP";
-                    if (sig.Status == SignalStatus.Failed && isHardStopLoss)
+                    if (sig.Status == SignalStatus.Failed && isHardStopLoss && sig.SignalAlertSent && !sig.IsTest)
                     {
-                        int losses = Interlocked.Increment(ref _consecutiveLosses);
+                        int losses;
+                        List<int> lossIdsSnapshot;
+                        lock (_lossLock)
+                        {
+                            _consecutiveLossSignalIds.Add(sig.Id);
+                            losses = _consecutiveLossSignalIds.Count;
+                            lossIdsSnapshot = _consecutiveLossSignalIds.ToList();
+                        }
+                        Interlocked.Exchange(ref _consecutiveLosses, losses);
+
                         if (losses >= 2)
                         {
                             _circuitBreakerUntil = DateTime.UtcNow.AddHours(4);
@@ -653,8 +661,9 @@ namespace CryptoSense.Worker
                                 {
                                     try
                                     {
-                                        await _telegramService.BroadcastSystemAlertAsync("âš ï¸ <b>RISK CIRCUIT BREAKER AKTÄ°VLÆÅDÄ°:</b>\n\n" +
-                                            "ArdÄ±cÄ±l 2 uÄŸursuz É™mÉ™liyyat (Stop Loss) qeydÉ™ alÄ±ndÄ±. Bazar skaneri kapitalÄ± qorumaq Ã¼Ã§Ã¼n <b>4 saatlÄ±q</b> mÃ¼ÅŸahidÉ™ rejiminÉ™ keÃ§di.");
+                                        const string cbAlertMsg = "⚠️ <b>RISK CIRCUIT BREAKER AKTİVLƏŞDİ:</b>\n\n" +
+                                            "Ardıcıl 2 uğursuz əməliyyat (Stop Loss) qeydə alındı. Bazar skaneri kapitalı qorumaq üçün <b>4 saatlıq</b> müşahidə rejiminə keçdi.";
+                                        await _telegramService.SendCircuitBreakerAlertAsync(cbAlertMsg, lossIdsSnapshot);
                                     }
                                     catch (Exception _ex) { Console.WriteLine($"[BackgroundMarketScanner] Swallowed exception: {_ex.Message}"); }
                                 });
@@ -663,6 +672,10 @@ namespace CryptoSense.Worker
                     }
                     else if (sig.CloseReason == "TP_B" || sig.CloseReason == "TP3")
                     {
+                        lock (_lossLock)
+                        {
+                            _consecutiveLossSignalIds.Clear();
+                        }
                         Interlocked.Exchange(ref _consecutiveLosses, 0);
                     }
 
@@ -710,7 +723,7 @@ namespace CryptoSense.Worker
                 : Math.Round(((sig.EntryPrice - exitPrice) / sig.EntryPrice) * 100, 2);
             decimal netPnl = Math.Round(grossPnl - 0.10m, 2);
 
-            // BÆND E: Alt LONG Ã¼Ã§Ã¼n BTC É™ks rejimi aÅŸkarlananda dÉ™rhal Ã§Ä±xÄ±ÅŸ (ETH daxil, BTCUSDT istisna)
+            // BƏND E: Alt LONG üçün BTC əks rejimi aşkarlananda dərhal çıxış (ETH daxil, BTCUSDT istisna)
             if (isLong && !sig.Symbol.Equals("BTCUSDT", StringComparison.OrdinalIgnoreCase))
             {
                 try
@@ -725,13 +738,13 @@ namespace CryptoSense.Worker
                         sig.CloseReason = "INVALIDATION";
                         sig.ResultPercent = netPnl;
                         sig.Status = (Math.Abs(netPnl) <= 0.20m) ? SignalStatus.Neutral : SignalStatus.Failed;
-                        sig.OutcomeStatus = "BTC É™ks rejim (INVALIDATION) âŒ";
+                        sig.OutcomeStatus = "BTC əks rejim (INVALIDATION) ❌";
 
                         await unitOfWork.Signals.UpdateAsync(sig);
                         await unitOfWork.SaveChangesAsync(stoppingToken);
                         if (sig.SignalAlertSent)
                         {
-                            await _telegramService.SendOutcomeAlertAsync(sig, "BTC É™ks â€” Ã§Ä±xÄ±ÅŸ", exitPrice, netPnl);
+                            await _telegramService.SendOutcomeAlertAsync(sig, "BTC əks — çıxış", exitPrice, netPnl);
                         }
                         return;
                     }
@@ -742,8 +755,8 @@ namespace CryptoSense.Worker
                 }
             }
 
-            // Simvol baÅŸÄ±na max 1 kline / 15m throttle
-            // YalnÄ±z 15m ÅŸam qapanÄ±ÅŸÄ±nda vÉ™ ya É™n tez 30s-dÉ™n bir yoxla
+            // Simvol başına max 1 kline / 15m throttle
+            // Yalnız 15m şam qapanışında və ya ən tez 30s-dən bir yoxla
             var now = DateTime.UtcNow;
             if (sig.LastObservedCandleTime != default && (now - sig.LastObservedCandleTime).TotalSeconds < 30)
             {
@@ -762,14 +775,14 @@ namespace CryptoSense.Worker
 
             if (rawKlines == null || rawKlines.Count < 25) return;
 
-            // Son qapalÄ± ÅŸamlar: forming candle-i Ã§Ä±xar
+            // Son qapalı şamlar: forming candle-i çıxar
             var closedCandles = rawKlines.Take(rawKlines.Count - 1).ToList();
             if (closedCandles.Count < 20) return;
 
             var lastClosed = closedCandles[^1];
             var lastCandleTime = DateTimeOffset.FromUnixTimeMilliseconds(lastClosed.OpenTime).UtcDateTime;
 
-            // ÆgÉ™r yeni ÅŸam qapanmayÄ±bsa, tÉ™krar hesablama
+            // Əgər yeni şam qapanmayıbsa, təkrar hesablama
             if (sig.LastObservedCandleTime != default && lastCandleTime <= sig.LastObservedCandleTime)
             {
                 return;
@@ -778,9 +791,9 @@ namespace CryptoSense.Worker
             sig.LastObservedCandleTime = lastCandleTime;
             sig.CandlesObserved++;
 
-            // NO_EDGE (Ã¶lÃ¼ edge) â€” timeframe-nisbi: (1h: 4 ÅŸam = 4 saat) vÉ™ ya (4h: 3 ÅŸam = 12 saat)
-            // YALNIZ: MFE < 0.4R VÆ TP_A hit olmayÄ±b.
-            // Vaxt kill TÆTBÄ°Q OLUNMASIN É™gÉ™r: MFE >= 0.4R VÆ ya qiymÉ™t TP_A-ya yaxÄ±ndÄ±r / artÄ±q +R-dÉ™dir VÆ ya TP_A artÄ±q vurulub.
+            // NO_EDGE (ölü edge) — timeframe-nisbi: (1h: 4 şam = 4 saat) və ya (4h: 3 şam = 12 saat)
+            // YALNIZ: MFE < 0.4R VƏ TP_A hit olmayıb.
+            // Vaxt kill TƏTBİQ OLUNMASIN əgər: MFE >= 0.4R VƏ ya qiymət TP_A-ya yaxındır / artıq +R-dədir VƏ ya TP_A artıq vurulub.
             decimal riskRPct = (sig.InitialRiskR > 0 && sig.EntryPrice > 0)
                 ? (sig.InitialRiskR / sig.EntryPrice) * 100m
                 : (Math.Abs(sig.EntryPrice - sig.StopLoss) / (sig.EntryPrice > 0 ? sig.EntryPrice : 1m)) * 100m;
@@ -827,24 +840,24 @@ namespace CryptoSense.Worker
                 if (Math.Abs(netPnl) <= 0.20m)
                 {
                     sig.Status = SignalStatus.Neutral;
-                    sig.OutcomeStatus = $"{sig.Timeframe} HÉ™rÉ™kÉ™tsiz (NO_EDGE Neytral: {netPnl}%) âšª";
+                    sig.OutcomeStatus = $"{sig.Timeframe} Hərəkətsiz (NO_EDGE Neytral: {netPnl}%) ⚪";
                 }
                 else
                 {
                     sig.Status = SignalStatus.Failed;
-                    sig.OutcomeStatus = $"{sig.Timeframe} HÉ™rÉ™kÉ™tsiz (NO_EDGE Donma Ã§Ä±xÄ±ÅŸÄ±: {netPnl}%) âŒ";
+                    sig.OutcomeStatus = $"{sig.Timeframe} Hərəkətsiz (NO_EDGE Donma çıxışı: {netPnl}%) ❌";
                 }
                 sig.CloseReason = "NO_EDGE";
 
                 await unitOfWork.Signals.UpdateAsync(sig);
                 await unitOfWork.SaveChangesAsync(stoppingToken);
-                if (sig.SignalAlertSent) await _telegramService.SendOutcomeAlertAsync(sig, "NO_EDGE (Donma Ã§Ä±xÄ±ÅŸÄ±)", exitPrice, netPnl);
+                if (sig.SignalAlertSent) await _telegramService.SendOutcomeAlertAsync(sig, "NO_EDGE (Donma çıxışı)", exitPrice, netPnl);
                 return;
             }
 
             // Problem 5: Invalidation
-            // LONG baÄŸla: close < siqnal swing low VÆ [(SuperTrend flip VÆ RSI close<50) VEYA (2 ardÄ±cÄ±l É™ks ÅŸam VÆ vol>1.3Ã—SMA20)].
-            // SHORT gÃ¼zgÃ¼ (swing high, RSI>50).
+            // LONG bağla: close < siqnal swing low VƏ [(SuperTrend flip VƏ RSI close<50) VEYA (2 ardıcıl əks şam VƏ vol>1.3×SMA20)].
+            // SHORT güzgü (swing high, RSI>50).
             var ind = indicatorEngine.CalculateIndicators(closedCandles);
             var volSma20 = closedCandles.TakeLast(20).Average(c => c.Volume);
 
@@ -870,7 +883,7 @@ namespace CryptoSense.Worker
                     sig.Status = SignalStatus.Failed;
                     sig.CloseReason = "INVALIDATION";
                     sig.ResultPercent = netPnl;
-                    sig.OutcomeStatus = "Struktur Pozuldu (INVALIDATION) âŒ";
+                    sig.OutcomeStatus = "Struktur Pozuldu (INVALIDATION) ❌";
 
                     await unitOfWork.Signals.UpdateAsync(sig);
                     await unitOfWork.SaveChangesAsync(stoppingToken);
@@ -900,7 +913,7 @@ namespace CryptoSense.Worker
                     sig.Status = SignalStatus.Failed;
                     sig.CloseReason = "INVALIDATION";
                     sig.ResultPercent = netPnl;
-                    sig.OutcomeStatus = "Struktur Pozuldu (INVALIDATION) âŒ";
+                    sig.OutcomeStatus = "Struktur Pozuldu (INVALIDATION) ❌";
 
                     await unitOfWork.Signals.UpdateAsync(sig);
                     await unitOfWork.SaveChangesAsync(stoppingToken);
@@ -909,13 +922,13 @@ namespace CryptoSense.Worker
                 }
             }
 
-            // Problem 6: TP2-dÉ™n sonra trail son 3 qapalÄ± swing Â± 0.3*ATR
+            // Problem 6: TP2-dən sonra trail son 3 qapalı swing ± 0.3*ATR
             if (sig.Tp2Notified && !sig.OutcomeAlertSent && !sig.IsClosed)
             {
                 decimal atrVal = ind.Atr > 0 ? ind.Atr : (sig.EntryPrice * (sig.AtrPercent > 0 ? sig.AtrPercent / 100m : 0.01m));
                 if (isLong)
                 {
-                    // Son 3 qapalÄ± swing low tap
+                    // Son 3 qapalı swing low tap
                     var recentLows = new List<decimal>();
                     for (int i = closedCandles.Count - 3; i >= 2 && recentLows.Count < 3; i--)
                     {
@@ -939,7 +952,7 @@ namespace CryptoSense.Worker
                 }
                 else
                 {
-                    // Son 3 qapalÄ± swing high tap
+                    // Son 3 qapalı swing high tap
                     var recentHighs = new List<decimal>();
                     for (int i = closedCandles.Count - 3; i >= 2 && recentHighs.Count < 3; i--)
                     {

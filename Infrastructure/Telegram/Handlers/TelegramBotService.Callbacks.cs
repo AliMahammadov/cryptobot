@@ -6,6 +6,7 @@ using System.Text;
 using System.Threading.Tasks;
 using CryptoSense.Application.DTOs;
 using CryptoSense.Application.Interfaces;
+using CryptoSense.Domain.Common;
 using CryptoSense.Domain.Entities;
 using CryptoSense.Domain.Enums;
 using CryptoSense.Domain.Interfaces;
@@ -335,7 +336,7 @@ namespace CryptoSense.Infrastructure.Telegram
                 var stats = (isCallerAdmin || chatId == SuperAdminChatId)
                     ? await unitOfWork.Signals.GetPerformanceStatsAsync(userSettings.Timeframe, userCoins: null, isAllTime: isAllTime)
                     : await signalEngine.GetUserPerformanceStatsAsync(chatId, userSettings.Timeframe, userSettings.Coins, isAllTime: isAllTime);
-                var tfLabel = (string.IsNullOrWhiteSpace(userSettings.Timeframe) || userSettings.Timeframe == "Təyin olunmayıb" || userSettings.Timeframe == "Hamısı" || userSettings.Timeframe == "Hamisi") ? "1h, 4h" : userSettings.Timeframe;
+                var tfLabel = (string.IsNullOrWhiteSpace(userSettings.Timeframe) || userSettings.Timeframe == "Təyin olunmayıb" || BotConstants.Timeframe.IsAll(userSettings.Timeframe)) ? "1h, 4h" : userSettings.Timeframe;
                 var statsMsg = TelegramMessageFormatter.FormatPerformanceStats(stats, tfLabel, isAllTime: isAllTime);
                 await EditMessageTextAsync(chatId, messageId, statsMsg, TelegramKeyboards.BuildStatsKeyboard(isAllTime: isAllTime));
             }
@@ -522,12 +523,8 @@ namespace CryptoSense.Infrastructure.Telegram
             if (!settings.IsActive) return false;
             if (!string.Equals(settings.PortfolioMode, targetMode, StringComparison.OrdinalIgnoreCase)) return false;
 
-            bool currentIsAll = string.Equals(settings.Timeframe, "Hamısı", StringComparison.OrdinalIgnoreCase)
-                             || string.Equals(settings.Timeframe, "Hamisi", StringComparison.OrdinalIgnoreCase)
-                             || string.Equals(settings.Timeframe, "1h, 4h", StringComparison.OrdinalIgnoreCase);
-            bool targetIsAll = string.Equals(targetTf, "Hamısı", StringComparison.OrdinalIgnoreCase)
-                            || string.Equals(targetTf, "Hamisi", StringComparison.OrdinalIgnoreCase)
-                            || string.Equals(targetTf, "1h, 4h", StringComparison.OrdinalIgnoreCase);
+            bool currentIsAll = BotConstants.Timeframe.IsAll(settings.Timeframe);
+            bool targetIsAll = BotConstants.Timeframe.IsAll(targetTf);
 
             if (currentIsAll && targetIsAll) return true;
 

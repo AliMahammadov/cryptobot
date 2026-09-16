@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
+using CryptoSense.Domain.Common;
 using CryptoSense.Domain.Entities;
 using CryptoSense.Domain.Enums;
 using CryptoSense.Domain.Interfaces;
@@ -216,7 +217,7 @@ namespace CryptoSense.Infrastructure.Persistence.Repositories
                 }
             }
 
-            if (!string.IsNullOrEmpty(specificTimeframe) && specificTimeframe != "Hamısı" && specificTimeframe != "Hamisi" && specificTimeframe != "AllTime" && specificTimeframe != "Hamısı (Bütün Tarix)")
+            if (!string.IsNullOrEmpty(specificTimeframe) && !BotConstants.Timeframe.IsAll(specificTimeframe))
             {
                 query = query.Where(s => s.Timeframe == specificTimeframe);
             }
@@ -468,10 +469,17 @@ namespace CryptoSense.Infrastructure.Persistence.Repositories
 
         public async Task<List<string>> GetDeliveredChatIdsAsync(int signalId)
         {
-            return await _context.UserSignalDeliveries
-                .Where(d => d.SignalId == signalId)
-                .Select(d => d.TelegramChatId)
-                .ToListAsync();
+            try
+            {
+                return await _context.UserSignalDeliveries
+                    .Where(d => d.SignalId == signalId)
+                    .Select(d => d.TelegramChatId)
+                    .ToListAsync();
+            }
+            catch
+            {
+                return new List<string>();
+            }
         }
 
         public async Task<int> GetUserSignalNumberAsync(int signalId, string chatId)
@@ -521,11 +529,7 @@ namespace CryptoSense.Infrastructure.Persistence.Repositories
                 .Select(d => d.SignalId)
                 .ToListAsync();
 
-            bool hasSpecificTf = !string.IsNullOrEmpty(specificTimeframe) 
-                && specificTimeframe != "Hamısı" 
-                && specificTimeframe != "Hamisi" 
-                && specificTimeframe != "AllTime" 
-                && specificTimeframe != "Hamısı (Bütün Tarix)";
+            bool hasSpecificTf = !string.IsNullOrEmpty(specificTimeframe) && !BotConstants.Timeframe.IsAll(specificTimeframe);
 
             int userOpenCount = 0;
             if (deliveredSignalIds.Count > 0)

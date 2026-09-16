@@ -907,8 +907,8 @@ namespace CryptoSense.Infrastructure.Telegram
                     var settings = GetSettings(chatId);
                     if (!settings.IsActive) continue;
 
-                    // Strict Timeframe check: Only 1h, 4h
-                    if (settings.Timeframe != "Hamısı" && settings.Timeframe != "Hamisi" && settings.Timeframe != signal.Timeframe)
+                    // Strict Timeframe check: Only 1h, 4h ("1h, 4h" and "1h + 4h" match both)
+                    if (!CryptoSense.Domain.Common.BotConstants.Timeframe.IsAll(settings.Timeframe) && settings.Timeframe != signal.Timeframe)
                     {
                         continue;
                     }
@@ -1162,6 +1162,115 @@ namespace CryptoSense.Infrastructure.Telegram
             }
         }
 
+        public async Task SendCircuitBreakerAlertAsync(string message, IEnumerable<int> lossSignalIds)
+        {
+            // 1. Breaker ALERT SuperAdmin-ə
+            if (!string.IsNullOrEmpty(SuperAdminChatId))
+            {
+                try
+                {
+                    await SendMessageAsync(message, SuperAdminChatId);
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[TelegramBotService] Failed to send circuit breaker alert to SuperAdmin: {ex.Message}");
+                }
+            }
+
+            // 2. Userbot/kanal YALNIZ o, həmin SL-lərdən birini delivery alıbsa
+            try
+            {
+                using var scope = _serviceProvider.CreateScope();
+                var uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
+
+                string? userbotChatId = null;
+                string? userbotUsername = _config.ChannelMirror?.Username ?? _config.ChannelMirrorUsername ?? "userbot";
+
+                foreach (var kvp in _authenticatedSessions)
+                {
+                    if (IsStickyUsername(kvp.Value) || IsUserbotMatch(kvp.Value, userbotUsername))
+                    {
+                        userbotChatId = kvp.Key;
+                        userbotUsername = kvp.Value;
+                        break;
+                    }
+                }
+
+                if (string.IsNullOrEmpty(userbotChatId))
+                {
+                    foreach (var kvp in UserPreferences)
+                    {
+                        if (IsStickyUsername(kvp.Value.Username) || IsUserbotMatch(kvp.Value.Username, userbotUsername))
+                        {
+                            userbotChatId = kvp.Key;
+                            userbotUsername = kvp.Value.Username;
+                            break;
+                        }
+                    }
+                }
+
+                if (string.IsNullOrEmpty(userbotChatId))
+                {
+                    var userbotUser = await uow.Users.GetByUsernameAsync(userbotUsername);
+                    if (userbotUser != null && !string.IsNullOrEmpty(userbotUser.TelegramChatId))
+                    {
+                        userbotChatId = userbotUser.TelegramChatId;
+                    }
+                }
+
+                var mirrorCfg = _config.ChannelMirror;
+                var channelChatId = !string.IsNullOrWhiteSpace(mirrorCfg?.ChannelChatId) 
+                    ? mirrorCfg.ChannelChatId 
+                    : _config.ChannelMirrorChannelChatId;
+
+                bool userbotDelivered = false;
+                foreach (var sigId in lossSignalIds)
+                {
+                    var delivered = await uow.Signals.GetDeliveredChatIdsAsync(sigId);
+                    if (!string.IsNullOrEmpty(userbotChatId) && delivered.Contains(userbotChatId))
+                    {
+                        userbotDelivered = true;
+                        break;
+                    }
+                    if (!string.IsNullOrEmpty(channelChatId) && delivered.Contains(channelChatId))
+                    {
+                        userbotDelivered = true;
+                        break;
+                    }
+                    if (!string.IsNullOrEmpty(userbotChatId) && _signalUserNumberMap.ContainsKey($"{sigId}_{userbotChatId}"))
+                    {
+                        userbotDelivered = true;
+                        break;
+                    }
+                }
+
+                if (userbotDelivered)
+                {
+                    if (!string.IsNullOrEmpty(userbotChatId))
+                    {
+                        bool sent = await SendMessageAsync(message, userbotChatId);
+                        if (sent)
+                        {
+                            var effectiveUsername = GetEffectiveUsername(userbotChatId, userbotUsername);
+                            _ = MirrorToChannelIfUserbotAsync(effectiveUsername, userbotChatId, message);
+                        }
+                    }
+                    else if (!string.IsNullOrEmpty(channelChatId))
+                    {
+                        await SendMessageAsync(message, channelChatId, replyMarkup: null);
+                    }
+                }
+                else
+                {
+                    Console.WriteLine("[TelegramBotService] Circuit breaker alert suppressed for userbot/channel: userbot did not receive delivery for any of these SL signals.");
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[TelegramBotService] Error in SendCircuitBreakerAlertAsync: {ex.Message}");
+            }
+        }
+
         public async Task NotifySuperAdminUserLoginAsync(string username, string platform)
         {
             if (string.IsNullOrEmpty(SuperAdminChatId)) return;
@@ -1268,9 +1377,10 @@ namespace CryptoSense.Infrastructure.Telegram
             var signalEngine = scope.ServiceProvider.GetRequiredService<ISignalEngine>();
             var marketData = scope.ServiceProvider.GetRequiredService<IMarketDataProvider>();
 
-            var tfDisplay = (timeframe == "Hamısı" || timeframe == "Hamisi") ? "1h, 4h" : timeframe;
+            var isAllTimeframes = CryptoSense.Domain.Common.BotConstants.Timeframe.IsAll(timeframe);
+            var tfDisplay = isAllTimeframes ? "1h, 4h" : timeframe;
             var userOpenSignals = await uow.Signals.GetUserOpenSignalsAsync(chatId);
-            if (timeframe != "Hamısı" && timeframe != "Hamisi")
+            if (!isAllTimeframes)
             {
                 userOpenSignals = userOpenSignals.Where(s => s.Timeframe == timeframe).ToList();
             }

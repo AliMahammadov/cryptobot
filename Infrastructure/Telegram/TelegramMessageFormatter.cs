@@ -537,7 +537,7 @@ namespace CryptoSense.Infrastructure.Telegram
             sb.AppendLine("🤖 <b>Skaner Vəziyyəti:</b> İşləyir 🟢 (24/7 Canlı Rejim)");
             var commitHash = GetShortGitCommitHash();
             sb.AppendLine($"📌 <b>Deploy Versiyası:</b> <code>v2.0 (Commit: {commitHash})</code>");
-            var tfDisplay = (settings.Timeframe == "Hamısı" || settings.Timeframe == "Hamisi") ? "1h, 4h" : (settings.Timeframe == "15m" ? "1h" : settings.Timeframe);
+            var tfDisplay = BotConstants.Timeframe.IsAll(settings.Timeframe) ? "1h, 4h" : (settings.Timeframe == "15m" ? "1h" : settings.Timeframe);
             sb.AppendLine($"⏱ <b>Aktiv Rejim:</b> <code>{tfDisplay}</code>");
             string coinText;
             if (settings.Coins.Count == 0)
@@ -563,7 +563,7 @@ namespace CryptoSense.Infrastructure.Telegram
             var statusIcon = settings.IsActive ? "İşləyir 🟢" : "Dayandırılıb 🔴";
             var tfDisplay = string.IsNullOrWhiteSpace(settings.Timeframe) || settings.Timeframe == "Təyin olunmayıb"
                 ? "Təyin olunmayıb ⚠️"
-                : ((settings.Timeframe == "Hamısı" || settings.Timeframe == "Hamisi") ? "1h, 4h" : settings.Timeframe);
+                : (BotConstants.Timeframe.IsAll(settings.Timeframe) ? "1h, 4h" : settings.Timeframe);
 
             string portModeName;
             string coinCount;
