@@ -754,7 +754,17 @@ namespace CryptoSense.Infrastructure.Telegram
             return IsUserbotMatch(username, target) || IsUserbotMatch(username, "userbot");
         }
 
-        private async Task MirrorToChannelIfUserbotAsync(string? username, string sourceChatId, string messageText)
+        public string GetEffectiveUsername(string chatId, string? fallback = null)
+        {
+            if (_authenticatedSessions.TryGetValue(chatId, out var sUname) && !string.IsNullOrWhiteSpace(sUname))
+                return sUname;
+            var settings = GetSettings(chatId);
+            if (!string.IsNullOrWhiteSpace(settings.Username))
+                return settings.Username;
+            return fallback ?? "";
+        }
+
+        public async Task MirrorToChannelIfUserbotAsync(string? username, string sourceChatId, string messageText)
         {
             try
             {
@@ -1096,7 +1106,12 @@ namespace CryptoSense.Infrastructure.Telegram
                 if (!settings.IsActive) continue;
                 // Only send volatility alert if user follows this coin or has chosen Hamısı
                 if (settings.Coins.Count > 0 && !settings.Coins.Contains(symbol)) continue;
-                await SendMessageAsync(msg, chatId);
+                bool sent = await SendMessageAsync(msg, chatId);
+                if (sent)
+                {
+                    var effectiveUsername = GetEffectiveUsername(chatId, settings.Username);
+                    _ = MirrorToChannelIfUserbotAsync(effectiveUsername, chatId, msg);
+                }
             }
         }
 
@@ -1146,7 +1161,12 @@ namespace CryptoSense.Infrastructure.Telegram
                 if (!await CanReceivePushAsync(chatId)) continue;
                 var settings = GetSettings(chatId);
                 if (!settings.IsActive) continue;
-                await SendMessageAsync(message, chatId);
+                bool sent = await SendMessageAsync(message, chatId);
+                if (sent)
+                {
+                    var effectiveUsername = GetEffectiveUsername(chatId, settings.Username);
+                    _ = MirrorToChannelIfUserbotAsync(effectiveUsername, chatId, message);
+                }
             }
         }
 
@@ -1219,7 +1239,12 @@ namespace CryptoSense.Infrastructure.Telegram
                 var userCoinsEntered = userOpenSignals.Select(s => s.Symbol.Replace("USDT", "")).Distinct().ToList();
 
                 var userMsg = TelegramMessageFormatter.FormatDailyReport(userStats, userCoinsEntered, defaultReasons, isSuperAdmin: false);
-                await SendMessageAsync(userMsg, chatId);
+                bool sent = await SendMessageAsync(userMsg, chatId);
+                if (sent)
+                {
+                    var effectiveUsername = GetEffectiveUsername(chatId, user.Username);
+                    _ = MirrorToChannelIfUserbotAsync(effectiveUsername, chatId, userMsg);
+                }
             }
         }
 

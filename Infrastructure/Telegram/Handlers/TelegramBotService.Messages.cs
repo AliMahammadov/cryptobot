@@ -223,7 +223,9 @@ namespace CryptoSense.Infrastructure.Telegram
                 text.StartsWith("/deluser", StringComparison.OrdinalIgnoreCase) ||
                 text.StartsWith("/test_signal", StringComparison.OrdinalIgnoreCase) ||
                 text.StartsWith("/test_outcome", StringComparison.OrdinalIgnoreCase) ||
-                text.StartsWith("/test_pipeline", StringComparison.OrdinalIgnoreCase);
+                text.StartsWith("/test_pipeline", StringComparison.OrdinalIgnoreCase) ||
+                text.StartsWith("/test_channel", StringComparison.OrdinalIgnoreCase) ||
+                text.StartsWith("/testchannel", StringComparison.OrdinalIgnoreCase);
 
             if (!isAdminUser && isRestrictedAdminCommand)
             {
@@ -244,7 +246,8 @@ namespace CryptoSense.Infrastructure.Telegram
                                      text == "➕ Öz coini əlavə et" || text == "➕ İstifadəçi Yarat" ||
                                      text.Contains("Siqnallar") || text.Contains("Menyu") || text.Contains("Statistika") ||
                                      (text.StartsWith("/") && !text.StartsWith("/login", StringComparison.OrdinalIgnoreCase) && !text.StartsWith("/admin ", StringComparison.OrdinalIgnoreCase)
-                                      && !text.StartsWith("/test_signal", StringComparison.OrdinalIgnoreCase) && !text.StartsWith("/test_outcome", StringComparison.OrdinalIgnoreCase) && !text.StartsWith("/test_pipeline", StringComparison.OrdinalIgnoreCase));
+                                      && !text.StartsWith("/test_signal", StringComparison.OrdinalIgnoreCase) && !text.StartsWith("/test_outcome", StringComparison.OrdinalIgnoreCase) && !text.StartsWith("/test_pipeline", StringComparison.OrdinalIgnoreCase)
+                                      && !text.StartsWith("/test_channel", StringComparison.OrdinalIgnoreCase) && !text.StartsWith("/testchannel", StringComparison.OrdinalIgnoreCase));
 
             // FSM guard: if user is mid text-input step, force isMenuButtonClick = false
             if (_userStates.TryGetValue(chatId, out var fsmGuardState) &&
@@ -1094,6 +1097,13 @@ namespace CryptoSense.Infrastructure.Telegram
                 return;
             }
 
+            if (isAdmin && (text == "/test_channel" || text.StartsWith("/test_channel", StringComparison.OrdinalIgnoreCase) || text == "/testchannel" || text.StartsWith("/testchannel", StringComparison.OrdinalIgnoreCase)))
+            {
+                var channelArg = text.Length > 13 ? text.Substring(13).Trim().ToLowerInvariant() : "";
+                await ExecuteTestChannelCommandAsync(chatId, userSettings, scope, channelArg);
+                return;
+            }
+
 
             // =========================================================================
             // 6. AUTHENTICATED REGULAR & ADMIN USER ACTIONS
@@ -1903,6 +1913,190 @@ namespace CryptoSense.Infrastructure.Telegram
                 Console.WriteLine($"[ExecuteTestOutcomeCommandAsync] Error: {ex.Message}");
                 await SendMessageAsync($"⚠️ Test nəticəsi göndərilərkən xəta baş verdi: <code>{ex.Message}</code>", chatId);
                 return false;
+            }
+        }
+
+        private async Task ExecuteTestChannelCommandAsync(string chatId, UserSettings userSettings, IServiceScope scope, string subCommand)
+        {
+            try
+            {
+                var mirrorCfg = _config.ChannelMirror;
+                var channelId = !string.IsNullOrWhiteSpace(mirrorCfg?.ChannelChatId) ? mirrorCfg.ChannelChatId : _config.ChannelMirrorChannelChatId;
+                if (string.IsNullOrWhiteSpace(channelId))
+                {
+                    var rootCfg = _serviceProvider?.GetService<Microsoft.Extensions.Configuration.IConfiguration>();
+                    channelId = rootCfg?.GetSection("ChannelMirror")?["ChannelChatId"]
+                        ?? Environment.GetEnvironmentVariable("CHANNEL_MIRROR_CHAT_ID")
+                        ?? Environment.GetEnvironmentVariable("CHANNEL_CHAT_ID")
+                        ?? "";
+                }
+
+                if (string.IsNullOrWhiteSpace(channelId))
+                {
+                    await SendMessageAsync("⚠️ <b>Xəta:</b> Kanal/Qrup ID-si (ChannelChatId) konfiqurasiya edilməyib!", chatId);
+                    return;
+                }
+
+                if (subCommand == "hb" || subCommand == "heartbeat" || subCommand == "hesabat")
+                {
+                    var snapTelemetry = CryptoSense.Worker.BackgroundMarketScanner.LatestTelemetrySnapshot ?? new CryptoSense.Worker.BackgroundMarketScanner.ScanTelemetry();
+                    var hbMsg = TelegramMessageFormatter.FormatLiveHeartbeat(
+                        chase: snapTelemetry.SkipChase,
+                        corr: snapTelemetry.SkipCorr,
+                        slWide: snapTelemetry.SkipSL,
+                        lowRr: snapTelemetry.SkipRR,
+                        activeLocks: 0,
+                        sent: snapTelemetry.Sent,
+                        nextCheckMinutes: 60,
+                        dataAgeMsBtc: 120,
+                        skipStale: snapTelemetry.SkipStale,
+                        skipLag: snapTelemetry.SkipLag,
+                        skipConfluence: snapTelemetry.SkipConfluence,
+                        telegramFail: snapTelemetry.TelegramFail,
+                        skipGozleme: snapTelemetry.SkipGozleme,
+                        skipBtcGate: snapTelemetry.SkipBtcGate,
+                        skipBtcRange: snapTelemetry.SkipBtcRange,
+                        skipCircuitBreaker: snapTelemetry.SkipCircuitBreaker,
+                        skipMaxOpen: snapTelemetry.SkipMaxOpen,
+                        skipDailyLoss: snapTelemetry.SkipDailyLoss,
+                        maxConfluenceSeen: snapTelemetry.MaxConfluenceSeen);
+
+                    await MirrorToChannelIfUserbotAsync("userbot", chatId, hbMsg);
+                    await SendMessageAsync("✅ <b>Bazar Nəzarəti (Heartbeat) hesabatı kanala göndərildi!</b>", chatId);
+                    return;
+                }
+
+                if (subCommand == "cb" || subCommand == "circuit" || subCommand == "blok")
+                {
+                    var cbMsg = "⚠️ <b>RISK CIRCUIT BREAKER AKTİVLƏŞDİ:</b>\n\n" +
+                                "Ardıcıl 2 uğursuz əməliyyat (Stop Loss) qeydə alındı. Bazar skaneri kapitalı qorumaq üçün <b>4 saatlıq</b> müşahidə rejiminə keçdi.";
+                    await MirrorToChannelIfUserbotAsync("userbot", chatId, cbMsg);
+                    await SendMessageAsync("✅ <b>Risk Circuit Breaker xəbərdarlığı kanala göndərildi!</b>", chatId);
+                    return;
+                }
+
+                if (subCommand == "vol" || subCommand == "volatility")
+                {
+                    var volMsg = TelegramMessageFormatter.FormatVolatilityRiskAlert("SOLUSDT", 145.20m, 8.45m, 2.35m, "Qeyri-adi dalğalanma spaykı");
+                    await MirrorToChannelIfUserbotAsync("userbot", chatId, volMsg);
+                    await SendMessageAsync("✅ <b>Volatility Risk bildirişi kanala göndərildi!</b>", chatId);
+                    return;
+                }
+
+                if (subCommand == "daily")
+                {
+                    var stats = new PerformanceStats
+                    {
+                        TotalSignals = 12,
+                        SuccessSignals = 10,
+                        FailedSignals = 2,
+                        WinRatePercent = 83.3m,
+                        TotalNetProfitPercent = 14.8m
+                    };
+                    var coins = new List<string> { "BTC", "ETH", "SOL" };
+                    var defaultReasons = new List<string> { "Bazar konsolidasiyası olan cütlüklər kənarlaşdırıldı" };
+                    var dailyMsg = TelegramMessageFormatter.FormatDailyReport(stats, coins, defaultReasons, isSuperAdmin: false);
+                    await MirrorToChannelIfUserbotAsync("userbot", chatId, dailyMsg);
+                    await SendMessageAsync("✅ <b>Gün sonu hesabatı kanala göndərildi!</b>", chatId);
+                    return;
+                }
+
+                // Default: Canlı Test LONG siqnalı və 10 saniyə sonra TP1 nəticəsi
+                var uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
+                int nextNum = await uow.Signals.GetNextSequentialSignalNumberAsync();
+
+                bool isShort = subCommand.Contains("short") || subCommand.Contains("qisa");
+                var dir = isShort ? SignalDirection.Sell : SignalDirection.Buy;
+                var sigType = isShort ? "GÜCLÜ SHORT 🔴" : "GÜCLÜ LONG 🟢";
+
+                decimal currentPrice = 64250.00m;
+                try
+                {
+                    var liveCache = scope.ServiceProvider.GetService<CryptoSense.Application.Services.LivePriceCache>();
+                    if (liveCache != null)
+                    {
+                        var snap = liveCache.GetSnapshot("BTCUSDT");
+                        if (snap != null && snap.Last > 0) currentPrice = Math.Round(snap.Last, 2);
+                    }
+                }
+                catch { }
+
+                decimal entry = currentPrice;
+                decimal entryLow = Math.Round(entry * 0.9985m, 2);
+                decimal entryHigh = Math.Round(entry * 1.0015m, 2);
+                decimal sl = isShort ? Math.Round(entry * 1.0150m, 2) : Math.Round(entry * 0.9850m, 2);
+                decimal tp1 = isShort ? Math.Round(entry * 0.9850m, 2) : Math.Round(entry * 1.0150m, 2);
+                decimal tp2 = isShort ? Math.Round(entry * 0.9700m, 2) : Math.Round(entry * 1.0300m, 2);
+
+                var testSig = new FuturesSignal
+                {
+                    Symbol = "BTCUSDT",
+                    SignalType = sigType,
+                    Direction = dir,
+                    EntryPrice = entry,
+                    EntryLow = entryLow,
+                    EntryHigh = entryHigh,
+                    TakeProfit1 = tp1,
+                    TakeProfit2 = tp2,
+                    TakeProfit3 = tp2,
+                    StopLoss = sl,
+                    ConfluenceScore = isShort ? 87.5m : 88.5m,
+                    Confidence = isShort ? 88 : 89,
+                    Timeframe = "1h",
+                    GeneratedAt = DateTime.UtcNow,
+                    SourceCandleOpenTimeUtc = DateTime.UtcNow,
+                    TimestampFormatted = Domain.Common.TimeHelper.NowFormatted,
+                    CandleCloseTimeUtc = DateTime.UtcNow,
+                    PriceSource = "ws_last",
+                    DataAgeMs = 115,
+                    NewsSentimentImpact = isShort ? "BEARISH 🔴" : "BULLISH 🟢",
+                    Status = SignalStatus.Open,
+                    IsTest = true,
+                    SignalNumber = nextNum
+                };
+
+                var sigMsg = TelegramMessageFormatter.FormatSignalAlert(testSig, nextNum);
+
+                // Adminə başlama bildirişi
+                await SendMessageAsync($"🧪 <b>[KANAL TESTİ BAŞLADI]</b>\n" +
+                                       $"📡 Qrup/Kanal: <code>{channelId}</code>\n" +
+                                       $"👤 İstifadəçi: <code>userbot</code>\n" +
+                                       $"Test siqnalı kanala yönləndirilir...", chatId);
+
+                await MirrorToChannelIfUserbotAsync("userbot", chatId, sigMsg);
+
+                await SendMessageAsync("✅ <b>Test siqnalı kanala göndərildi!</b>\n" +
+                                       "⏱ <i>10 saniyə sonra nəticə kartı (TP1) kanala göndəriləcək...</i>", chatId);
+
+                _ = Task.Run(async () =>
+                {
+                    try
+                    {
+                        await Task.Delay(10000);
+                        testSig.Status = SignalStatus.Success;
+                        testSig.ClosePrice = testSig.TakeProfit1;
+                        testSig.ClosedAt = DateTime.UtcNow;
+
+                        var outcomeMsg = TelegramMessageFormatter.FormatOutcomeAlert(
+                            testSig, 
+                            nextNum, 
+                            "🎯 Take Profit 1 (TP1)", 
+                            testSig.TakeProfit1, 
+                            +1.50m);
+
+                        await MirrorToChannelIfUserbotAsync("userbot", chatId, outcomeMsg);
+                        await SendMessageAsync("✅ <b>Test TP1 nəticəsi kanala göndərildi!</b> Qrupu yoxlaya bilərsiniz.", chatId);
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"[TestChannelOutcome] Error: {ex.Message}");
+                    }
+                });
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[ExecuteTestChannelCommandAsync] Error: {ex.Message}");
+                await SendMessageAsync($"⚠️ Test icra edilərkən xəta baş verdi: <code>{ex.Message}</code>", chatId);
             }
         }
     }

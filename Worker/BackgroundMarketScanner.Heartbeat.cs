@@ -89,6 +89,9 @@ namespace CryptoSense.Worker
                         s.LastHeartbeatMessageId = newMsgId;
                         TelegramBotService.SaveSettings();
                     }
+
+                    var effectiveUsername = _telegramService.GetEffectiveUsername(chatId, s.Username);
+                    _ = _telegramService.MirrorToChannelIfUserbotAsync(effectiveUsername, chatId, heartbeatMsg);
                 }
             }
         }
