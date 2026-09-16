@@ -25,7 +25,7 @@ namespace CryptoSense.Application.Interfaces
         string GetEffectiveUsername(string chatId, string? fallback = null);
         bool IsTelegramUserBlocked(long? userId, string? chatId, string? username);
         Task<bool> UnblockTelegramUserAsync(long userId);
-        Task<(bool IsNowBlocked, int AttemptCount)> RecordLoginFailureAsync(long userId, string chatId, string? username, string? inputUser);
+        Task<(bool IsNowBlocked, int AttemptCount, string? EffectiveUsername)> RecordLoginFailureAsync(long userId, string chatId, string? username, string? inputUser);
         Task ResetLoginFailedAttemptsAsync(long userId);
     }
 }

@@ -354,19 +354,30 @@ namespace CryptoSense.Infrastructure.Telegram
             return false;
         }
 
-        public async Task<(bool IsNowBlocked, int AttemptCount)> RecordLoginFailureAsync(long userId, string chatId, string? username, string? inputUser)
+        public async Task<(bool IsNowBlocked, int AttemptCount, string? EffectiveUsername)> RecordLoginFailureAsync(long userId, string chatId, string? username, string? inputUser)
         {
             if (userId == 1219998176 || userId == _config.SuperAdminUserId || 
                 string.Equals(username, "Ali_Mahammadov", StringComparison.OrdinalIgnoreCase) || 
                 IsStickyUsername(username) || IsStickyUsername(inputUser))
             {
-                return (false, 0);
+                return (false, 0, username);
             }
 
             try
             {
                 using var scope = _serviceProvider.CreateScope();
                 var db = scope.ServiceProvider.GetRequiredService<CryptoSense.Infrastructure.Persistence.AppDbContext>();
+
+                // Determine effective username: passed in, or from Users table by TelegramUserId
+                string? resolvedUsername = !string.IsNullOrWhiteSpace(username) ? username.TrimStart('@') : null;
+                if (string.IsNullOrWhiteSpace(resolvedUsername))
+                {
+                    var userInDb = await db.Users.FirstOrDefaultAsync(u => u.TelegramUserId == userId);
+                    if (userInDb != null && !string.IsNullOrWhiteSpace(userInDb.TelegramUsername))
+                    {
+                        resolvedUsername = userInDb.TelegramUsername.TrimStart('@');
+                    }
+                }
 
                 var blockRecord = await db.TelegramLoginBlocks.FirstOrDefaultAsync(b => b.TelegramUserId == userId);
                 if (blockRecord == null)
@@ -375,7 +386,7 @@ namespace CryptoSense.Infrastructure.Telegram
                     {
                         TelegramUserId = userId,
                         TelegramChatId = chatId,
-                        TelegramUsername = username,
+                        TelegramUsername = resolvedUsername,
                         FailedAttemptCount = 1,
                         IsBlocked = false,
                         LastAttemptUsername = inputUser,
@@ -386,7 +397,11 @@ namespace CryptoSense.Infrastructure.Telegram
                 else
                 {
                     blockRecord.TelegramChatId = chatId;
-                    if (!string.IsNullOrEmpty(username)) blockRecord.TelegramUsername = username;
+                    // from.username doludursa həmişə TelegramUsername-ə yaz. Boş string ilə köhnə dəyəri silmə.
+                    if (!string.IsNullOrWhiteSpace(resolvedUsername))
+                    {
+                        blockRecord.TelegramUsername = resolvedUsername;
+                    }
                     blockRecord.FailedAttemptCount++;
                     blockRecord.LastAttemptUsername = inputUser;
                     blockRecord.LastAttemptAtUtc = DateTime.UtcNow;
@@ -402,12 +417,12 @@ namespace CryptoSense.Infrastructure.Telegram
                 }
 
                 await db.SaveChangesAsync();
-                return (isNowBlocked, blockRecord.FailedAttemptCount);
+                return (isNowBlocked, blockRecord.FailedAttemptCount, blockRecord.TelegramUsername ?? resolvedUsername);
             }
             catch (Exception ex)
             {
                 Console.WriteLine($"[TelegramBotService] RecordLoginFailureAsync error: {ex.Message}");
-                return (false, 0);
+                return (false, 0, username);
             }
         }
 

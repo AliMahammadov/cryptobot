@@ -2342,16 +2342,16 @@ namespace CryptoSense.Infrastructure.Testing
                 await _telegramBotService.UnblockTelegramUserAsync(attackId);
 
                 // Fail 1: count=1, not blocked
-                var (b1, c1) = await _telegramBotService.RecordLoginFailureAsync(attackId, attackChat, attackUser, "admin_fake1");
-                bool check1 = !b1 && c1 == 1 && !_telegramBotService.IsTelegramUserBlocked(attackId, attackChat, attackUser);
+                var (b1, c1, u1) = await _telegramBotService.RecordLoginFailureAsync(attackId, attackChat, attackUser, "admin_fake1");
+                bool check1 = !b1 && c1 == 1 && u1 == attackUser && !_telegramBotService.IsTelegramUserBlocked(attackId, attackChat, attackUser);
 
                 // Fail 2: count=2, not blocked
-                var (b2, c2) = await _telegramBotService.RecordLoginFailureAsync(attackId, attackChat, attackUser, "admin_fake2");
-                bool check2 = !b2 && c2 == 2 && !_telegramBotService.IsTelegramUserBlocked(attackId, attackChat, attackUser);
+                var (b2, c2, u2) = await _telegramBotService.RecordLoginFailureAsync(attackId, attackChat, attackUser, "admin_fake2");
+                bool check2 = !b2 && c2 == 2 && u2 == attackUser && !_telegramBotService.IsTelegramUserBlocked(attackId, attackChat, attackUser);
 
                 // Fail 3: count=3, PERMANENTLY BLOCKED
-                var (b3, c3) = await _telegramBotService.RecordLoginFailureAsync(attackId, attackChat, attackUser, "admin_fake3");
-                bool check3 = b3 && c3 == 3 && _telegramBotService.IsTelegramUserBlocked(attackId, attackChat, attackUser);
+                var (b3, c3, u3) = await _telegramBotService.RecordLoginFailureAsync(attackId, attackChat, attackUser, "admin_fake3");
+                bool check3 = b3 && c3 == 3 && u3 == attackUser && _telegramBotService.IsTelegramUserBlocked(attackId, attackChat, attackUser);
 
                 // Fast O(1) in-memory check without ID (using chatId string)
                 bool checkChatBlocked = _telegramBotService.IsTelegramUserBlocked(null, attackChat, null);
@@ -2404,19 +2404,19 @@ namespace CryptoSense.Infrastructure.Testing
 
                 // 1. User typos password 2 times -> count=2, not blocked
                 await _telegramBotService.UnblockTelegramUserAsync(userAId);
-                var (_, c1) = await _telegramBotService.RecordLoginFailureAsync(userAId, userAChat, userAUser, "typo1");
-                var (_, c2) = await _telegramBotService.RecordLoginFailureAsync(userAId, userAChat, userAUser, "typo2");
+                var (_, c1, _) = await _telegramBotService.RecordLoginFailureAsync(userAId, userAChat, userAUser, "typo1");
+                var (_, c2, _) = await _telegramBotService.RecordLoginFailureAsync(userAId, userAChat, userAUser, "typo2");
                 bool twoFailsOk = c1 == 1 && c2 == 2 && !_telegramBotService.IsTelegramUserBlocked(userAId, userAChat, userAUser);
 
                 // 2. User enters correct credentials -> ResetLoginFailedAttemptsAsync
                 await _telegramBotService.ResetLoginFailedAttemptsAsync(userAId);
                 // Next fail should be attempt 1 again (not 3)
-                var (bAfterReset, cAfterReset) = await _telegramBotService.RecordLoginFailureAsync(userAId, userAChat, userAUser, "typo3");
+                var (bAfterReset, cAfterReset, _) = await _telegramBotService.RecordLoginFailureAsync(userAId, userAChat, userAUser, "typo3");
                 bool resetOk = !bAfterReset && cAfterReset == 1;
 
                 // 3. User reaches 3 fails and gets blocked
                 await _telegramBotService.RecordLoginFailureAsync(userAId, userAChat, userAUser, "typo4");
-                var (blockedNow, _) = await _telegramBotService.RecordLoginFailureAsync(userAId, userAChat, userAUser, "typo5");
+                var (blockedNow, _, _) = await _telegramBotService.RecordLoginFailureAsync(userAId, userAChat, userAUser, "typo5");
                 bool isBlockedNow = blockedNow && _telegramBotService.IsTelegramUserBlocked(userAId, userAChat, userAUser);
 
                 // 4. Admin unblocks the user via UnblockTelegramUserAsync
@@ -2424,6 +2424,34 @@ namespace CryptoSense.Infrastructure.Testing
                 bool isUnblockedNow = !_telegramBotService.IsTelegramUserBlocked(userAId, userAChat, userAUser);
 
                 return twoFailsOk && resetOk && isBlockedNow && unblockResult && isUnblockedNow;
+            });
+
+            // 59. Cyber-defense Verification 4: Random text / non-credentials block at 3rd attempt and resolve Telegram username from Users table
+            await AssertTest("Test 67: Cyber-defense 3-Message Non-Credential Block & Username resolution", async () =>
+            {
+                if (_telegramBotService == null) return false;
+
+                long randomSpammerId = 9988776655L;
+                string randomChat = "9988776655";
+
+                await _telegramBotService.UnblockTelegramUserAsync(randomSpammerId);
+
+                // 1. Message 1: random greeting "/start" -> count 1, not blocked
+                var (rb1, rc1, _) = await _telegramBotService.RecordLoginFailureAsync(randomSpammerId, randomChat, null, "/start");
+                bool rcheck1 = !rb1 && rc1 == 1 && !_telegramBotService.IsTelegramUserBlocked(randomSpammerId, randomChat, null);
+
+                // 2. Message 2: random text "salam" with username provided -> count 2, not blocked, username saved
+                var (rb2, rc2, ru2) = await _telegramBotService.RecordLoginFailureAsync(randomSpammerId, randomChat, "spammer_user", "salam");
+                bool rcheck2 = !rb2 && rc2 == 2 && ru2 == "spammer_user" && !_telegramBotService.IsTelegramUserBlocked(randomSpammerId, randomChat, "spammer_user");
+
+                // 3. Message 3: 3rd message without username (empty string) -> count 3, PERMANENTLY BLOCKED, existing username preserved (not overwritten by empty)
+                var (rb3, rc3, ru3) = await _telegramBotService.RecordLoginFailureAsync(randomSpammerId, randomChat, "", "necesen");
+                bool rcheck3 = rb3 && rc3 == 3 && ru3 == "spammer_user" && _telegramBotService.IsTelegramUserBlocked(randomSpammerId, randomChat, "spammer_user");
+
+                // Clean up
+                await _telegramBotService.UnblockTelegramUserAsync(randomSpammerId);
+
+                return rcheck1 && rcheck2 && rcheck3;
             });
 
             Console.WriteLine("\n========================================================");

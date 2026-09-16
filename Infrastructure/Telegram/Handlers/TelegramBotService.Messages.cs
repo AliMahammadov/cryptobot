@@ -454,21 +454,114 @@ namespace CryptoSense.Infrastructure.Telegram
 
                 var parts = cleanLogin.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
                 bool isCredentialAttempt = parts.Length >= 2;
+                string? inputUser = isCredentialAttempt ? parts[0] : null;
+                string? inputPass = isCredentialAttempt ? string.Join(" ", parts.Skip(1)) : null;
 
-                if (isCredentialAttempt)
+                bool isImmune = IsSuperAdmin(chatId, userId, telegramUsername) || 
+                               (userId.HasValue && userId.Value == 1219998176) || 
+                               IsStickyUsername(telegramUsername) || 
+                               (!string.IsNullOrEmpty(inputUser) && IsStickyUsername(inputUser));
+
+                // 1. SuperAdmin / userbot / no userId: existing flow without counting
+                if (!userId.HasValue || isImmune)
                 {
-                    string inputUser = parts[0];
-                    string inputPass = string.Join(" ", parts.Skip(1));
+                    if (isCredentialAttempt && !string.IsNullOrEmpty(inputUser) && !string.IsNullOrEmpty(inputPass))
+                    {
+                        _ = DeleteMessageAsync(chatId, messageId);
+                        var (isValid, user) = await userManager.ValidateLoginAsync(inputUser, inputPass, userId, chatId, telegramUsername);
+                        if (isValid && user != null)
+                        {
+                            _authenticatedSessions[chatId] = user.Username;
+                            _loggedOutChats.TryRemove(chatId, out _);
+                            _userStates.TryRemove(chatId, out _);
 
+                            var settings = GetSettings(chatId);
+                            settings.TelegramUserId = userId;
+                            if (settings.Coins == null || settings.Coins.Count == 0)
+                            {
+                                settings.Coins = new List<string>(Default40Coins);
+                                settings.Timeframe = "1h, 4h";
+                                settings.PortfolioMode = "Standard40";
+                            }
+                            settings.IsActive = true;
+                            settings.LastResumeTime = DateTime.UtcNow;
+                            settings.IsTerminalOpen = false;
+                            settings.LastTerminalMessageId = null;
+                            settings.IsAdminOpen = false;
+                            settings.LastAdminMessageId = null;
+                            SaveSettings();
+
+                            bool isAdm = (user.Role == UserRole.Admin) || 
+                                         user.Username.Equals("Ali", StringComparison.OrdinalIgnoreCase) || 
+                                         (userId.HasValue && userId.Value == 1219998176);
+
+                            if (isAdm)
+                            {
+                                SuperAdminChatId = chatId;
+                                settings.Username = "Ali (Super Admin)";
+                                SaveSettings();
+
+                                var welcomeAdmin = $"👑 <b>Xoş Gəldiniz, Baş Admin ({user.Username})!</b>\n\n" +
+                                                   $"🚀 <b>CryptoSense Terminal Xidməti AKTİVDİR 🟢</b>\n\n" +
+                                                   $"Terminalı açmaq üçün aşağıdakı <b>🎛 Əsas Terminal</b> düyməsinə toxunun.\n\n" +
+                                                   $"<i>Çıxış etmək üçün: <code>/logout</code></i>";
+
+                                await SendMessageAsync(welcomeAdmin, chatId, TelegramKeyboards.BuildUserKeyboard(settings, isAdmin: true));
+                                return;
+                            }
+                            else
+                            {
+                                settings.Username = user.Username;
+                                SaveSettings();
+
+                                var onboardingMsg = $"✅ <b>Giriş Təsdiqləndi! Xoş Gəldiniz, {user.Username}!</b>\n\n" +
+                                                    $"🚀 <b>Kripto Signals Bot Xidməti AKTİVDİR 🟢</b>\n\n" +
+                                                    $"Terminalı açmaq üçün aşağıdakı <b>🎛 Əsas Terminal</b> düyməsinə toxunun.\n\n" +
+                                                    $"<i>Çıxış etmək üçün: <code>/logout</code></i>";
+                                
+                                await SendMessageAsync(onboardingMsg, chatId, TelegramKeyboards.BuildUserKeyboard(settings, isAdmin: false));
+                                await NotifySuperAdminUserLoginAsync(user.Username, $"Telegram (@{telegramUsername})");
+                                return;
+                            }
+                        }
+                        else
+                        {
+                            var failMsg = "❌ <b>Giriş Uğursuz Oldu!</b>\n\n" +
+                                          "İstifadəçi adı və ya parol yalnışdır.\n" +
+                                          "Zəhmət olmasa məlumatlarınızı yoxlayıb yenidən daxil edin:\n\n" +
+                                          "💡 <b>Nümunə:</b> <code>Murad 123456</code>\n\n" +
+                                          "<i>Hesabınız yoxdursa, Admin (<a href=\"https://t.me/Ali_Mahammadov\">@Ali_Mahammadov</a>) ilə əlaqə saxlayın.</i>";
+
+                            await SendMessageAsync(failMsg, chatId, new { remove_keyboard = true });
+                            return;
+                        }
+                    }
+                    else
+                    {
+                        _ = DeleteMessageAsync(chatId, messageId);
+                        var welcomeAndAuth = "👋 <b>Salam! Kripto Signals Bot Xidmətinə xoş gəlmisiniz.</b>\n\n" +
+                                             "⚠️ <b>Sistemdən istifadə etmək üçün daxil olmalısınız!</b>\n\n" +
+                                             "Sistemə daxil olmaq üçün <b>İstifadəçi Adınızı</b> və <b>Parolunuzu</b> bir sətirdə, aralarında boşluq qoyaraq yazın:\n\n" +
+                                             "💡 <b>Nümunə:</b>\n" +
+                                             "<code>Murad 123456</code>\n\n" +
+                                             "-----------------------------------\n" +
+                                             "Hesabınız yoxdur? Qeydiyyat və giriş icazəsi üçün <b>Admin</b> ilə əlaqə saxlayın:\n" +
+                                             "👉 <a href=\"https://t.me/Ali_Mahammadov\">@Ali_Mahammadov</a>";
+
+                        await SendMessageAsync(welcomeAndAuth, chatId, new { remove_keyboard = true });
+                        return;
+                    }
+                }
+
+                // 2. Non-immune unauthenticated user:
+                // Check if credential attempt (2+ tokens) and ValidateLoginAsync is valid FIRST
+                if (isCredentialAttempt && !string.IsNullOrEmpty(inputUser) && !string.IsNullOrEmpty(inputPass))
+                {
                     _ = DeleteMessageAsync(chatId, messageId);
-
                     var (isValid, user) = await userManager.ValidateLoginAsync(inputUser, inputPass, userId, chatId, telegramUsername);
                     if (isValid && user != null)
                     {
-                        if (userId.HasValue)
-                        {
-                            await ResetLoginFailedAttemptsAsync(userId.Value);
-                        }
+                        await ResetLoginFailedAttemptsAsync(userId.Value);
 
                         _authenticatedSessions[chatId] = user.Username;
                         _loggedOutChats.TryRemove(chatId, out _);
@@ -523,78 +616,73 @@ namespace CryptoSense.Infrastructure.Telegram
                             return;
                         }
                     }
-                    else
-                    {
-                        _ = DeleteMessageAsync(chatId, messageId);
-
-                        bool isImmune = IsSuperAdmin(chatId, userId, telegramUsername) || (userId.HasValue && userId.Value == 1219998176) || IsStickyUsername(inputUser);
-                        if (!userId.HasValue || isImmune)
-                        {
-                            var failMsg = "❌ <b>Giriş Uğursuz Oldu!</b>\n\n" +
-                                          "İstifadəçi adı və ya parol yalnışdır.\n" +
-                                          "Zəhmət olmasa məlumatlarınızı yoxlayıb yenidən daxil edin:\n\n" +
-                                          "💡 <b>Nümunə:</b> <code>Murad 123456</code>\n\n" +
-                                          "<i>Hesabınız yoxdursa, Admin (<a href=\"https://t.me/Ali_Mahammadov\">@Ali_Mahammadov</a>) ilə əlaqə saxlayın.</i>";
-
-                            await SendMessageAsync(failMsg, chatId, new { remove_keyboard = true });
-                            return;
-                        }
-
-                        var (isNowBlocked, attemptCount) = await RecordLoginFailureAsync(userId.Value, chatId, telegramUsername, inputUser);
-
-                        if (isNowBlocked)
-                        {
-                            var blockedMsg = "⛔ <b>Hesabınız 3 uğursuz giriş cəhdinə görə bloklanıb.</b>\n\n" +
-                                             "Admin təsdiqi olmadan yenidən daxil ola bilməzsiniz. Bundan sonra göndərdiyiniz mesajlar işlənməyəcək.\n\n" +
-                                             "Əlaqə: @Ali_Mahammadov";
-                            await SendMessageAsync(blockedMsg, chatId, new { remove_keyboard = true });
-
-                            var targetAdminChat = !string.IsNullOrEmpty(SuperAdminChatId) 
-                                ? SuperAdminChatId 
-                                : (!string.IsNullOrEmpty(_config.SuperAdminChatId) ? _config.SuperAdminChatId : "1219998176");
-
-                            if (!string.IsNullOrEmpty(targetAdminChat))
-                            {
-                                var uNameDisplay = string.IsNullOrWhiteSpace(telegramUsername) ? "—" : "@" + telegramUsername;
-                                var adminAlert = "🚫 <b>LOGIN BLOKU (kiber-qoruma)</b>\n" +
-                                                 $"Telegram ID: <code>{userId.Value}</code>\n" +
-                                                 $"Telegram: {uNameDisplay}\n" +
-                                                 $"Chat ID: <code>{chatId}</code>\n" +
-                                                 $"Son cəhd edilən istifadəçi adı: <code>{inputUser}</code>\n" +
-                                                 "Səbəb: 3 dəfə səhv username/parol\n" +
-                                                 $"Vaxt: {CryptoSense.Domain.Common.TimeHelper.NowFormatted}\n" +
-                                                 "<i>Bundan sonra həmin ID üçün növbəti update-lər early-return.</i>";
-                                await SendMessageAsync(adminAlert, targetAdminChat);
-                            }
-                            return;
-                        }
-                        else
-                        {
-                            var failMsg = "❌ <b>Giriş Uğursuz Oldu!</b>\n\n" +
-                                          "İstifadəçi adı və ya parol yalnışdır.\n" +
-                                          "Zəhmət olmasa məlumatlarınızı yoxlayıb yenidən daxil edin:\n\n" +
-                                          "💡 <b>Nümunə:</b> <code>Murad 123456</code>\n\n" +
-                                          "<i>Hesabınız yoxdursa, Admin (<a href=\"https://t.me/Ali_Mahammadov\">@Ali_Mahammadov</a>) ilə əlaqə saxlayın.</i>";
-
-                            await SendMessageAsync(failMsg, chatId, new { remove_keyboard = true });
-                            return;
-                        }
-                    }
                 }
                 else
                 {
                     _ = DeleteMessageAsync(chatId, messageId);
-                    var welcomeAndAuth = "👋 <b>Salam! Kripto Signals Bot Xidmətinə xoş gəlmisiniz.</b>\n\n" +
-                                         "⚠️ <b>Sistemdən istifadə etmək üçün daxil olmalısınız!</b>\n\n" +
-                                         "Sistemə daxil olmaq üçün <b>İstifadəçi Adınızı</b> və <b>Parolunuzu</b> bir sətirdə, aralarında boşluq qoyaraq yazın:\n\n" +
-                                         "💡 <b>Nümunə:</b>\n" +
-                                         "<code>Murad 123456</code>\n\n" +
-                                         "-----------------------------------\n" +
-                                         "Hesabınız yoxdur? Qeydiyyat və giriş icazəsi üçün <b>Admin</b> ilə əlaqə saxlayın:\n" +
-                                         "👉 <a href=\"https://t.me/Ali_Mahammadov\">@Ali_Mahammadov</a>";
+                }
 
-                    await SendMessageAsync(welcomeAndAuth, chatId, new { remove_keyboard = true });
+                // 3. Any unauthenticated text that is not a valid login is counted as a failure
+                string lastAttemptPayload = text;
+                if (lastAttemptPayload.Length > 80) lastAttemptPayload = lastAttemptPayload.Substring(0, 80) + "...";
+
+                var (isNowBlocked, attemptCount, effectiveUsername) = await RecordLoginFailureAsync(userId.Value, chatId, telegramUsername, lastAttemptPayload);
+
+                if (isNowBlocked)
+                {
+                    var blockedMsg = "⛔ <b>Hesabınız 3 uğursuz giriş cəhdinə görə bloklanıb.</b>\n\n" +
+                                     "Admin təsdiqi olmadan yenidən daxil ola bilməzsiniz. Bundan sonra göndərdiyiniz mesajlar işlənməyəcək.\n\n" +
+                                     "Əlaqə: @Ali_Mahammadov";
+                    await SendMessageAsync(blockedMsg, chatId, new { remove_keyboard = true });
+
+                    var targetAdminChat = !string.IsNullOrEmpty(SuperAdminChatId) 
+                        ? SuperAdminChatId 
+                        : (!string.IsNullOrEmpty(_config.SuperAdminChatId) ? _config.SuperAdminChatId : "1219998176");
+
+                    if (!string.IsNullOrEmpty(targetAdminChat))
+                    {
+                        var uNameDisplay = !string.IsNullOrWhiteSpace(effectiveUsername)
+                            ? "@" + effectiveUsername.TrimStart('@')
+                            : (!string.IsNullOrWhiteSpace(telegramUsername) ? "@" + telegramUsername.TrimStart('@') : "yoxdur");
+                        var safeText = System.Net.WebUtility.HtmlEncode(lastAttemptPayload);
+                        var adminAlert = "🚫 <b>LOGIN BLOKU (kiber-qoruma)</b>\n" +
+                                         $"Telegram ID: <code>{userId.Value}</code>\n" +
+                                         $"Telegram username: {uNameDisplay}\n" +
+                                         $"Chat ID: <code>{chatId}</code>\n" +
+                                         $"Son yazılan mətn/login: <code>{safeText}</code>\n" +
+                                         "Səbəb: login olmayan şəxs 3 dəfə sistemə yazıb\n" +
+                                         $"Vaxt: {CryptoSense.Domain.Common.TimeHelper.NowFormatted}";
+                        await SendMessageAsync(adminAlert, targetAdminChat);
+                    }
                     return;
+                }
+                else
+                {
+                    if (isCredentialAttempt)
+                    {
+                        var failMsg = "❌ <b>Giriş Uğursuz Oldu!</b>\n\n" +
+                                      "İstifadəçi adı və ya parol yalnışdır.\n" +
+                                      "Zəhmət olmasa məlumatlarınızı yoxlayıb yenidən daxil edin:\n\n" +
+                                      "💡 <b>Nümunə:</b> <code>Murad 123456</code>\n\n" +
+                                      "<i>Hesabınız yoxdursa, Admin (<a href=\"https://t.me/Ali_Mahammadov\">@Ali_Mahammadov</a>) ilə əlaqə saxlayın.</i>";
+
+                        await SendMessageAsync(failMsg, chatId, new { remove_keyboard = true });
+                        return;
+                    }
+                    else
+                    {
+                        var welcomeAndAuth = "👋 <b>Salam! Kripto Signals Bot Xidmətinə xoş gəlmisiniz.</b>\n\n" +
+                                             "⚠️ <b>Sistemdən istifadə etmək üçün daxil olmalısınız!</b>\n\n" +
+                                             "Sistemə daxil olmaq üçün <b>İstifadəçi Adınızı</b> və <b>Parolunuzu</b> bir sətirdə, aralarında boşluq qoyaraq yazın:\n\n" +
+                                             "💡 <b>Nümunə:</b>\n" +
+                                             "<code>Murad 123456</code>\n\n" +
+                                             "-----------------------------------\n" +
+                                             "Hesabınız yoxdur? Qeydiyyat və giriş icazəsi üçün <b>Admin</b> ilə əlaqə saxlayın:\n" +
+                                             "👉 <a href=\"https://t.me/Ali_Mahammadov\">@Ali_Mahammadov</a>";
+
+                        await SendMessageAsync(welcomeAndAuth, chatId, new { remove_keyboard = true });
+                        return;
+                    }
                 }
             }
 

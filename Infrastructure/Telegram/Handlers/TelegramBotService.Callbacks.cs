@@ -537,9 +537,9 @@ namespace CryptoSense.Infrastructure.Telegram
                     var rows = new List<object[]>();
                     foreach (var b in blockedList)
                     {
-                        var uname = string.IsNullOrEmpty(b.TelegramUsername) ? "—" : "@" + b.TelegramUsername;
+                        var uname = string.IsNullOrWhiteSpace(b.TelegramUsername) ? "username yoxdur" : "@" + b.TelegramUsername.TrimStart('@');
                         var timeStr = b.BlockedAtUtc.HasValue ? TimeHelper.FormatAz(b.BlockedAtUtc.Value) : TimeHelper.FormatAz(b.LastAttemptAtUtc);
-                        sb.AppendLine($"• ID: <code>{b.TelegramUserId}</code> | {uname} | Son cəhd: <code>{b.LastAttemptUsername ?? "—"}</code> | Vaxt: {timeStr}");
+                        sb.AppendLine($"• ID: <code>{b.TelegramUserId}</code> ({uname}) | Son cəhd: <code>{b.LastAttemptUsername ?? "—"}</code> | Vaxt: {timeStr}");
 
                         rows.Add(new object[]
                         {
