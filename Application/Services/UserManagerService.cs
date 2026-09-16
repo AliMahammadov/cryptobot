@@ -137,7 +137,7 @@ namespace CryptoSense.Application.Services
                                                 TelegramUserId = bu.TelegramUserId,
                                                 TelegramChatId = bu.TelegramChatId,
                                                 IsActive = bu.IsActive,
-                                                IsLoggedIn = false, // Never auto-login restored user
+                                                IsLoggedIn = !string.IsNullOrWhiteSpace(bu.TelegramChatId), // Restore logged-in state if ChatId is bound
                                                 CreatedAtUtc = bu.CreatedAtUtc == default ? DateTime.UtcNow : bu.CreatedAtUtc,
                                                 LastLoginAt = bu.LastLoginAt == default ? DateTime.UtcNow : bu.LastLoginAt
                                             };
@@ -291,11 +291,20 @@ namespace CryptoSense.Application.Services
             return await _unitOfWork.Users.GetByChatIdOrTelegramUserIdAsync(chatId, telegramUserId);
         }
 
+        private static bool IsUserbotUsername(string? username)
+        {
+            if (string.IsNullOrWhiteSpace(username)) return false;
+            static string Clean(string s) => s.Replace(" ", "").Replace("_", "").Trim().ToLowerInvariant();
+            return Clean(username) == "userbot";
+        }
+
         public async Task ClearChatBindingAsync(string chatId, long? telegramUserId)
         {
             var user = await _unitOfWork.Users.GetByChatIdOrTelegramUserIdAsync(chatId, telegramUserId);
             if (user != null)
             {
+                if (IsUserbotUsername(user.Username)) return;
+
                 user.IsLoggedIn = false;
                 user.TelegramChatId = "";
                 user.TelegramUserId = null;
@@ -310,6 +319,8 @@ namespace CryptoSense.Application.Services
             var user = await _unitOfWork.Users.GetByChatIdOrTelegramUserIdAsync(chatId, telegramUserId);
             if (user != null)
             {
+                if (IsUserbotUsername(user.Username)) return;
+
                 user.IsLoggedIn = false;
                 user.TelegramChatId = "";
                 user.TelegramUserId = null;

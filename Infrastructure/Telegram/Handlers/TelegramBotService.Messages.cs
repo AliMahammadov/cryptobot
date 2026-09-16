@@ -158,6 +158,40 @@ namespace CryptoSense.Infrastructure.Telegram
                 SaveSettings();
             }
 
+            // USER STICKY SESSION RESTORE (Analogous to SuperAdmin block):
+            // If user has an active account in database bound to this chatId,
+            // automatically restore session without demanding credentials again.
+            if (!isAdminUser && !_loggedOutChats.ContainsKey(chatId) && !isLogoutCommand)
+            {
+                var stickyUser = await userManager.GetUserByChatIdOrTelegramIdAsync(chatId, userId);
+                if (stickyUser != null && stickyUser.IsActive && !string.IsNullOrWhiteSpace(stickyUser.TelegramChatId) && stickyUser.TelegramChatId == chatId)
+                {
+                    _authenticatedSessions[chatId] = stickyUser.Username;
+                    _loggedOutChats.TryRemove(chatId, out _);
+
+                    var uPref = GetSettings(chatId);
+                    uPref.Username = stickyUser.Username;
+                    uPref.TelegramUserId = userId ?? stickyUser.TelegramUserId;
+                    uPref.IsActive = true;
+                    if (uPref.Coins == null || uPref.Coins.Count == 0)
+                    {
+                        uPref.Coins = new List<string>(Default40Coins);
+                        uPref.Timeframe = "1h";
+                        uPref.PortfolioMode = "Standard40";
+                    }
+
+                    if (!stickyUser.IsLoggedIn)
+                    {
+                        stickyUser.IsLoggedIn = true;
+                        using var scopeU = _serviceProvider.CreateScope();
+                        var uowU = scopeU.ServiceProvider.GetRequiredService<IUnitOfWork>();
+                        await uowU.Users.UpdateAsync(stickyUser);
+                        await uowU.SaveChangesAsync();
+                    }
+                    SaveSettings();
+                }
+            }
+
             // STRICT NON-ADMIN COMMAND RESTRICTION:
             // Commands like /clear, /clean, /test, /testmode, /teststop, start test, stop test, etc. are strictly reserved for Admin!
             bool isRestrictedAdminCommand = 
@@ -228,6 +262,24 @@ namespace CryptoSense.Infrastructure.Telegram
             // =========================================================================
             if (text == "/logout" || text.Equals("/cixis", StringComparison.OrdinalIgnoreCase) || text.Equals("/exit", StringComparison.OrdinalIgnoreCase) || text.Equals("Çıxış", StringComparison.OrdinalIgnoreCase) || text.Equals("Cixis", StringComparison.OrdinalIgnoreCase) || text.Equals("logout", StringComparison.OrdinalIgnoreCase))
             {
+                // USERBOT LOGOUT PROTECTION: userbot is a permanent daemon session and cannot be logged out
+                string? uName = null;
+                if (_authenticatedSessions.TryGetValue(chatId, out var sessUname)) uName = sessUname;
+                else if (UserPreferences.TryGetValue(chatId, out var prefU)) uName = prefU.Username;
+
+                if (IsStickyUsername(uName))
+                {
+                    await SendMessageAsync("⚠️ <b>userbot daimi xidmət hesabıdır və çıxış edilə bilməz. Kanal güzgüsü aktiv qalır.</b>", chatId);
+                    return;
+                }
+
+                var checkUser = await userManager.GetUserByChatIdOrTelegramIdAsync(chatId, userId);
+                if (checkUser != null && IsStickyUsername(checkUser.Username))
+                {
+                    await SendMessageAsync("⚠️ <b>userbot daimi xidmət hesabıdır və çıxış edilə bilməz. Kanal güzgüsü aktiv qalır.</b>", chatId);
+                    return;
+                }
+
                 _ = DeleteMessageAsync(chatId, messageId);
                 _authenticatedSessions.TryRemove(chatId, out _);
                 _loggedOutChats[chatId] = true;
@@ -286,11 +338,19 @@ namespace CryptoSense.Infrastructure.Telegram
                 if (!_authenticatedSessions.TryGetValue(chatId, out var sessionUser))
                 {
                     var dbUser = await userManager.GetUserByChatIdOrTelegramIdAsync(chatId, userId);
-                    if (dbUser != null && dbUser.IsActive && dbUser.IsLoggedIn)
+                    if (dbUser != null && dbUser.IsActive && !string.IsNullOrWhiteSpace(dbUser.TelegramChatId) && dbUser.TelegramChatId == chatId)
                     {
                         sessionUser = dbUser.Username;
                         _authenticatedSessions[chatId] = sessionUser;
                         _loggedOutChats.TryRemove(chatId, out _);
+                        if (!dbUser.IsLoggedIn)
+                        {
+                            dbUser.IsLoggedIn = true;
+                            using var sScope = _serviceProvider.CreateScope();
+                            var sUow = sScope.ServiceProvider.GetRequiredService<IUnitOfWork>();
+                            await sUow.Users.UpdateAsync(dbUser);
+                            await sUow.SaveChangesAsync();
+                        }
                     }
                 }
 
@@ -345,12 +405,20 @@ namespace CryptoSense.Infrastructure.Telegram
                 if (!_authenticatedSessions.TryGetValue(chatId, out currentUsername))
                 {
                     var dbUser = await userManager.GetUserByChatIdOrTelegramIdAsync(chatId, userId);
-                    if (dbUser != null && dbUser.IsActive && dbUser.IsLoggedIn)
+                    if (dbUser != null && dbUser.IsActive && !string.IsNullOrWhiteSpace(dbUser.TelegramChatId) && dbUser.TelegramChatId == chatId)
                     {
                         currentUsername = dbUser.Username;
                         _authenticatedSessions[chatId] = currentUsername;
                         _loggedOutChats.TryRemove(chatId, out _);
                         isAuthenticated = true;
+                        if (!dbUser.IsLoggedIn)
+                        {
+                            dbUser.IsLoggedIn = true;
+                            using var sScope = _serviceProvider.CreateScope();
+                            var sUow = sScope.ServiceProvider.GetRequiredService<IUnitOfWork>();
+                            await sUow.Users.UpdateAsync(dbUser);
+                            await sUow.SaveChangesAsync();
+                        }
                     }
                 }
                 else

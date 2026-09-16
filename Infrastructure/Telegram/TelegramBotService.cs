@@ -197,12 +197,22 @@ namespace CryptoSense.Infrastructure.Telegram
             try
             {
                 using var scope = _serviceProvider.CreateScope();
-                var userManager = scope.ServiceProvider.GetRequiredService<IUserManagerService>();
-                var activeUsers = userManager.GetAllLoggedInActiveUsersAsync().GetAwaiter().GetResult();
-                foreach (var u in activeUsers)
+                var uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
+                var allUsers = uow.Users.GetAllUsersAsync().GetAwaiter().GetResult();
+                bool anyUpdated = false;
+                foreach (var u in allUsers)
                 {
-                    if (!string.IsNullOrEmpty(u.TelegramChatId) && u.IsActive && u.IsLoggedIn)
+                    // Sticky hydration: Any active user with bound TelegramChatId is restored to session!
+                    // (IsLoggedIn false qalıbsa belə ChatId varsa sticky bərpa, userbot ChannelMirror.Username xüsusilə dirilsin).
+                    if (!string.IsNullOrEmpty(u.TelegramChatId) && u.IsActive)
                     {
+                        if (!u.IsLoggedIn)
+                        {
+                            u.IsLoggedIn = true;
+                            uow.Users.UpdateAsync(u).GetAwaiter().GetResult();
+                            anyUpdated = true;
+                        }
+
                         _authenticatedSessions[u.TelegramChatId] = u.Username;
                         _loggedOutChats.TryRemove(u.TelegramChatId, out _);
                         if (u.Role == Domain.Enums.UserRole.Admin)
@@ -223,6 +233,10 @@ namespace CryptoSense.Infrastructure.Telegram
                         s.TelegramUserId = u.TelegramUserId;
                         s.IsActive = true;
                     }
+                }
+                if (anyUpdated)
+                {
+                    uow.SaveChangesAsync().GetAwaiter().GetResult();
                 }
             }
             catch (Exception ex)
@@ -278,40 +292,75 @@ namespace CryptoSense.Infrastructure.Telegram
         public async Task<bool> CanReceivePushAsync(string chatId)
         {
             if (string.IsNullOrWhiteSpace(chatId)) return false;
-            if (_loggedOutChats.ContainsKey(chatId)) return false;
 
             // 1. Session check: user must have active session in memory
             if (!_authenticatedSessions.ContainsKey(chatId))
             {
-                return false;
+                try
+                {
+                    using var checkScope = _serviceProvider.CreateScope();
+                    var checkUow = checkScope.ServiceProvider.GetRequiredService<IUnitOfWork>();
+                    var checkUser = await checkUow.Users.GetByChatIdOrTelegramUserIdAsync(chatId, null);
+                    if (checkUser != null && checkUser.IsActive && !string.IsNullOrWhiteSpace(checkUser.TelegramChatId) && checkUser.TelegramChatId == chatId)
+                    {
+                        _authenticatedSessions[chatId] = checkUser.Username;
+                        _loggedOutChats.TryRemove(chatId, out _);
+                    }
+                    else
+                    {
+                        return false;
+                    }
+                }
+                catch
+                {
+                    return false;
+                }
             }
+
+            if (_loggedOutChats.ContainsKey(chatId)) return false;
 
             // 2. UserPreferences check: must exist and be active
             if (!UserPreferences.TryGetValue(chatId, out var pref) || !pref.IsActive)
             {
-                return false;
+                if (_authenticatedSessions.TryGetValue(chatId, out _))
+                {
+                    pref = GetSettings(chatId);
+                    pref.IsActive = true;
+                }
+                else
+                {
+                    return false;
+                }
             }
 
             // 3. Database check: IsLoggedIn==true AND TelegramChatId dolu & matches AND IsActive==true
-            // TƏK QAPI: İstisna YOX (SuperAdmin də yalnız öz chatId və aktiv sessiyası ilə keçir)
             try
             {
                 using var scope = _serviceProvider.CreateScope();
                 var uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
                 var user = await uow.Users.GetByChatIdOrTelegramUserIdAsync(chatId, null);
 
-                if (user == null || !user.IsLoggedIn || string.IsNullOrWhiteSpace(user.TelegramChatId) || user.TelegramChatId != chatId || !user.IsActive)
+                if (user != null && user.IsActive && !string.IsNullOrWhiteSpace(user.TelegramChatId) && user.TelegramChatId == chatId)
                 {
-                    _loggedOutChats[chatId] = true;
-                    _authenticatedSessions.TryRemove(chatId, out _);
-                    if (UserPreferences.TryGetValue(chatId, out var stalePref))
+                    if (!user.IsLoggedIn)
                     {
-                        stalePref.IsActive = false;
+                        user.IsLoggedIn = true;
+                        await uow.Users.UpdateAsync(user);
+                        await uow.SaveChangesAsync();
                     }
-                    return false;
+                    _authenticatedSessions[chatId] = user.Username;
+                    _loggedOutChats.TryRemove(chatId, out _);
+                    pref.IsActive = true;
+                    return true;
                 }
 
-                return true;
+                _loggedOutChats[chatId] = true;
+                _authenticatedSessions.TryRemove(chatId, out _);
+                if (UserPreferences.TryGetValue(chatId, out var stalePref))
+                {
+                    stalePref.IsActive = false;
+                }
+                return false;
             }
             catch (Exception ex)
             {
@@ -320,23 +369,12 @@ namespace CryptoSense.Infrastructure.Telegram
             }
         }
 
-        private async Task ClearSessionOnForbiddenAsync(string chatId)
+        private Task ClearSessionOnForbiddenAsync(string chatId)
         {
-            try
-            {
-                _loggedOutChats[chatId] = true;
-                _authenticatedSessions.TryRemove(chatId, out _);
-                UserPreferences.TryRemove(chatId, out _);
-                _userStates.TryRemove(chatId, out _);
-                if (SuperAdminChatId == chatId) SuperAdminChatId = null;
-                SaveSettings();
-
-                using var scope = _serviceProvider.CreateScope();
-                var userManager = scope.ServiceProvider.GetRequiredService<IUserManagerService>();
-                await userManager.LogoutAsync(chatId);
-                await userManager.ClearChatBindingAsync(chatId, null);
-            }
-            catch { }
+            // Auto-logout suppression: 403 Forbidden is often transient or caused by temporary Telegram blocks.
+            // Do NOT terminate or wipe session on 403! Only log warning.
+            Console.WriteLine($"[TelegramBotService] 403 Forbidden notice for chatId {chatId}. Session preserved.");
+            return Task.CompletedTask;
         }
 
         public async Task<bool> SendMessageAsync(string message, string targetChatId, object? replyMarkup = null)
@@ -707,6 +745,13 @@ namespace CryptoSense.Infrastructure.Telegram
 
             static string Normalize(string s) => s.Replace(" ", "").Replace("_", "").Trim().ToLowerInvariant();
             return Normalize(username) == Normalize(targetUsername);
+        }
+
+        public bool IsStickyUsername(string? username)
+        {
+            if (string.IsNullOrWhiteSpace(username)) return false;
+            var target = _config.ChannelMirror?.Username ?? _config.ChannelMirrorUsername ?? "userbot";
+            return IsUserbotMatch(username, target) || IsUserbotMatch(username, "userbot");
         }
 
         private async Task MirrorToChannelIfUserbotAsync(string? username, string sourceChatId, string messageText)
