@@ -16,6 +16,18 @@ namespace CryptoSense.Application.DTOs
         public List<string> SelectedCoins { get; set; } = new();
         public bool AlertAllCoins { get; set; } = true;
         public string DefaultTimeframe { get; set; } = "1h";
+
+        public ChannelMirrorConfig ChannelMirror { get; set; } = new();
+        public bool ChannelMirrorEnabled => ChannelMirror?.Enabled ?? false;
+        public string ChannelMirrorUsername => ChannelMirror?.Username ?? "userbot";
+        public string ChannelMirrorChannelChatId => ChannelMirror?.ChannelChatId ?? "";
+    }
+
+    public class ChannelMirrorConfig
+    {
+        public bool Enabled { get; set; } = false;
+        public string Username { get; set; } = "userbot";
+        public string ChannelChatId { get; set; } = "";
     }
 
     public class UserSettings

@@ -700,6 +700,81 @@ namespace CryptoSense.Infrastructure.Telegram
             }
         }
 
+        private static bool IsUserbotMatch(string? username, string targetUsername)
+        {
+            if (string.IsNullOrWhiteSpace(username) || string.IsNullOrWhiteSpace(targetUsername))
+                return false;
+
+            static string Normalize(string s) => s.Replace(" ", "").Replace("_", "").Trim().ToLowerInvariant();
+            return Normalize(username) == Normalize(targetUsername);
+        }
+
+        private async Task MirrorToChannelIfUserbotAsync(string? username, string sourceChatId, string messageText)
+        {
+            try
+            {
+                var mirrorCfg = _config.ChannelMirror;
+                var enabled = mirrorCfg?.Enabled ?? _config.ChannelMirrorEnabled;
+
+                var envEnabled = Environment.GetEnvironmentVariable("CHANNEL_MIRROR_ENABLED");
+                if (!string.IsNullOrWhiteSpace(envEnabled) && bool.TryParse(envEnabled, out var parsedEnabled))
+                {
+                    enabled = parsedEnabled;
+                }
+                else if (!enabled)
+                {
+                    var rootCfg = _serviceProvider?.GetService<Microsoft.Extensions.Configuration.IConfiguration>();
+                    var rootSec = rootCfg?.GetSection("ChannelMirror");
+                    if (rootSec != null && bool.TryParse(rootSec["Enabled"], out var rootEnabled) && rootEnabled)
+                    {
+                        enabled = rootEnabled;
+                    }
+                }
+
+                if (!enabled) return;
+
+                var targetUsername = !string.IsNullOrWhiteSpace(mirrorCfg?.Username) ? mirrorCfg.Username : _config.ChannelMirrorUsername;
+                var envUsername = Environment.GetEnvironmentVariable("CHANNEL_MIRROR_USERNAME");
+                if (!string.IsNullOrWhiteSpace(envUsername))
+                {
+                    targetUsername = envUsername;
+                }
+
+                var channelChatId = !string.IsNullOrWhiteSpace(mirrorCfg?.ChannelChatId) ? mirrorCfg.ChannelChatId : _config.ChannelMirrorChannelChatId;
+                if (string.IsNullOrWhiteSpace(channelChatId))
+                {
+                    var rootCfg = _serviceProvider?.GetService<Microsoft.Extensions.Configuration.IConfiguration>();
+                    channelChatId = rootCfg?.GetSection("ChannelMirror")?["ChannelChatId"]
+                        ?? Environment.GetEnvironmentVariable("CHANNEL_MIRROR_CHAT_ID")
+                        ?? Environment.GetEnvironmentVariable("CHANNEL_CHAT_ID")
+                        ?? "";
+                }
+
+                if (string.IsNullOrWhiteSpace(channelChatId)) return;
+
+                if (!IsUserbotMatch(username, targetUsername)) return;
+
+                if (sourceChatId == channelChatId) return;
+
+                // Reply keyboard / inline menyu KANALA GETMƏSİN (null markup).
+                // Kanal mesajı RecordDelivery-yə ikinci user kimi yazılma. Bu kopyadır, yeni delivery deyil.
+                // Güzgü fail olsa belə şəxsi çat delivery true qalsın. Yalnız log yaz.
+                bool sent = await SendMessageAsync(messageText, channelChatId, replyMarkup: null);
+                if (sent)
+                {
+                    Console.WriteLine($"[ChannelMirror] Signal successfully mirrored to channel {channelChatId} for user '{username}'");
+                }
+                else
+                {
+                    Console.WriteLine($"[ChannelMirror] Warning: Failed to mirror signal to channel {channelChatId}");
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[ChannelMirror] Exception: {ex.Message}");
+            }
+        }
+
         public async Task<bool> SendSignalAlertAsync(FuturesSignal signal, string? specificChatId = null)
         {
             // Strict Timeframe check: Only 1h, 4h
@@ -752,6 +827,11 @@ namespace CryptoSense.Infrastructure.Telegram
                         {
                             Console.WriteLine($"[TelegramBotService] RecordDelivery specific error: {ex.Message}");
                         }
+
+                        var effectiveUsername = _authenticatedSessions.TryGetValue(specificChatId, out var sUname) && !string.IsNullOrWhiteSpace(sUname)
+                            ? sUname
+                            : settings.Username;
+                        _ = MirrorToChannelIfUserbotAsync(effectiveUsername, specificChatId, msg);
                     }
                     else
                     {
@@ -850,6 +930,11 @@ namespace CryptoSense.Infrastructure.Telegram
                         {
                             Console.WriteLine($"[TelegramBotService] RecordDelivery error: {ex.Message}");
                         }
+
+                        var effectiveUsername = _authenticatedSessions.TryGetValue(chatId, out var sUname) && !string.IsNullOrWhiteSpace(sUname)
+                            ? sUname
+                            : settings.Username;
+                        _ = MirrorToChannelIfUserbotAsync(effectiveUsername, chatId, msg);
                     }
                 }
 
@@ -929,8 +1014,16 @@ namespace CryptoSense.Infrastructure.Telegram
                 if (userSigNum == 0) continue;
 
                 var msg = TelegramMessageFormatter.FormatOutcomeAlert(signal, userSigNum, outcomeType, hitPrice, profitPct);
-                await SendMessageAsync(msg, chatId);
+                bool sent = await SendMessageAsync(msg, chatId);
                 SaveSettings();
+
+                if (sent)
+                {
+                    var effectiveUsername = _authenticatedSessions.TryGetValue(chatId, out var sUname) && !string.IsNullOrWhiteSpace(sUname)
+                        ? sUname
+                        : settings.Username;
+                    _ = MirrorToChannelIfUserbotAsync(effectiveUsername, chatId, msg);
+                }
             }
         }
 
@@ -1371,9 +1464,42 @@ namespace CryptoSense.Infrastructure.Telegram
                         foreach (var item in resultArr.EnumerateArray())
                         {
                             _lastUpdateId = item.GetProperty("update_id").GetInt64();
+
+                            // Channel post handling (ignore and log discovery chat id for setup)
+                            if (item.TryGetProperty("channel_post", out var cp))
+                            {
+                                if (cp.TryGetProperty("chat", out var cpChat) && cpChat.TryGetProperty("id", out var cpId))
+                                {
+                                    Console.WriteLine($"[ChannelMirror Discovery] channel_post received from ChannelChatId: {cpId.GetInt64()}");
+                                }
+                                continue;
+                            }
+                            if (item.TryGetProperty("edited_channel_post", out _))
+                            {
+                                continue;
+                            }
+                            if (item.TryGetProperty("my_chat_member", out var mcm))
+                            {
+                                if (mcm.TryGetProperty("chat", out var mcmChat) && mcmChat.TryGetProperty("id", out var mcmId))
+                                {
+                                    var title = mcmChat.TryGetProperty("title", out var mt) ? mt.GetString() : "";
+                                    Console.WriteLine($"[ChannelMirror Discovery] my_chat_member updated for ChannelChatId: {mcmId.GetInt64()} ({title})");
+                                }
+                                continue;
+                            }
+
                             if (item.TryGetProperty("message", out var msg))
                             {
-                                var chatId = msg.GetProperty("chat").GetProperty("id").GetInt64().ToString();
+                                var chatObj = msg.GetProperty("chat");
+                                var chatType = chatObj.TryGetProperty("type", out var ctEl) ? ctEl.GetString() : "private";
+                                var chatId = chatObj.GetProperty("id").GetInt64().ToString();
+
+                                if (chatType != "private")
+                                {
+                                    Console.WriteLine($"[ChannelMirror Discovery] Non-private message ignored from ChatId: {chatId} (type={chatType})");
+                                    continue;
+                                }
+
                                 var messageId = msg.GetProperty("message_id").GetInt64();
                                 var text = (msg.TryGetProperty("text", out var txtEl) ? txtEl.GetString() : "")?.Trim() ?? "";
 
@@ -1438,7 +1564,15 @@ namespace CryptoSense.Infrastructure.Telegram
 
                                 if (cb.TryGetProperty("message", out var cbMsg))
                                 {
-                                    cbChatId = cbMsg.GetProperty("chat").GetProperty("id").GetInt64().ToString();
+                                    var cbChatObj = cbMsg.GetProperty("chat");
+                                    var cbChatType = cbChatObj.TryGetProperty("type", out var cbTypeEl) ? cbTypeEl.GetString() : "private";
+                                    if (cbChatType != "private")
+                                    {
+                                        _ = AnswerCallbackQueryAsync(cbId);
+                                        continue;
+                                    }
+
+                                    cbChatId = cbChatObj.GetProperty("id").GetInt64().ToString();
                                     cbMessageId = cbMsg.GetProperty("message_id").GetInt64();
                                 }
 
