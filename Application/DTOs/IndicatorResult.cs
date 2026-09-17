@@ -108,5 +108,14 @@ namespace CryptoSense.Application.DTOs
         public int BullishIndicatorsCount { get; set; }
         public int BearishIndicatorsCount { get; set; }
         public int NeutralIndicatorsCount { get; set; }
+
+        // Continuous Features & Raw Directional Score
+        public decimal EmaSpreadFeature { get; set; }
+        public decimal RsiFeature { get; set; }
+        public decimal VwapFeature { get; set; }
+        public decimal ObvSlopeFeature { get; set; }
+        public decimal BbPositionFeature { get; set; }
+        public decimal BtcResidualFeature { get; set; }
+        public decimal DirectionalRaw { get; set; }
     }
 }

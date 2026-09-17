@@ -85,6 +85,8 @@ namespace CryptoSense.Domain.Common
             public const decimal MinAdx1h                 = 22m;
             /// <summary>Min ADX for 4h signals</summary>
             public const decimal MinAdx4h                 = 16m;
+            public const decimal RsiExhaustionLong        = 78m;
+            public const decimal RsiExhaustionShort       = 22m;
 
             public const decimal MinSlAtr = 1.20m;
             public const decimal MaxSlAtr = 3.00m;

@@ -944,12 +944,11 @@ namespace CryptoSense.Worker
                 // BE trigger (once)
                 if (!sig.BreakevenTriggered)
                 {
-                    bool mfeBeTrigger = sig.MfePercent >= 1.5m * riskRPct && currentMove >= 1.2m * riskRPct;
                     bool fractalBeTrigger = isLong
                         ? ((swingLows.Count >= 2 && swingLows[^1] > swingLows[^2]) || (swingLows.Count >= 1 && sig.SignalSwingLow > 0 && swingLows[^1] > sig.SignalSwingLow))
                         : ((swingHighs.Count >= 2 && swingHighs[^1] < swingHighs[^2]) || (swingHighs.Count >= 1 && sig.SignalSwingHigh > 0 && swingHighs[^1] < sig.SignalSwingHigh));
 
-                    if (mfeBeTrigger || fractalBeTrigger)
+                    if (fractalBeTrigger)
                     {
                         decimal beStop = isLong
                             ? SignalEngine.RoundToCoinPrecision(sig.EntryPrice, sig.EntryPrice + BotConstants.Thresholds.BeBufferAtr * atr)

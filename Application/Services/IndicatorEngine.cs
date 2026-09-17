@@ -247,8 +247,40 @@ namespace CryptoSense.Application.Services
 
             // 13. OBV
             res.Obv = CalculateObv(klines);
-            res.ObvTrend = res.Obv >= 0 ? "Həcm Toplanır (Akumulyasiya)" : "Həcm Çıxır (Distribusiya)";
-            res.ObvVote = res.Obv >= 0 ? IndicatorVote.Bullish : IndicatorVote.Bearish;
+            
+            // OBV slope: son 10 vs əvvəlki 10 OBV delta
+            decimal slopeNow = 0m;
+            decimal obvScale = 1m;
+            if (klines.Count >= 20)
+            {
+                var obvSeries = new List<decimal>(klines.Count);
+                decimal curObv = 0m;
+                obvSeries.Add(curObv);
+                for (int i = 1; i < klines.Count; i++)
+                {
+                    if (klines[i].Close > klines[i - 1].Close) curObv += klines[i].Volume;
+                    else if (klines[i].Close < klines[i - 1].Close) curObv -= klines[i].Volume;
+                    obvSeries.Add(curObv);
+                }
+                decimal obvNow = obvSeries[^1];
+                decimal obv10Ago = obvSeries[^10];
+                decimal obv20Ago = obvSeries[^20];
+                slopeNow = obvNow - obv10Ago;
+                decimal slopePrev = obv10Ago - obv20Ago;
+
+                var recentVols = volumes.Skip(Math.Max(0, volumes.Count - 20)).ToList();
+                obvScale = (recentVols.Count > 0 ? recentVols.Average() : 1m) * 5m;
+                if (obvScale <= 0) obvScale = 1m;
+
+                res.ObvTrend = slopeNow >= slopePrev ? "Həcm Toplanır (Akumulyasiya)" : "Həcm Çıxır (Distribusiya)";
+                res.ObvVote = slopeNow >= slopePrev ? IndicatorVote.Bullish : IndicatorVote.Bearish;
+            }
+            else
+            {
+                res.ObvTrend = res.Obv >= 0 ? "Həcm Toplanır (Akumulyasiya)" : "Həcm Çıxır (Distribusiya)";
+                res.ObvVote = res.Obv >= 0 ? IndicatorVote.Bullish : IndicatorVote.Bearish;
+            }
+            res.ObvSlopeFeature = (decimal)Math.Tanh((double)(slopeNow / obvScale));
 
             // 14. Volume Surge (20)
             res.VolumeEma20 = CalculateEma(volumes, 20);
@@ -278,45 +310,49 @@ namespace CryptoSense.Application.Services
                 if (klines[i].High < klines[i - 2].Low) res.HasBearishFvg = true;
             }
 
-            // 17. Core Confluence Scoring - 3 Orthogonal Axes Model (Eliminates Multicollinearity)
-            // Axis 1: Directional Alignment (EMA, SMA, SuperTrend)
-            decimal emaScore = res.EmaVote == IndicatorVote.Bullish ? 1.0m : (res.EmaVote == IndicatorVote.Bearish ? -1.0m : 0.0m);
-            decimal smaScore = res.SmaVote == IndicatorVote.Bullish ? 1.0m : (res.SmaVote == IndicatorVote.Bearish ? -1.0m : 0.0m);
-            decimal stScore = res.SuperTrendVote == IndicatorVote.Bullish ? 1.0m : (res.SuperTrendVote == IndicatorVote.Bearish ? -1.0m : 0.0m);
-            decimal directionVector = (emaScore * 0.40m) + (smaScore * 0.25m) + (stScore * 0.35m);
+            // 17. Core Confluence Scoring - Continuous Mathematics & Normalized Feature Space
+            static decimal Tanh(decimal x) => (decimal)Math.Tanh((double)x);
+            decimal atrSafe = Math.Max(res.Atr, lastClose * 0.0001m);
 
-            // Axis 2: Market Regime & Volatility Damping (Wilder ADX & Bollinger Bandwidth)
-            decimal adxMultiplier = res.Adx >= 25m ? 1.0m : (res.Adx >= 20m ? 0.85m : 0.50m);
-            res.TrendScore = Math.Round(directionVector * adxMultiplier, 3);
+            // SKOR (SMA QATILMIR):
+            decimal emaSpread = Tanh(((res.Ema20 - res.Ema50) / atrSafe) / 1.5m);
+            decimal priceEma = Tanh(((lastClose - res.Ema20) / atrSafe) / 1.0m);
+            decimal stSign = res.SuperTrendVote == IndicatorVote.Bullish ? 1.0m : (res.SuperTrendVote == IndicatorVote.Bearish ? -1.0m : 0.0m);
+            decimal stFeat = stSign * Math.Max(0.35m, Tanh(Math.Abs(lastClose - res.SuperTrend) / atrSafe));
+            decimal adxMult = Math.Clamp(res.Adx / 25m, 0.45m, 1.0m);
 
-            decimal macdScore = res.MacdVote == IndicatorVote.Bullish ? 1.0m : (res.MacdVote == IndicatorVote.Bearish ? -1.0m : 0.0m);
-            decimal rsiScore = res.RsiVote == IndicatorVote.Bullish ? 1.0m : (res.RsiVote == IndicatorVote.Bearish ? -1.0m : 0.0m);
-            res.MomentumScore = Math.Round((macdScore * 0.65m) + (rsiScore * 0.35m), 3);
+            res.EmaSpreadFeature = emaSpread;
+            res.TrendScore = Math.Clamp(((0.45m * emaSpread) + (0.25m * priceEma) + (0.30m * stFeat)) * adxMult, -1m, 1m);
 
-            decimal bbScore = res.BollingerVote == IndicatorVote.Bullish ? 1.0m : (res.BollingerVote == IndicatorVote.Bearish ? -1.0m : 0.0m);
-            res.VolatilityScore = bbScore;
+            decimal rsiFeat = Tanh((res.Rsi - 50m) / 12m);
+            decimal macdFeat = Tanh(res.MacdHist / (atrSafe * 0.15m));
+            decimal stochFeat = Tanh((res.StochRsiK - 50m) / 20m);
+            res.RsiFeature = rsiFeat;
+            res.MomentumScore = Math.Clamp((0.50m * rsiFeat) + (0.35m * macdFeat) + (0.15m * stochFeat), -1m, 1m);
 
-            // Axis 3: Participation & Liquidity Verification (Volume Surge, VWAP, OBV)
-            decimal obvScore = res.ObvVote == IndicatorVote.Bullish ? 1.0m : (res.ObvVote == IndicatorVote.Bearish ? -1.0m : 0.0m);
-            decimal vwapScore = res.VwapVote == IndicatorVote.Bullish ? 1.0m : (res.VwapVote == IndicatorVote.Bearish ? -1.0m : 0.0m);
-            decimal volScore = res.VolumeVote == IndicatorVote.Bullish ? 1.0m : (res.VolumeVote == IndicatorVote.Bearish ? -1.0m : 0.0m);
-            decimal volSurgeFactor = res.VolumeSurgeRatio >= 1.30m ? 1.10m : (res.VolumeSurgeRatio >= 1.0m ? 1.0m : (res.VolumeSurgeRatio >= 0.70m ? 0.85m : 0.60m));
-            res.VolumeScore = Math.Round(((obvScore * 0.40m) + (vwapScore * 0.35m) + (volScore * 0.25m)) * volSurgeFactor, 3);
+            decimal vwapFeat = Tanh(((lastClose - res.Vwap) / atrSafe) / 1.0m);
+            res.VwapFeature = vwapFeat;
 
-            // Synthesized Confluence: 40% Trend (Direction * Regime) + 30% Momentum + 20% Participation (Volume + VWAP + OBV) + 10% Volatility
-            decimal rawScore = (res.TrendScore * 0.40m) + (res.MomentumScore * 0.30m) + (res.VolumeScore * 0.20m) + (res.VolatilityScore * 0.10m);
+            var last20Volumes = volumes.Skip(Math.Max(0, volumes.Count - 20)).ToList();
+            decimal mean20 = last20Volumes.Count > 0 ? last20Volumes.Average() : volumes.Last();
+            double sumSq = last20Volumes.Sum(v => Math.Pow((double)(v - mean20), 2));
+            decimal std20 = (last20Volumes.Count > 1) ? (decimal)Math.Sqrt(sumSq / last20Volumes.Count) : 1m;
+            if (std20 <= 0m) std20 = 1m;
+            decimal volZ = (volumes.Last() - mean20) / std20;
+            decimal candleSign = lastClose >= lastOpen ? 1m : -1m;
 
-            decimal mtfFactor = 1.0m;
-            if (btcCompass != null)
-            {
-                if (rawScore > 0 && btcCompass.Regime == BtcMarketRegime.Bullish) mtfFactor = 1.0m;
-                else if (rawScore < 0 && btcCompass.Regime == BtcMarketRegime.Bearish) mtfFactor = 1.0m;
-                else mtfFactor = 0.85m;
-            }
-            res.MtfFactor = mtfFactor;
+            res.VolumeScore = Math.Clamp((0.45m * vwapFeat) + (0.35m * res.ObvSlopeFeature) + (0.20m * Tanh(volZ / 1.5m) * candleSign), -1m, 1m);
 
-            decimal finalScore = rawScore * mtfFactor;
-            res.ConfluenceScore = Math.Round(Math.Clamp(((finalScore + 1.0m) / 2.0m) * 100m, 5m, 98m), 1);
+            decimal bbSpan = res.BollingerUpper - res.BollingerLower;
+            decimal bbPos = bbSpan > 0 ? Math.Clamp(2m * (lastClose - res.BollingerMiddle) / bbSpan, -1m, 1m) : 0m;
+            res.BbPositionFeature = bbPos;
+            res.VolatilityScore = bbPos;
+
+            decimal fvgFeat = (res.HasBullishFvg && !res.HasBearishFvg) ? 0.08m : ((!res.HasBullishFvg && res.HasBearishFvg) ? -0.08m : 0m);
+
+            res.BtcResidualFeature = 0m; // AnalyzeCoinAsync sonra yazar
+            res.DirectionalRaw = Math.Clamp((0.40m * res.TrendScore) + (0.28m * res.MomentumScore) + (0.20m * res.VolumeScore) + (0.12m * res.VolatilityScore) + fvgFeat, -1m, 1m);
+            res.ConfluenceScore = Math.Round(Math.Clamp(((res.DirectionalRaw + 1m) / 2m) * 100m, 5m, 98m), 1);
 
             var votes = new[] { res.RsiVote, res.StochVote, res.MacdVote, res.EmaVote, res.BollingerVote, res.AdxVote, res.CciVote, res.WilliamsRVote, res.SuperTrendVote, res.VwapVote, res.ObvVote, res.VolumeVote };
             res.BullishIndicatorsCount = votes.Count(v => v == IndicatorVote.Bullish);
@@ -643,17 +679,26 @@ namespace CryptoSense.Application.Services
         public decimal CalculateVwap(List<Kline> klines)
         {
             if (klines == null || klines.Count == 0) return 0;
+            
+            var lastBar = klines.Last();
+            var sessionDate = lastBar.Time.Date;
+            var sessionKlines = klines.Where(k => k.Time.Date == sessionDate).ToList();
+            if (sessionKlines.Count == 0)
+            {
+                sessionKlines = klines.TakeLast(Math.Min(klines.Count, 24)).ToList();
+            }
+
             decimal cumPriceVol = 0;
             decimal cumVol = 0;
 
-            foreach (var k in klines)
+            foreach (var k in sessionKlines)
             {
-                decimal tp = (k.High + k.Low + k.Close) / 3;
+                decimal tp = (k.High + k.Low + k.Close) / 3m;
                 cumPriceVol += tp * k.Volume;
                 cumVol += k.Volume;
             }
 
-            return cumVol > 0 ? Math.Round(cumPriceVol / cumVol, 4) : klines.Last().Close;
+            return cumVol > 0 ? Math.Round(cumPriceVol / cumVol, 4) : lastBar.Close;
         }
 
         public decimal CalculateObv(List<Kline> klines)

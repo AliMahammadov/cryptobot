@@ -673,9 +673,9 @@ namespace CryptoSense.Application.Services
             bool breakoutLong = indicators.ResistanceLevel > 0 && currentPrice >= indicators.ResistanceLevel;
             bool breakoutShort = indicators.SupportLevel > 0 && currentPrice <= indicators.SupportLevel;
 
-            // E. RSI Safe Zone Filter
-            bool rsiAllowsLong = indicators.Rsi >= 38 && indicators.Rsi <= 68;
-            bool rsiAllowsShort = indicators.Rsi >= 32 && indicators.Rsi <= 62;
+            // E. RSI Exhaustion Filters (Dip Long Açıqdır, Top Short Açıqdır)
+            bool rsiLongOk = indicators.Rsi <= CryptoSense.Domain.Common.BotConstants.Thresholds.RsiExhaustionLong;
+            bool rsiShortOk = indicators.Rsi >= CryptoSense.Domain.Common.BotConstants.Thresholds.RsiExhaustionShort;
 
             // F. Macro & Bitcoin Alignment (Problem 8 - BTC 1h SuperTrend + HH/HL = rejim)
             bool isAltcoin = symbol != "BTCUSDT";
@@ -707,89 +707,106 @@ namespace CryptoSense.Application.Services
             decimal recentAltSwingHigh = altSwingHighs.Count > 0 ? altSwingHighs[^1] : 0m;
             bool isStructuralBreakout = hasHigherLow && (recentAltSwingHigh > 0 && closedCandle.Close > recentAltSwingHigh);
 
-            if (isAltcoin && closedKlines.Count >= 10)
+            decimal btcResidualFeature = 0m;
+            if (isAltcoin && closedKlines.Count >= 20)
             {
                 try
                 {
-                    var btcKlines = await _marketData.GetKlinesAsync("BTCUSDT", timeframe, closedKlines.Count);
+                    var btcKlines = await _marketData.GetKlinesAsync("BTCUSDT", timeframe, closedKlines.Count + 1);
                     var closedBtc = btcKlines.Count >= 2 ? btcKlines.Take(btcKlines.Count - 1).ToList() : btcKlines;
-                    if (closedBtc.Count >= 10)
+                    if (closedBtc.Count >= 20)
                     {
                         int alignCount = Math.Min(closedKlines.Count, closedBtc.Count);
-                        var altCloses = closedKlines.TakeLast(alignCount).Select(k => k.Close).ToList();
-                        var btcCloses = closedBtc.TakeLast(alignCount).Select(k => k.Close).ToList();
-                        altBtcCorr = CalculatePearsonCorrelation(altCloses, btcCloses);
+                        var altSubset = closedKlines.TakeLast(alignCount).ToList();
+                        var btcSubset = closedBtc.TakeLast(alignCount).ToList();
 
-                        var lastAlt = closedKlines.Last();
-                        var lastBtc = closedBtc.Last();
-                        decimal altChg = lastAlt.Open > 0 ? (lastAlt.Close - lastAlt.Open) / lastAlt.Open : 0m;
-                        decimal btcChg = lastBtc.Open > 0 ? (lastBtc.Close - lastBtc.Open) / lastBtc.Open : 0m;
-                        altRs = altChg - btcChg;
+                        var altR = new List<decimal>(alignCount - 1);
+                        var btcR = new List<decimal>(alignCount - 1);
+                        for (int i = 1; i < alignCount; i++)
+                        {
+                            decimal altPrev = altSubset[i - 1].Close;
+                            decimal altCurr = altSubset[i].Close;
+                            decimal btcPrev = btcSubset[i - 1].Close;
+                            decimal btcCurr = btcSubset[i].Close;
+
+                            if (altPrev > 0 && altCurr > 0 && btcPrev > 0 && btcCurr > 0)
+                            {
+                                altR.Add((decimal)Math.Log((double)(altCurr / altPrev)));
+                                btcR.Add((decimal)Math.Log((double)(btcCurr / btcPrev)));
+                            }
+                        }
+
+                        if (altR.Count >= 20)
+                        {
+                            altBtcCorr = CalculatePearsonCorrelation(altR, btcR);
+
+                            decimal meanAltR = altR.Average();
+                            decimal meanBtcR = btcR.Average();
+                            decimal cov = 0m;
+                            decimal varBtc = 0m;
+                            for (int i = 0; i < altR.Count; i++)
+                            {
+                                decimal dAlt = altR[i] - meanAltR;
+                                decimal dBtc = btcR[i] - meanBtcR;
+                                cov += dAlt * dBtc;
+                                varBtc += dBtc * dBtc;
+                            }
+                            decimal beta = varBtc > 0 ? cov / varBtc : 0m;
+                            decimal residual = altR.Last() - (beta * btcR.Last());
+                            btcResidualFeature = (decimal)Math.Tanh((double)(residual / 0.012m));
+
+                            var lastAlt = altSubset.Last();
+                            var lastBtc = btcSubset.Last();
+                            decimal altChg = lastAlt.Open > 0 ? (lastAlt.Close - lastAlt.Open) / lastAlt.Open : 0m;
+                            decimal btcChg = lastBtc.Open > 0 ? (lastBtc.Close - lastBtc.Open) / lastBtc.Open : 0m;
+                            altRs = altChg - btcChg;
+                        }
                     }
                 }
                 catch (Exception _ex) { Console.WriteLine($"[SignalEngine] Swallowed exception: {_ex.Message}"); }
             }
+            else if (!isAltcoin)
+            {
+                altBtcCorr = 1.0m;
+                btcResidualFeature = 0m;
+                altRs = 0m;
+            }
+
+            indicators.BtcResidualFeature = btcResidualFeature;
 
             // BTC QAPI: BTC özü kompas tərəfindən bloklanmır (öz SuperTrend/confluence saxlanılır).
             bool btc4hStrongLong = btcCompass.Btc4hStrongLong;
             bool btc4hStrongShort = btcCompass.Btc4hStrongShort;
 
-            bool rangingBullCandle = isAltcoin
-                && btcCompass.Regime == BtcMarketRegime.Ranging
-                && closedCandle.Close > closedCandle.Open;
-            bool rangingBearCandle = isAltcoin
-                && btcCompass.Regime == BtcMarketRegime.Ranging
-                && closedCandle.Close < closedCandle.Open;
+            bool btcResidualLongOk = !isAltcoin || indicators.BtcResidualFeature >= -0.35m;
+            bool btcResidualShortOk = !isAltcoin || indicators.BtcResidualFeature <= 0.35m;
 
-            // BTCUSDT heç vaxt kompasla bloklanmır.
-            // Bullish + 4h Strong Long → alt LONG olar.
-            // Ranging + yaşıl şam (close>open) → alt LONG olar.
-            // Bearish və ya Ranging qırmızı/doji → alt LONG YOX.
-            bool btcConfirmsLong = !isAltcoin
-                || (btcCompass.Regime == BtcMarketRegime.Bullish && btc4hStrongLong)
-                || rangingBullCandle;
-
-            // Bearish → SHORT olar.
-            // Ranging + qırmızı şam (close<open) → SHORT olar.
-            // Ranging yaşıl/doji → SHORT YOX.
-            // Bullish (ranging deyil) → SHORT-u burada kəsmə; GATE B 4h Strong Long-dursa SHORT-u kəsəcək.
-            bool btcConfirmsShort = !isAltcoin
-                || btcCompass.Regime == BtcMarketRegime.Bearish
-                || rangingBearCandle
-                || (btcCompass.Regime == BtcMarketRegime.Bullish && !btc4hStrongLong);
-
-            bool ethConfirmsLong = true;
-            bool ethConfirmsShort = true;
+            bool ethLongOk = true;
+            bool ethShortOk = true;
 
             if (isAltcoin)
             {
-                bool isHighCorr = altBtcCorr > 0.7m;
-                bool altRsPositive = altRs > 0m;
-
-                // BTC 1h bullish VƏ alt-BTC 15m corr>0.7 VƏ alt RS müsbət → alt SHORT yalnız struktur breakdown (lower high + close below swing). Mean-reversion SHORT yox.
-                if (btcCompass.Regime == BtcMarketRegime.Bullish && isHighCorr && altRsPositive)
+                // Mean-reversion: BTC Bullish && ReturnCorr>=0.50 && residual>0 && !breakdown → SHORT skip
+                if (btcCompass.Regime == BtcMarketRegime.Bullish && altBtcCorr >= 0.50m && indicators.BtcResidualFeature > 0m && !isStructuralBreakdown)
                 {
-                    btcConfirmsShort = isStructuralBreakdown;
+                    btcResidualShortOk = false;
                 }
 
-                // BƏND 5 Korrelyasiya: BTC və ETH eyni 1h-də siqnal istiqamətini təsdiqləmirsə alt SHORT/LONG AçMA (ADA #72 tipi).
+                // ETH eyni timeframe SuperTrend (şam rəngi yox)
                 try
                 {
-                    var ethKlines1h = await _marketData.GetKlinesAsync("ETHUSDT", "1h", 10);
-                    var closedEth1h = ethKlines1h.Count >= 2 ? ethKlines1h.Take(ethKlines1h.Count - 1).ToList() : ethKlines1h;
-                    if (closedEth1h.Count > 0)
+                    var ethKlines = await _marketData.GetKlinesAsync("ETHUSDT", timeframe, 25);
+                    var closedEth = ethKlines.Count >= 2 ? ethKlines.Take(ethKlines.Count - 1).ToList() : ethKlines;
+                    if (closedEth.Count >= 10)
                     {
-                        var lastEth = closedEth1h.Last();
-                        bool isEthBullish = lastEth.Close > lastEth.Open;
-                        bool isEthBearish = lastEth.Close < lastEth.Open;
-
-                        if (isEthBullish && !isStructuralBreakdown)
+                        var (_, ethIsBullish) = _indicatorEngine.CalculateSuperTrend(closedEth, 10, 3.0m);
+                        if (!ethIsBullish && altBtcCorr >= 0.65m && !isStructuralBreakout)
                         {
-                            ethConfirmsShort = false;
+                            ethLongOk = false;
                         }
-                        if (isEthBearish && !isStructuralBreakout)
+                        if (ethIsBullish && altBtcCorr >= 0.65m && !isStructuralBreakdown)
                         {
-                            ethConfirmsLong = false;
+                            ethShortOk = false;
                         }
                     }
                 }
@@ -828,13 +845,12 @@ namespace CryptoSense.Application.Services
             // =========================================================================
             else if (indicators.ConfluenceScore >= minLongScore &&
                 indicators.SuperTrendVote == IndicatorVote.Bullish &&
-                isUptrend &&
-                bullishCandleConfirmation &&
                 hasValidMarketRegime &&
                 volumeConfirmed &&
-                rsiAllowsLong &&
-                btcConfirmsLong &&
-                ethConfirmsLong)
+                rsiLongOk &&
+                btcResidualLongOk &&
+                ethLongOk &&
+                bullishCandleConfirmation)
             {
                 direction = SignalDirection.Buy;
                 determinedType = breakoutLong ? "GÜCLÜ BREAKOUT LONG 🟢" : (isPullbackZone ? "GÜCLÜ RETEST LONG 🟢" : "GÜCLÜ TREND LONG 🟢");
@@ -845,13 +861,12 @@ namespace CryptoSense.Application.Services
             // =========================================================================
             else if (indicators.ConfluenceScore <= maxShortScore &&
                      indicators.SuperTrendVote == IndicatorVote.Bearish &&
-                     isDowntrend &&
-                     bearishCandleConfirmation &&
                      hasValidMarketRegime &&
                      volumeConfirmed &&
-                     rsiAllowsShort &&
-                     btcConfirmsShort &&
-                     ethConfirmsShort)
+                     rsiShortOk &&
+                     btcResidualShortOk &&
+                     ethShortOk &&
+                     bearishCandleConfirmation)
             {
                 direction = SignalDirection.Sell;
                 determinedType = breakoutShort ? "GÜCLÜ BREAKDOWN SHORT 🔴" : (isPullbackZone ? "GÜCLÜ RETEST SHORT 🔴" : "GÜCLÜ TREND SHORT 🔴");
@@ -865,25 +880,20 @@ namespace CryptoSense.Application.Services
                 if (indicators.SuperTrendVote != IndicatorVote.Bullish && isUptrend) reasons.Add("SuperTrend təsdiqi yoxdur (Trend ziddiyyətlidir)");
             }
 
-            // Alt LONG təhlükəsizlik baryeri: BTC 1h və ya 4h təsdiq etmirsə alt LONG qətiyyən buraxılmasın
+            // Alt LONG təhlükəsizlik baryeri: BTC və ya ETH təsdiq etmirsə alt LONG qətiyyən buraxılmasın
             if (isAltcoin && determinedType.Contains("LONG"))
             {
-                if (!btcConfirmsLong)
+                if (!btcResidualLongOk)
                 {
                     determinedType = "GÖZLƏMƏ ⚪";
                     confidence = 50;
-                    if (btcCompass.Regime == BtcMarketRegime.Bearish)
-                        reasons.Add("SKIP_BTC_BEAR_LONG: BTC 1h Bearish — alt LONG bloklandı");
-                    else if (btcCompass.Regime == BtcMarketRegime.Ranging)
-                        reasons.Add("SKIP_BTC_RANGE: BTC 1h Ranging + qırmızı/doji şam — alt LONG bloklandı");
-                    else
-                        reasons.Add("SKIP_BTC_BEAR_LONG: BTC 1h Bullish və BTC 4h SuperTrend Bullish tələb olunur — alt LONG bloklandı");
+                    reasons.Add("SKIP_BTC_RESIDUAL: BTC residual zəif — alt LONG bloklandı");
                 }
-                else if (!ethConfirmsLong)
+                else if (!ethLongOk)
                 {
                     determinedType = "GÖZLƏMƏ ⚪";
                     confidence = 50;
-                    reasons.Add("ETH 1h Bearish: altcoin LONG üçün ETH təsdiqi yoxdur");
+                    reasons.Add("ETH SuperTrend Bearish: altcoin LONG üçün ETH təsdiqi yoxdur");
                 }
             }
 
@@ -911,7 +921,7 @@ namespace CryptoSense.Application.Services
                         {
                             determinedType = "GÖZLƏMƏ ⚪";
                             confidence = 50;
-                            reasons.Add("SKIP_HTF_OPPOSE: 1h SHORT vs 4h not bullish");
+                            reasons.Add("SKIP_HTF_OPPOSE: 1h SHORT vs 4h not bearish");
                         }
                     }
                 }
@@ -920,22 +930,17 @@ namespace CryptoSense.Application.Services
 
             if (isAltcoin && determinedType.Contains("SHORT"))
             {
-                if (!btcConfirmsShort)
+                if (!btcResidualShortOk)
                 {
                     determinedType = "GÖZLƏMƏ ⚪";
                     confidence = 50;
-                    if (btcCompass.Regime == BtcMarketRegime.Ranging)
-                        reasons.Add("SKIP_BTC_RANGE: BTC 1h Ranging + yaşıl/doji şam — alt SHORT bloklandı");
-                    else if (btcCompass.Regime == BtcMarketRegime.Bullish && altBtcCorr > 0.7m && altRs > 0m && !isStructuralBreakdown)
-                        reasons.Add("BTC 1h Bullish, corr>0.7 və alt RS müsbət: Altcoin SHORT yalnız struktur breakdown olduqda açıla bilər (Mean-reversion SHORT bloklandı)");
-                    else
-                        reasons.Add("SKIP_BTC_RANGE: alt SHORT üçün BTC təsdiqi yoxdur");
+                    reasons.Add("SKIP_BTC_RESIDUAL: BTC residual və ya mean-reversion qaydası — alt SHORT bloklandı");
                 }
-                else if (!ethConfirmsShort)
+                else if (!ethShortOk)
                 {
                     determinedType = "GÖZLƏMƏ ⚪";
                     confidence = 50;
-                    reasons.Add("ETH 1h Bullish: altcoin SHORT üçün ETH təsdiqi yoxdur (ADA #72 filtri)");
+                    reasons.Add("ETH SuperTrend Bullish: altcoin SHORT üçün ETH təsdiqi yoxdur (ADA #72 filtri)");
                 }
             }
 
@@ -1072,14 +1077,14 @@ namespace CryptoSense.Application.Services
             // Create indicator snapshots
             newSignal.IndicatorSnapshots = new List<SignalIndicatorSnapshot>
             {
-                new() { IndicatorName = "RSI14", Value = indicators.Rsi, Vote = indicators.RsiVote, Weight = 0.35m },
-                new() { IndicatorName = "MACD_Hist", Value = indicators.MacdHist, Vote = indicators.MacdVote, Weight = 0.45m },
+                new() { IndicatorName = "RSI14", Value = indicators.Rsi, Vote = indicators.RsiVote, Weight = 0.50m },
+                new() { IndicatorName = "MACD_Hist", Value = indicators.MacdHist, Vote = indicators.MacdVote, Weight = 0.35m },
                 new() { IndicatorName = "EMA20", Value = indicators.Ema20, Vote = indicators.EmaVote, Weight = 0.45m },
                 new() { IndicatorName = "ADX14", Value = indicators.Adx, Vote = indicators.AdxVote, Weight = 0.30m },
-                new() { IndicatorName = "BollingerBands", Value = indicators.BollingerBandwidth, Vote = indicators.BollingerVote, Weight = 0.15m },
-                new() { IndicatorName = "SuperTrend", Value = indicators.SuperTrend, Vote = indicators.SuperTrendVote, Weight = 0.25m },
-                new() { IndicatorName = "OBV", Value = indicators.Obv, Vote = indicators.ObvVote, Weight = 0.40m },
-                new() { IndicatorName = "VWAP", Value = indicators.Vwap, Vote = indicators.VwapVote, Weight = 0.30m }
+                new() { IndicatorName = "BollingerBands", Value = indicators.BollingerBandwidth, Vote = indicators.BollingerVote, Weight = 0.12m },
+                new() { IndicatorName = "SuperTrend", Value = indicators.SuperTrend, Vote = indicators.SuperTrendVote, Weight = 0.30m },
+                new() { IndicatorName = "OBV", Value = indicators.Obv, Vote = indicators.ObvVote, Weight = 0.35m },
+                new() { IndicatorName = "VWAP", Value = indicators.Vwap, Vote = indicators.VwapVote, Weight = 0.45m }
             };
 
             return newSignal;
