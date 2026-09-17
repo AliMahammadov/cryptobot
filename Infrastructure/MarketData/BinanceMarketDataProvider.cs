@@ -56,6 +56,7 @@ namespace CryptoSense.Infrastructure.MarketData
         {
             var cleanSym = symbol.ToUpper();
             var futuresSym = cleanSym;
+            if (futuresSym == "HYPEUSDT") return new List<Kline>();
             if (futuresSym == "PEPEUSDT") futuresSym = "1000PEPEUSDT";
             else if (futuresSym == "SHIBUSDT") futuresSym = "1000SHIBUSDT";
             else if (futuresSym == "BONKUSDT") futuresSym = "1000BONKUSDT";

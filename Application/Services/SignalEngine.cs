@@ -133,7 +133,8 @@ namespace CryptoSense.Application.Services
             decimal calculationRefPrice,
             decimal atr14,
             decimal vwap,
-            string timeframe = "1h")
+            string timeframe = "1h",
+            List<string>? reasons = null)
         {
             var fail = new SrTargetResult(false, null, 0, 0, 0, 0, 0, 0, 0, 0, new List<decimal>());
             if (closedKlines == null || closedKlines.Count < 10 || calculationRefPrice <= 0)
@@ -299,11 +300,15 @@ namespace CryptoSense.Application.Services
             {
                 tp1 = calculationRefPrice + BotConstants.Thresholds.Tp1R * riskR;
                 var nextRes = clusters.Where(c => c > tp1 + (0.15m * riskR)).OrderBy(c => c).ToList();
-                if (nextRes.Count == 0)
+                if (nextRes.Count > 0)
                 {
-                    return fail with { SkipReason = "SKIP_NO_STRUCTURE_TARGET" };
+                    tp2 = nextRes.First();
                 }
-                tp2 = nextRes.First();
+                else
+                {
+                    tp2 = calculationRefPrice + 2.50m * riskR;
+                    reasons?.Add("TP2_FALLBACK_2R5: no cluster beyond 1.5R");
+                }
                 if (tp2 <= tp1)
                 {
                     return fail with { SkipReason = "SKIP_NO_STRUCTURE_TARGET" };
@@ -313,11 +318,15 @@ namespace CryptoSense.Application.Services
             {
                 tp1 = calculationRefPrice - BotConstants.Thresholds.Tp1R * riskR;
                 var nextSup = clusters.Where(c => c < tp1 - (0.15m * riskR)).OrderByDescending(c => c).ToList();
-                if (nextSup.Count == 0)
+                if (nextSup.Count > 0)
                 {
-                    return fail with { SkipReason = "SKIP_NO_STRUCTURE_TARGET" };
+                    tp2 = nextSup.First();
                 }
-                tp2 = nextSup.First();
+                else
+                {
+                    tp2 = calculationRefPrice - 2.50m * riskR;
+                    reasons?.Add("TP2_FALLBACK_2R5: no cluster beyond 1.5R");
+                }
                 if (tp2 >= tp1)
                 {
                     return fail with { SkipReason = "SKIP_NO_STRUCTURE_TARGET" };
@@ -827,6 +836,8 @@ namespace CryptoSense.Application.Services
             bool bullishCandleConfirmation = closedCandle.Close >= closedCandle.Open || buyerRejection;
             bool bearishCandleConfirmation = closedCandle.Close <= closedCandle.Open || sellerRejection;
             bool volumeConfirmed = indicators.VolumeSurgeRatio >= CryptoSense.Domain.Common.BotConstants.Thresholds.MinVolumeSurgeRatio;
+            bool volumeSoftOk = volumeConfirmed
+                || (indicators.ConfluenceScore >= 82m && indicators.Adx >= 25m && indicators.VolumeSurgeRatio >= 0.70m);
 
             // Extreme Volatility & High-Risk Anomaly Check
             bool isExtremeVolatility = (indicators.Atr > 0 && currentPrice > 0 && (indicators.Atr / currentPrice) >= 0.055m) ||
@@ -850,7 +861,7 @@ namespace CryptoSense.Application.Services
             else if (indicators.ConfluenceScore >= minLongScore &&
                 indicators.SuperTrendVote == IndicatorVote.Bullish &&
                 hasValidMarketRegime &&
-                volumeConfirmed &&
+                volumeSoftOk &&
                 rsiLongOk &&
                 btcResidualLongOk &&
                 ethLongOk &&
@@ -866,7 +877,7 @@ namespace CryptoSense.Application.Services
             else if (indicators.ConfluenceScore <= maxShortScore &&
                      indicators.SuperTrendVote == IndicatorVote.Bearish &&
                      hasValidMarketRegime &&
-                     volumeConfirmed &&
+                     volumeSoftOk &&
                      rsiShortOk &&
                      btcResidualShortOk &&
                      ethShortOk &&
@@ -882,7 +893,7 @@ namespace CryptoSense.Application.Services
                 confidence = 50;
                 if (!hasValidMarketRegime) reasons.Add($"Rejim Filtri: ADX ({indicators.Adx:F1}) < {minAdxRequired:F1} (Bazar zəif/yan konsolidasiyadadır)");
                 if (indicators.SuperTrendVote != IndicatorVote.Bullish && isUptrend) reasons.Add("SuperTrend təsdiqi yoxdur (Trend ziddiyyətlidir)");
-                if (!volumeConfirmed) reasons.Add($"SKIP_VOLUME: Vol {indicators.VolumeSurgeRatio:F2} < {CryptoSense.Domain.Common.BotConstants.Thresholds.MinVolumeSurgeRatio:F2}");
+                if (!volumeSoftOk) reasons.Add($"SKIP_VOLUME: Vol {indicators.VolumeSurgeRatio:F2} < {CryptoSense.Domain.Common.BotConstants.Thresholds.MinVolumeSurgeRatio:F2}");
             }
 
             // Alt LONG təhlükəsizlik baryeri: BTC və ya ETH təsdiq etmirsə alt LONG qətiyyən buraxılmasın
@@ -1030,7 +1041,7 @@ namespace CryptoSense.Application.Services
             if (isTradeSignal)
             {
                 // S/R Target and Exit calculation (1h / 4h ATR Cap and R:R >= 1.30)
-                var srResult = CalculateSrTargetsAndStops(closedKlines, direction, calculationRefPrice, indicators.Atr, indicators.Vwap, timeframe);
+                var srResult = CalculateSrTargetsAndStops(closedKlines, direction, calculationRefPrice, indicators.Atr, indicators.Vwap, timeframe, reasons);
                 if (!srResult.Success)
                 {
                     return new FuturesSignal
