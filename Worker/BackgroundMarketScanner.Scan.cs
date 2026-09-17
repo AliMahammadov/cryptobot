@@ -73,7 +73,10 @@ namespace CryptoSense.Worker
                 var bakuDayStartUtc = DateTime.UtcNow.AddHours(4).Date.AddHours(-4);
                 var todayClosedPnL = await unitOfWork.Signals.GetClosedPnlSinceAsync(bakuDayStartUtc);
 
-                if (todayClosedPnL <= BotConstants.Thresholds.DailyLossThreshold)
+                // MÜVƏQQƏTİ TEST: İstifadəçinin istəyi ilə yeni sistemin siqnallarını test etmək üçün günlük itki limiti müvəqqəti bypass edilir.
+                // Sabah və ya test bitdikdən sonra şərt bərpa olunacaq.
+                bool bypassDailyLossForTesting = true;
+                if (!bypassDailyLossForTesting && todayClosedPnL <= BotConstants.Thresholds.DailyLossThreshold)
                 {
                     Interlocked.Increment(ref _hourlyTelemetry.SkipDailyLoss);
                     Console.WriteLine($"[SCAN_CYCLE_SKIP] reason=DAILY_LOSS pnl={todayClosedPnL:F2}% threshold={BotConstants.Thresholds.DailyLossThreshold:F1}%");
@@ -81,6 +84,10 @@ namespace CryptoSense.Worker
                     await MaybeSendHourlyHeartbeatAsync(stoppingToken);
                     LastScanUtc = DateTime.UtcNow;
                     return;
+                }
+                else if (bypassDailyLossForTesting && todayClosedPnL <= BotConstants.Thresholds.DailyLossThreshold)
+                {
+                    Console.WriteLine($"[SCAN_CYCLE_TEST] DAILY_LOSS pnl={todayClosedPnL:F2}% threshold={BotConstants.Thresholds.DailyLossThreshold:F1}% (BYPASSED TEMPORARILY FOR TESTING)");
                 }
             }
             catch (Exception _ex) { Console.WriteLine($"[BackgroundMarketScanner] Swallowed exception: {_ex.Message}"); }
