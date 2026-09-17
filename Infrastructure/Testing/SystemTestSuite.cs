@@ -967,10 +967,10 @@ namespace CryptoSense.Infrastructure.Testing
                 return Task.FromResult(true);
             });
 
-            // 35. Risk:Reward Gate: R:R = (weighted TP) / (SL məsafəsi) < 1.30 -> SKIP_RR
-            await AssertTest("Test 42: Risk:Reward Gate - R:R < 1.30 Strictly Blocked & Format Verified", () =>
+            // 35. Risk:Reward Gate: R:R = (weighted TP) / (SL məsafəsi) < 2.00 -> SKIP_RR
+            await AssertTest("Test 42: Risk:Reward Gate - R:R < 2.00 Strictly Blocked & Format Verified", () =>
             {
-                // Case 1: Bad R:R (e.g. BTC TP1 +1.08%, SL -1.01%, R:R = 1.07 < 1.30)
+                // Case 1: Bad R:R (e.g. BTC TP1 +1.08%, SL -1.01%, R:R = 1.07 < 2.00)
                 decimal entryPrice = 78350.00m;
                 decimal badTp1 = 79200.00m;
                 decimal badSl = 77560.55m;
@@ -992,9 +992,9 @@ namespace CryptoSense.Infrastructure.Testing
                 string log = $"[MarketScanner] SKIP_RR send=NO BTCUSDT tp1%={badTp1Pct:F2}% sl%={badSlPct:F2}% rr={badRr:F2}";
                 Console.WriteLine(log);
 
-                // Case 2: Good R:R (e.g. TP1 +1.40%, SL -1.01%, R:R >= 1.30)
+                // Case 2: Good R:R (e.g. TP1 +2.12%, SL -1.01%, R:R >= 2.00)
                 decimal goodSlDist = badSlDist;
-                decimal goodTp1Dist = goodSlDist * 1.35m;
+                decimal goodTp1Dist = goodSlDist * 2.10m;
                 decimal goodTp1 = entryPrice + goodTp1Dist;
                 decimal goodSl = badSl;
                 decimal goodRr = goodSlDist > 0 ? (goodTp1Dist / goodSlDist) : 0m;
@@ -1006,6 +1006,7 @@ namespace CryptoSense.Infrastructure.Testing
                     return Task.FromResult(false);
                 }
 
+                decimal goodTp2 = entryPrice + (goodSlDist * 2.10m);
                 var goodSig = new FuturesSignal
                 {
                     SignalNumber = 1,
@@ -1014,7 +1015,7 @@ namespace CryptoSense.Infrastructure.Testing
                     Timeframe = "1h",
                     EntryPrice = entryPrice,
                     TakeProfit1 = goodTp1,
-                    TakeProfit2 = 0m,
+                    TakeProfit2 = goodTp2,
                     TakeProfit3 = 0m,
                     StopLoss = goodSl,
                     ConfluenceScore = 80.0m
@@ -1076,67 +1077,118 @@ namespace CryptoSense.Infrastructure.Testing
             });
 
             // 38. Target Integrity: TP1 >= 0.60%, TP1 <= 2.50%, TP3 > 0 strictly guaranteed
-            await AssertTest("Test 45: Target Integrity - TP1 >= 0.60%, TP1 <= 2.50%, TP3 > 0 strictly guaranteed", () =>
+            // 38. Target Integrity: Fractal SL, TP1 ~ 1.5R, TP2 > TP1 (long) / TP2 < TP1 (short), TP3 == 0
+            await AssertTest("Test 45: Target Integrity - Fractal SL, TP1 ~ 1.5R, TP2 > TP1, TP3 == 0", () =>
             {
-                var klines = new List<Kline>();
                 var baseTime = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() - (60 * 15 * 60 * 1000);
-                decimal basePrice = 10.0m;
+                decimal basePrice = 100.0m;
+                decimal atr = 2.0m;
+                decimal tickSize = 0.01m;
+
+                // Buy test
+                var buyKlines = new List<Kline>();
                 for (int i = 0; i < 60; i++)
                 {
-                    decimal p = basePrice + ((decimal)Math.Sin(i * 0.2) * 0.15m);
-                    klines.Add(new Kline
+                    buyKlines.Add(new Kline
                     {
                         OpenTime = baseTime + (i * 15 * 60 * 1000),
-                        Open = p,
-                        High = p + 0.05m,
-                        Low = p - 0.05m,
-                        Close = p + 0.01m,
+                        Open = basePrice,
+                        High = basePrice + 0.50m,
+                        Low = basePrice - 0.50m,
+                        Close = basePrice,
                         Volume = 5000
                     });
                 }
+                // ±2 fractal swing high at index 25 for cluster resistance > 1.5R
+                buyKlines[25].High = 109.0m;
+                // ±2 fractal swing low at index 40 for fractal SL
+                buyKlines[40].Low = 96.80m;
 
-                // Buy test
-                var buyRes = SignalEngine.CalculateSrTargetsAndStops(klines, SignalDirection.Buy, basePrice, 0.03m, basePrice);
-                if (buyRes.Success)
+                var buyRes = SignalEngine.CalculateSrTargetsAndStops(buyKlines, SignalDirection.Buy, basePrice, atr, basePrice);
+                if (!buyRes.Success)
                 {
-                    decimal tp1Dist = ((buyRes.TakeProfit1 - basePrice) / basePrice) * 100m;
-                    if (tp1Dist < 0.60m || tp1Dist > 2.50m)
-                    {
-                        Console.WriteLine($"[Test 45 Fail] Buy TP1 distance is {tp1Dist:F2}% (expected 0.60% - 2.50%)");
-                        return Task.FromResult(false);
-                    }
-                    if (buyRes.TakeProfit2 > 0 && buyRes.TakeProfit2 <= buyRes.TakeProfit1)
-                    {
-                        Console.WriteLine($"[Test 45 Fail] Buy targets invalid: TP1={buyRes.TakeProfit1}, TP2={buyRes.TakeProfit2}");
-                        return Task.FromResult(false);
-                    }
-                    if (buyRes.TakeProfit3 > 0 && buyRes.TakeProfit3 <= buyRes.TakeProfit2)
-                    {
-                        Console.WriteLine($"[Test 45 Fail] Buy targets invalid: TP2={buyRes.TakeProfit2}, TP3={buyRes.TakeProfit3}");
-                        return Task.FromResult(false);
-                    }
+                    Console.WriteLine($"[Test 45 Fail] Buy failed: {buyRes.SkipReason}");
+                    return Task.FromResult(false);
+                }
+
+                decimal expectedBuyTp1 = basePrice + BotConstants.Thresholds.Tp1R * buyRes.InitialRiskR;
+                if (Math.Abs(buyRes.TakeProfit1 - expectedBuyTp1) > 2 * tickSize)
+                {
+                    Console.WriteLine($"[Test 45 Fail] Buy TP1 not ~1.5R: actual={buyRes.TakeProfit1}, expected={expectedBuyTp1}");
+                    return Task.FromResult(false);
+                }
+                if (buyRes.TakeProfit2 <= buyRes.TakeProfit1)
+                {
+                    Console.WriteLine($"[Test 45 Fail] Buy targets invalid: TP1={buyRes.TakeProfit1}, TP2={buyRes.TakeProfit2}");
+                    return Task.FromResult(false);
+                }
+                if (buyRes.TakeProfit3 != 0m)
+                {
+                    Console.WriteLine($"[Test 45 Fail] Buy TP3 is not 0: TP3={buyRes.TakeProfit3}");
+                    return Task.FromResult(false);
+                }
+                if (buyRes.StopLoss >= basePrice)
+                {
+                    Console.WriteLine($"[Test 45 Fail] Buy SL not below entry: SL={buyRes.StopLoss}, entry={basePrice}");
+                    return Task.FromResult(false);
+                }
+                if (buyRes.InitialRiskR < BotConstants.Thresholds.MinSlAtr * atr || buyRes.InitialRiskR > BotConstants.Thresholds.MaxSlAtr * atr)
+                {
+                    Console.WriteLine($"[Test 45 Fail] Buy SL distance out of ATR bounds: {buyRes.InitialRiskR}");
+                    return Task.FromResult(false);
                 }
 
                 // Sell test
-                var sellRes = SignalEngine.CalculateSrTargetsAndStops(klines, SignalDirection.Sell, basePrice, 0.05m, basePrice);
-                if (sellRes.Success)
+                var sellKlines = new List<Kline>();
+                for (int i = 0; i < 60; i++)
                 {
-                    decimal tp1Dist = ((basePrice - sellRes.TakeProfit1) / basePrice) * 100m;
-                    if (tp1Dist < 0.60m || tp1Dist > 2.50m)
+                    sellKlines.Add(new Kline
                     {
-                        Console.WriteLine($"[Test 45 Fail] Sell TP1 distance is {tp1Dist:F2}% (expected 0.60% - 2.50%)");
-                        return Task.FromResult(false);
-                    }
-                    if (sellRes.TakeProfit2 > 0 && sellRes.TakeProfit2 >= sellRes.TakeProfit1)
-                    {
-                        Console.WriteLine($"[Test 45 Fail] Sell targets invalid: TP1={sellRes.TakeProfit1}, TP2={sellRes.TakeProfit2}");
-                        return Task.FromResult(false);
-                    }
-                    if (sellRes.TakeProfit3 > 0 && sellRes.TakeProfit3 >= sellRes.TakeProfit2)
-                    {
-                        Console.WriteLine($"[Test 45 Fail] Sell targets invalid: TP2={sellRes.TakeProfit2}, TP3={sellRes.TakeProfit3}");
-                        return Task.FromResult(false);
-                    }
+                        OpenTime = baseTime + (i * 15 * 60 * 1000),
+                        Open = basePrice,
+                        High = basePrice + 0.50m,
+                        Low = basePrice - 0.50m,
+                        Close = basePrice,
+                        Volume = 5000
+                    });
+                }
+                // ±2 fractal swing low at index 25 for cluster support below 1.5R
+                sellKlines[25].Low = 91.0m;
+                // ±2 fractal swing high at index 40 for fractal SL
+                sellKlines[40].High = 103.20m;
+
+                var sellRes = SignalEngine.CalculateSrTargetsAndStops(sellKlines, SignalDirection.Sell, basePrice, atr, basePrice);
+                if (!sellRes.Success)
+                {
+                    Console.WriteLine($"[Test 45 Fail] Sell failed: {sellRes.SkipReason}");
+                    return Task.FromResult(false);
+                }
+
+                decimal expectedSellTp1 = basePrice - BotConstants.Thresholds.Tp1R * sellRes.InitialRiskR;
+                if (Math.Abs(sellRes.TakeProfit1 - expectedSellTp1) > 2 * tickSize)
+                {
+                    Console.WriteLine($"[Test 45 Fail] Sell TP1 not ~1.5R: actual={sellRes.TakeProfit1}, expected={expectedSellTp1}");
+                    return Task.FromResult(false);
+                }
+                if (sellRes.TakeProfit2 >= sellRes.TakeProfit1)
+                {
+                    Console.WriteLine($"[Test 45 Fail] Sell targets invalid: TP1={sellRes.TakeProfit1}, TP2={sellRes.TakeProfit2}");
+                    return Task.FromResult(false);
+                }
+                if (sellRes.TakeProfit3 != 0m)
+                {
+                    Console.WriteLine($"[Test 45 Fail] Sell TP3 is not 0: TP3={sellRes.TakeProfit3}");
+                    return Task.FromResult(false);
+                }
+                if (sellRes.StopLoss <= basePrice)
+                {
+                    Console.WriteLine($"[Test 45 Fail] Sell SL not above entry: SL={sellRes.StopLoss}, entry={basePrice}");
+                    return Task.FromResult(false);
+                }
+                if (sellRes.InitialRiskR < BotConstants.Thresholds.MinSlAtr * atr || sellRes.InitialRiskR > BotConstants.Thresholds.MaxSlAtr * atr)
+                {
+                    Console.WriteLine($"[Test 45 Fail] Sell SL distance out of ATR bounds: {sellRes.InitialRiskR}");
+                    return Task.FromResult(false);
                 }
 
                 return Task.FromResult(true);
@@ -1165,7 +1217,8 @@ namespace CryptoSense.Infrastructure.Testing
 
                 // Trigger Breakeven
                 sig.BreakevenTriggered = true;
-                sig.StopLoss = SignalEngine.RoundToCoinPrecision(sig.EntryPrice, sig.EntryPrice * 0.9988m); // 0.9988
+                decimal atr = (sig.AtrPercent / 100m) * sig.EntryPrice;
+                sig.StopLoss = SignalEngine.RoundToCoinPrecision(sig.EntryPrice, sig.EntryPrice - BotConstants.Thresholds.BeBufferAtr * atr);
 
                 // Current live price is 0.991 (+0.9% profit)
                 decimal livePrice = 0.991m;
@@ -1181,8 +1234,8 @@ namespace CryptoSense.Infrastructure.Testing
                     return Task.FromResult(false);
                 }
 
-                // If price reverses back to 0.9988 or 0.9990, now it should close at BE:
-                decimal retracePrice = 0.9990m;
+                // If price reverses back to stop loss, now it should close at BE:
+                decimal retracePrice = sig.StopLoss + 0.0010m;
                 bool isRetraceSlHit = (sig.BreakevenTriggered || sig.Tp1Notified)
                     ? (retracePrice >= sig.StopLoss)
                     : (sig.SessionHigh >= sig.StopLoss || retracePrice >= sig.StopLoss);
@@ -2032,19 +2085,20 @@ namespace CryptoSense.Infrastructure.Testing
                 }
             });
 
-            // 49. SignalEmitGates Unit Verification (SL 2.81% 1h fail, RR 1.29 fail, DataAge 3501 fail, 2.80/1.30/3500 pass)
+            // 49. SignalEmitGates Unit Verification (SL ATR bounds, RR, DataAge Thresholds from BotConstants)
             await AssertTest("Test 57: SignalEmitGates - SL, RR, DataAge Thresholds from BotConstants", () =>
             {
-                // 1. Pass baseline (SL 2.0%, RR 1.30, DataAge 1000ms)
+                // 1. Pass: Entry=100, AtrPercent=1.50 (atrAbs=1.5), SL=97.50 (sl=2.50=1.667 ATR), TP1=103.75 (1.5R), TP2=106.00 -> weighted RR=(0.4*3.75+0.6*6)/2.50=2.04 >= 2.00, DataAge=1000 -> pass
                 var baseSignal = new FuturesSignal
                 {
                     Symbol = "TESTGATE57",
                     Timeframe = "1h",
                     Direction = SignalDirection.Buy,
                     EntryPrice = 100m,
-                    TakeProfit1 = 102.00m,
-                    TakeProfit2 = 103.20m,
-                    StopLoss = 98.00m,
+                    AtrPercent = 1.50m,
+                    TakeProfit1 = 103.75m,
+                    TakeProfit2 = 106.00m,
+                    StopLoss = 97.50m,
                     DataAgeMs = 1000
                 };
                 var (passOk, passReason) = CryptoSense.Application.Services.SignalEmitGates.Evaluate(baseSignal, 100m, 1000, "1h");
@@ -2054,73 +2108,57 @@ namespace CryptoSense.Infrastructure.Testing
                     return Task.FromResult(false);
                 }
 
-                // 2. Exact boundary pass: SL 2.80%, RR 1.30, DataAge 3500ms
-                var boundarySignal = new FuturesSignal
-                {
-                    Symbol = "TESTGATE57",
-                    Timeframe = "1h",
-                    Direction = SignalDirection.Buy,
-                    EntryPrice = 100m,
-                    TakeProfit1 = 103.00m,
-                    TakeProfit2 = 104.28m,
-                    StopLoss = 97.20m, // 2.80% SL
-                    DataAgeMs = 3500
-                };
-                var (boundaryOk, boundaryReason) = CryptoSense.Application.Services.SignalEmitGates.Evaluate(boundarySignal, 100m, 3500, "1h");
-                if (!boundaryOk)
-                {
-                    Console.WriteLine($"[Test 57 Fail] Exact boundary signal (2.80% / 1.30 / 3500ms) was blocked: {boundaryReason}");
-                    return Task.FromResult(false);
-                }
-
-                // 3. SL Fail: SL 2.81% (1h) -> fail ("SL")
+                // 2. ATR-wide fail: same but StopLoss=95.40 (sl=4.60 > 3*1.5=4.50) -> reason "SL"
                 var slFailSignal = new FuturesSignal
                 {
                     Symbol = "TESTGATE57",
                     Timeframe = "1h",
                     Direction = SignalDirection.Buy,
                     EntryPrice = 100m,
-                    TakeProfit1 = 105.00m,
-                    TakeProfit2 = 105.00m,
-                    StopLoss = 97.19m, // 2.81% SL > 2.80%
+                    AtrPercent = 1.50m,
+                    TakeProfit1 = 103.75m,
+                    TakeProfit2 = 106.00m,
+                    StopLoss = 95.40m,
                     DataAgeMs = 1000
                 };
                 var (slOk, slReason) = CryptoSense.Application.Services.SignalEmitGates.Evaluate(slFailSignal, 100m, 1000, "1h");
                 if (slOk || slReason != "SL")
                 {
-                    Console.WriteLine($"[Test 57 Fail] SL 2.81% was not rejected with 'SL': ok={slOk}, reason={slReason}");
+                    Console.WriteLine($"[Test 57 Fail] ATR-wide SL was not rejected with 'SL': ok={slOk}, reason={slReason}");
                     return Task.FromResult(false);
                 }
 
-                // 4. RR Fail: R:R 1.29 -> fail ("RR")
+                // 3. RR fail: TP2=0 or TP2==TP1 -> "RR"
                 var rrFailSignal = new FuturesSignal
                 {
                     Symbol = "TESTGATE57",
                     Timeframe = "1h",
                     Direction = SignalDirection.Buy,
                     EntryPrice = 100m,
-                    TakeProfit1 = 101.29m,
-                    TakeProfit2 = 101.29m,
-                    StopLoss = 99.00m, // SL dist = 1.0 -> RR = 1.29 < 1.30
+                    AtrPercent = 1.50m,
+                    TakeProfit1 = 103.75m,
+                    TakeProfit2 = 0m,
+                    StopLoss = 97.50m,
                     DataAgeMs = 1000
                 };
                 var (rrOk, rrReason) = CryptoSense.Application.Services.SignalEmitGates.Evaluate(rrFailSignal, 100m, 1000, "1h");
                 if (rrOk || rrReason != "RR")
                 {
-                    Console.WriteLine($"[Test 57 Fail] RR 1.29 was not rejected with 'RR': ok={rrOk}, reason={rrReason}");
+                    Console.WriteLine($"[Test 57 Fail] RR fail was not rejected with 'RR': ok={rrOk}, reason={rrReason}");
                     return Task.FromResult(false);
                 }
 
-                // 5. DataAge Fail: DataAge 3501 -> fail ("DataAge")
+                // 4. DataAge fail: DataAge=3501 with otherwise passing TP/SL/AtrPercent -> "DataAge"
                 var ageFailSignal = new FuturesSignal
                 {
                     Symbol = "TESTGATE57",
                     Timeframe = "1h",
                     Direction = SignalDirection.Buy,
                     EntryPrice = 100m,
-                    TakeProfit1 = 103.00m,
-                    TakeProfit2 = 104.28m,
-                    StopLoss = 98.00m,
+                    AtrPercent = 1.50m,
+                    TakeProfit1 = 103.75m,
+                    TakeProfit2 = 106.00m,
+                    StopLoss = 97.50m,
                     DataAgeMs = 3501
                 };
                 var (ageOk, ageReason) = CryptoSense.Application.Services.SignalEmitGates.Evaluate(ageFailSignal, 100m, 3501, "1h");

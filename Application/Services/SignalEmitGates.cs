@@ -14,16 +14,23 @@ namespace CryptoSense.Application.Services
             decimal entry = signal.EntryPrice > 0 ? signal.EntryPrice : livePrice;
 
             decimal slDist = Math.Abs(signal.StopLoss - entry);
-            decimal slPct = entry > 0 ? (slDist / entry) * 100m : 0m;
-            decimal maxSlPct = tf == "4h" ? BotConstants.Thresholds.MaxSlPct4h : BotConstants.Thresholds.MaxSlPct1h;
-            if (slPct > maxSlPct)
+            if (signal.AtrPercent > 0)
             {
-                return (false, "SL");
+                decimal atrAbs = entry * signal.AtrPercent / 100m;
+                if (slDist < BotConstants.Thresholds.MinSlAtr * atrAbs || slDist > BotConstants.Thresholds.MaxSlAtr * atrAbs)
+                {
+                    return (false, "SL");
+                }
+            }
+
+            if (signal.TakeProfit2 <= 0 || signal.TakeProfit2 == signal.TakeProfit1)
+            {
+                return (false, "RR");
             }
 
             decimal tp1Dist = Math.Abs(signal.TakeProfit1 - entry);
-            decimal tpBDist = signal.TakeProfit2 > 0 ? Math.Abs(signal.TakeProfit2 - entry) : tp1Dist;
-            decimal weightedTpDist = (0.50m * tp1Dist) + (0.50m * tpBDist);
+            decimal tpBDist = Math.Abs(signal.TakeProfit2 - entry);
+            decimal weightedTpDist = (BotConstants.Thresholds.Tp1Weight * tp1Dist) + (BotConstants.Thresholds.Tp2Weight * tpBDist);
             decimal effectiveRr = slDist > 0 ? (weightedTpDist / slDist) : 0m;
             if (effectiveRr < BotConstants.Thresholds.MinRiskReward)
             {

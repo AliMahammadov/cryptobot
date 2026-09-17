@@ -216,13 +216,13 @@ namespace CryptoSense.Worker
                             }
                         }
 
-                        var prioritizedTfs = new[] { "1h", "4h" }
+                        var prioritizedTfs = new[] { "4h", "1h" }
                             .Where(tf => activeTimeframes.Contains(tf))
                             .ToList();
 
                         if (prioritizedTfs.Count == 0)
                         {
-                            prioritizedTfs = new List<string> { "1h", "4h" };
+                            prioritizedTfs = new List<string> { "4h", "1h" };
                         }
 
                         foreach (var tf in prioritizedTfs)
@@ -261,11 +261,11 @@ namespace CryptoSense.Worker
                             {
                                 // Strict single-bucket skip classification
                                 // Priority: BtcGate > Range > Confluence > SL > RR > Chase > Gozleme
-                                bool hasBtcGate = signal.AnalysisReasons != null && signal.AnalysisReasons.Any(r => r.Contains("SKIP_BTC_BEAR_LONG") || r.Contains("SKIP_BTC_4H_OPPOSE"));
+                                bool hasBtcGate = signal.AnalysisReasons != null && signal.AnalysisReasons.Any(r => r.Contains("SKIP_BTC_BEAR_LONG") || r.Contains("SKIP_BTC_4H_OPPOSE") || r.Contains("SKIP_HTF_OPPOSE"));
                                 bool hasBtcRange = signal.AnalysisReasons != null && signal.AnalysisReasons.Any(r => r.Contains("SKIP_BTC_RANGE"));
                                 bool hasConfluence = signal.AnalysisReasons != null && signal.AnalysisReasons.Any(r => r.Contains("Confluence Filtri") || r.Contains("< 75.0%"));
-                                bool hasSL = signal.AnalysisReasons != null && signal.AnalysisReasons.Any(r => r.Contains("SKIP_SL_TOO_WIDE"));
-                                bool hasRR = signal.AnalysisReasons != null && signal.AnalysisReasons.Any(r => r.Contains("SKIP_LOW_RR"));
+                                bool hasSL = signal.AnalysisReasons != null && signal.AnalysisReasons.Any(r => r.Contains("SKIP_SL_TOO_WIDE") || r.Contains("SKIP_SL_TOO_TIGHT") || r.Contains("SKIP_NO_SWING"));
+                                bool hasRR = signal.AnalysisReasons != null && signal.AnalysisReasons.Any(r => r.Contains("SKIP_LOW_RR") || r.Contains("SKIP_NO_STRUCTURE_TARGET"));
                                 bool hasChase = signal.AnalysisReasons != null && signal.AnalysisReasons.Any(r => r.Contains("SKIP_CHASE"));
 
                                 if (hasBtcGate)

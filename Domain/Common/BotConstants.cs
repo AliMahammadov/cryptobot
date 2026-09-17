@@ -72,13 +72,9 @@ namespace CryptoSense.Domain.Common
             /// <summary>Min confluence score for 1m/3m signals</summary>
             public const decimal MinConfluence1m3m        = 90m;
             /// <summary>Minimum R:R ratio for signal dispatch</summary>
-            public const decimal MinRiskReward            = 1.30m;
+            public const decimal MinRiskReward            = 2.00m;
             /// <summary>No-signal heartbeat interval (minutes)</summary>
             public const int     HeartbeatIntervalMinutes = 60;
-            /// <summary>Max Stop-Loss percentage for 1h signals (2.80%)</summary>
-            public const decimal MaxSlPct1h               = 2.80m;
-            /// <summary>Max Stop-Loss percentage for 4h signals (4.00%)</summary>
-            public const decimal MaxSlPct4h               = 4.00m;
             /// <summary>Max allowable WebSocket DataAge in milliseconds</summary>
             public const long    MaxDataAgeMs             = 3500;
             /// <summary>Max global concurrent open signals</summary>
@@ -89,6 +85,18 @@ namespace CryptoSense.Domain.Common
             public const decimal MinAdx1h                 = 22m;
             /// <summary>Min ADX for 4h signals</summary>
             public const decimal MinAdx4h                 = 16m;
+
+            public const decimal MinSlAtr = 1.20m;
+            public const decimal MaxSlAtr = 3.00m;
+            public const decimal SlBufferAtr = 0.20m;
+            public const decimal Tp1R = 1.50m;
+            public const decimal PartialTp1 = 0.40m;      // close 40% at TP_A
+            public const decimal PartialTp2 = 0.50m;      // close half of remaining at TP_B -> 30% original left
+            public const decimal TrailAtr = 2.00m;
+            public const decimal BeBufferAtr = 0.20m;
+            public const decimal ThinBookAtr = 1.70m;
+            public const decimal Tp1Weight = 0.40m;
+            public const decimal Tp2Weight = 0.60m;
         }
 
         // Super Admin identifiers — never hardcode inline

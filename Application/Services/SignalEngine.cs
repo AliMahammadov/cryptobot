@@ -204,66 +204,48 @@ namespace CryptoSense.Application.Services
             decimal atrPct = (atr14 > 0 && calculationRefPrice > 0) ? (atr14 / calculationRefPrice) * 100m : 1.0m;
             fail = new SrTargetResult(false, null, 0, 0, 0, 0, 0, atrPct, signalSwingLow, signalSwingHigh, clusters);
 
-            // BƏND 2 — SL = DƏSTƏK/DİRƏNC + ATR (ƏSAS PUL QAYDASI)
-            // son 4–6 şamın swing HIGH / swing LOW
-            int swingCount = Math.Min(6, closedKlines.Count);
-            var recentCandles = closedKlines.TakeLast(swingCount).ToList();
-            decimal swingHigh = recentCandles.Max(c => c.High);
-            decimal swingLow = recentCandles.Min(c => c.Low);
-
-            decimal bufferAtr = 0.10m * atr14;
-            decimal minAtrDistance = 1.50m * atr14;
-            decimal floorAtrDistance = 1.20m * atr14;
-
             decimal slDistance;
             decimal sl;
 
-            if (direction == SignalDirection.Sell) // SHORT
+            if (direction == SignalDirection.Buy) // LONG
             {
-                // 1h SHORT SL = max(1.50 × ATR(14) eyni 1h, son 4–6 × 1h şamın swing HIGH + 0.10 × ATR)
-                decimal swingLevel = swingHigh + bufferAtr;
-                decimal swingDist = swingLevel - calculationRefPrice;
-                slDistance = Math.Max(minAtrDistance, swingDist);
-                if (slDistance < floorAtrDistance) slDistance = floorAtrDistance;
-                sl = calculationRefPrice + slDistance;
+                decimal fractalSwing = swingLows.LastOrDefault(l => l < calculationRefPrice);
+                if (fractalSwing == 0)
+                {
+                    return fail with { SkipReason = "SKIP_NO_SWING" };
+                }
+                sl = fractalSwing - BotConstants.Thresholds.SlBufferAtr * atr14;
+                slDistance = calculationRefPrice - sl;
             }
-            else // LONG (SignalDirection.Buy)
+            else // SHORT (SignalDirection.Sell)
             {
-                // 1h LONG SL = max(1.50×ATR, swing LOW − 0.10×ATR)
-                decimal swingLevel = swingLow - bufferAtr;
-                decimal swingDist = calculationRefPrice - swingLevel;
-                slDistance = Math.Max(minAtrDistance, swingDist);
-                if (slDistance < floorAtrDistance) slDistance = floorAtrDistance;
-                sl = calculationRefPrice - slDistance;
+                decimal fractalSwing = swingHighs.LastOrDefault(h => h > calculationRefPrice);
+                if (fractalSwing == 0)
+                {
+                    return fail with { SkipReason = "SKIP_NO_SWING" };
+                }
+                sl = fractalSwing + BotConstants.Thresholds.SlBufferAtr * atr14;
+                slDistance = sl - calculationRefPrice;
+            }
+
+            if (slDistance < BotConstants.Thresholds.MinSlAtr * atr14)
+            {
+                return fail with { SkipReason = $"SKIP_SL_TOO_TIGHT (SL {slDistance:F4} < {BotConstants.Thresholds.MinSlAtr} * ATR)" };
+            }
+
+            if (slDistance > BotConstants.Thresholds.MaxSlAtr * atr14)
+            {
+                return fail with { SkipReason = $"SKIP_SL_TOO_WIDE (SL {slDistance:F4} > {BotConstants.Thresholds.MaxSlAtr} * ATR)" };
             }
 
             // 05:00–07:00 +4 pəncərəsində 1h: əlavə filtr — SL minimum 1.70 ATR (nazik kitab)
             var aztNowHour = DateTime.UtcNow.AddHours(4).Hour;
             if (timeframe == "1h" && aztNowHour >= 5 && aztNowHour < 7)
             {
-                decimal thinBookDist = 1.70m * atr14;
-                if (slDistance < thinBookDist)
+                if (slDistance < BotConstants.Thresholds.ThinBookAtr * atr14)
                 {
-                    slDistance = thinBookDist;
-                    sl = direction == SignalDirection.Buy
-                        ? calculationRefPrice - slDistance
-                        : calculationRefPrice + slDistance;
+                    return fail with { SkipReason = $"SKIP_SL_TOO_TIGHT (Thin book SL {slDistance:F4} < {BotConstants.Thresholds.ThinBookAtr} * ATR)" };
                 }
-            }
-
-            decimal slPct = calculationRefPrice > 0 ? (slDistance / calculationRefPrice) * 100m : 0m;
-
-            // 1h SL məsafəsi > 2.8% → kart AÇMA (ölçünü sıxmaq yox, treydi keç)
-            if (timeframe == "1h" && slPct > BotConstants.Thresholds.MaxSlPct1h)
-            {
-                Console.WriteLine($"[SignalEngine] 1h SL too wide ({slPct:F2}% > {BotConstants.Thresholds.MaxSlPct1h:F2}%). Trade skipped.");
-                return fail with { SkipReason = $"SKIP_SL_TOO_WIDE (1h SL {slPct:F2}% > {BotConstants.Thresholds.MaxSlPct1h:F2}%)" };
-            }
-            // 4h: eyni qayda, ATR(4h), swing 4–6 × 4h (4h AAVE 1.87 ATR / 2.40% saxla, max 4.0%)
-            if (timeframe == "4h" && slPct > BotConstants.Thresholds.MaxSlPct4h)
-            {
-                Console.WriteLine($"[SignalEngine] 4h SL too wide ({slPct:F2}% > {BotConstants.Thresholds.MaxSlPct4h:F2}%). Trade skipped.");
-                return fail with { SkipReason = $"SKIP_SL_TOO_WIDE (4h SL {slPct:F2}% > {BotConstants.Thresholds.MaxSlPct4h:F2}%)" };
             }
 
             // BƏND 5: CHASE QADAĞA: son 3×1h şamda qiymət artıq TP istiqamətində ≥1.2% getmişsə 1h kart AçMA (XRP 03:00, AVAX/SOL 05:00).
@@ -305,48 +287,48 @@ namespace CryptoSense.Application.Services
                 }
             }
 
-            // BƏND 3 — TP = 1R PARTİAL + STRUKTUR
-            // TP_A = 1.00R (girişdən SL məsafəsi qədər)
-            // TP_B = min(2.0R, növbəti struktur dəstək/dirənc)
-            decimal riskR = slDistance; // 1.00R
-            decimal tickSize = GetCoinTickSize(calculationRefPrice);
+            // BƏND 3 — TP = 1.5R PARTİAL + STRUKTUR
+            decimal riskR = slDistance;
 
             decimal tp1, tp2;
             if (direction == SignalDirection.Buy) // LONG
             {
-                tp1 = calculationRefPrice + riskR;
-                decimal maxTp2 = calculationRefPrice + (2.00m * riskR);
+                tp1 = calculationRefPrice + BotConstants.Thresholds.Tp1R * riskR;
                 var nextRes = clusters.Where(c => c > tp1 + (0.15m * riskR)).OrderBy(c => c).ToList();
-                decimal structRes = nextRes.Count > 0 ? nextRes.First() : maxTp2;
-                tp2 = Math.Min(maxTp2, structRes);
-                if (tp2 <= tp1) tp2 = maxTp2;
-
-                // HBAR #3 tipi: TP səviyyəsi low/high-a 1 tik qalırsa, TP-ni 1 tik YAXINLAŞDIR (hit olsun), SL-i daraltma
-                tp1 -= tickSize;
-                tp2 -= tickSize;
+                if (nextRes.Count == 0)
+                {
+                    return fail with { SkipReason = "SKIP_NO_STRUCTURE_TARGET" };
+                }
+                tp2 = nextRes.First();
+                if (tp2 <= tp1)
+                {
+                    return fail with { SkipReason = "SKIP_NO_STRUCTURE_TARGET" };
+                }
             }
             else // SHORT
             {
-                tp1 = calculationRefPrice - riskR;
-                decimal maxTp2 = calculationRefPrice - (2.00m * riskR);
+                tp1 = calculationRefPrice - BotConstants.Thresholds.Tp1R * riskR;
                 var nextSup = clusters.Where(c => c < tp1 - (0.15m * riskR)).OrderByDescending(c => c).ToList();
-                decimal structSup = nextSup.Count > 0 ? nextSup.First() : maxTp2;
-                tp2 = Math.Max(maxTp2, structSup);
-                if (tp2 >= tp1) tp2 = maxTp2;
-
-                // HBAR #3 tipi: TP səviyyəsi low/high-a 1 tik qalırsa, TP-ni 1 tik YAXINLAŞDIR (hit olsun), SL-i daraltma
-                tp1 += tickSize;
-                tp2 += tickSize;
+                if (nextSup.Count == 0)
+                {
+                    return fail with { SkipReason = "SKIP_NO_STRUCTURE_TARGET" };
+                }
+                tp2 = nextSup.First();
+                if (tp2 >= tp1)
+                {
+                    return fail with { SkipReason = "SKIP_NO_STRUCTURE_TARGET" };
+                }
             }
 
             tp1 = RoundToCoinPrecision(calculationRefPrice, tp1);
             tp2 = RoundToCoinPrecision(calculationRefPrice, tp2);
             sl = RoundToCoinPrecision(calculationRefPrice, sl);
 
-            // R:R < 1.30 (YENİ SL ilə hesabla) → kart yox
+            decimal tp3 = 0m;
+
             decimal tp1DistActual = Math.Abs(tp1 - calculationRefPrice);
             decimal tp2DistActual = Math.Abs(tp2 - calculationRefPrice);
-            decimal weightedTpDist = (0.50m * tp1DistActual) + (0.50m * tp2DistActual);
+            decimal weightedTpDist = (BotConstants.Thresholds.Tp1Weight * tp1DistActual) + (BotConstants.Thresholds.Tp2Weight * tp2DistActual);
             decimal rrRatio = riskR > 0 ? (weightedTpDist / riskR) : 0m;
 
             if (rrRatio < BotConstants.Thresholds.MinRiskReward)
@@ -354,8 +336,6 @@ namespace CryptoSense.Application.Services
                 Console.WriteLine($"[SignalEngine] R:R filter blocked (Weighted R:R {rrRatio:F2} < {BotConstants.Thresholds.MinRiskReward:F2})");
                 return fail with { SkipReason = $"SKIP_LOW_RR (Weighted R:R {rrRatio:F2} < {BotConstants.Thresholds.MinRiskReward:F2})" };
             }
-
-            decimal tp3 = 0m;
 
             return new SrTargetResult(
                 Success: true,
@@ -731,16 +711,17 @@ namespace CryptoSense.Application.Services
             {
                 try
                 {
-                    var btcKlines15m = await _marketData.GetKlinesAsync("BTCUSDT", "15m", closedKlines.Count);
-                    var closedBtc15m = btcKlines15m.Count >= 2 ? btcKlines15m.Take(btcKlines15m.Count - 1).ToList() : btcKlines15m;
-                    if (closedBtc15m.Count >= 10)
+                    var btcKlines = await _marketData.GetKlinesAsync("BTCUSDT", timeframe, closedKlines.Count);
+                    var closedBtc = btcKlines.Count >= 2 ? btcKlines.Take(btcKlines.Count - 1).ToList() : btcKlines;
+                    if (closedBtc.Count >= 10)
                     {
-                        var altCloses = closedKlines.Select(k => k.Close).ToList();
-                        var btcCloses = closedBtc15m.Select(k => k.Close).ToList();
+                        int alignCount = Math.Min(closedKlines.Count, closedBtc.Count);
+                        var altCloses = closedKlines.TakeLast(alignCount).Select(k => k.Close).ToList();
+                        var btcCloses = closedBtc.TakeLast(alignCount).Select(k => k.Close).ToList();
                         altBtcCorr = CalculatePearsonCorrelation(altCloses, btcCloses);
 
                         var lastAlt = closedKlines.Last();
-                        var lastBtc = closedBtc15m.Last();
+                        var lastBtc = closedBtc.Last();
                         decimal altChg = lastAlt.Open > 0 ? (lastAlt.Close - lastAlt.Open) / lastAlt.Open : 0m;
                         decimal btcChg = lastBtc.Open > 0 ? (lastBtc.Close - lastBtc.Open) / lastBtc.Open : 0m;
                         altRs = altChg - btcChg;
@@ -824,7 +805,7 @@ namespace CryptoSense.Application.Services
             // Candle Action Confirmations (Never enter against impulsive counter-trend bars)
             bool bullishCandleConfirmation = closedCandle.Close >= closedCandle.Open || buyerRejection;
             bool bearishCandleConfirmation = closedCandle.Close <= closedCandle.Open || sellerRejection;
-            bool volumeConfirmed = true;
+            bool volumeConfirmed = indicators.VolumeSurgeRatio >= 1.0m;
 
             // Extreme Volatility & High-Risk Anomaly Check
             bool isExtremeVolatility = (indicators.Atr > 0 && currentPrice > 0 && (indicators.Atr / currentPrice) >= 0.055m) ||
@@ -906,7 +887,7 @@ namespace CryptoSense.Application.Services
                 }
             }
 
-            if (timeframe == "1h" && direction == SignalDirection.Buy && determinedType.Contains("LONG"))
+            if (timeframe == "1h" && (determinedType.Contains("LONG") || determinedType.Contains("SHORT")))
             {
                 try
                 {
@@ -915,13 +896,22 @@ namespace CryptoSense.Application.Services
                     {
                         var closed4h = klines4h.Count >= 2 ? klines4h.Take(klines4h.Count - 1).ToList() : klines4h;
                         var ind4h = _indicatorEngine.CalculateIndicators(closed4h);
-                        bool is4hStrongShort = (ind4h.SuperTrendVote == IndicatorVote.Bearish && ind4h.ConfluenceScore <= 35m) ||
-                                               (closed4h.Last().Close < ind4h.Ema50 && ind4h.Ema20 < ind4h.Ema50 && ind4h.SuperTrendVote == IndicatorVote.Bearish);
-                        if (is4hStrongShort)
+                        decimal lastClose4h = closed4h.Last().Close;
+
+                        bool alignedLong = ind4h.SuperTrendVote == IndicatorVote.Bullish && lastClose4h > ind4h.Ema50;
+                        bool alignedShort = ind4h.SuperTrendVote == IndicatorVote.Bearish && lastClose4h < ind4h.Ema50;
+
+                        if (determinedType.Contains("LONG") && !alignedLong)
                         {
                             determinedType = "GÖZLƏMƏ ⚪";
                             confidence = 50;
-                            reasons.Add("1h LONG, 4h güclü SHORT olduğu üçün bloklandı");
+                            reasons.Add("SKIP_HTF_OPPOSE: 1h LONG vs 4h not bullish");
+                        }
+                        else if (determinedType.Contains("SHORT") && !alignedShort)
+                        {
+                            determinedType = "GÖZLƏMƏ ⚪";
+                            confidence = 50;
+                            reasons.Add("SKIP_HTF_OPPOSE: 1h SHORT vs 4h not bullish");
                         }
                     }
                 }
@@ -993,8 +983,8 @@ namespace CryptoSense.Application.Services
                 "3m" => 60,
                 "5m" => 60,
                 "15m" => 90,
-                "4h" => 1440,
-                _ => 480
+                "4h" => 4320,
+                _ => 2160
             };
 
             int sigNumber = 0; // Number is assigned strictly upon send-success in BackgroundMarketScanner

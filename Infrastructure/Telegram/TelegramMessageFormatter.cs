@@ -41,13 +41,15 @@ namespace CryptoSense.Infrastructure.Telegram
 
             decimal tpBDist = signal.TakeProfit2 > 0 ? Math.Abs(signal.TakeProfit2 - signal.EntryPrice) : 0m;
             decimal tpBPct = (signal.EntryPrice > 0 && tpBDist > 0) ? (tpBDist / signal.EntryPrice) * 100m : 0m;
-            decimal effectiveRr = slDist > 0 ? ((0.50m * tp1Dist + 0.50m * (tpBDist > 0 ? tpBDist : tp1Dist)) / slDist) : 0m;
+            decimal effectiveRr = (slDist > 0 && signal.TakeProfit2 > 0)
+                ? (((BotConstants.Thresholds.Tp1Weight * tp1Dist) + (BotConstants.Thresholds.Tp2Weight * tpBDist)) / slDist)
+                : 0m;
 
             sb.AppendLine($"📍 <b>Giriş Zonası:</b> ${signal.EntryLow.ToString(CultureInfo.InvariantCulture)} - ${signal.EntryHigh.ToString(CultureInfo.InvariantCulture)}");
-            sb.AppendLine($"🎯 <b>Hədəf A (TP_A 1.0R - 50%):</b> ${signal.TakeProfit1.ToString(CultureInfo.InvariantCulture)} (+{tp1Pct.ToString("F2", CultureInfo.InvariantCulture)}%) <i>[50% Bağla + BE Stop]</i>");
+            sb.AppendLine($"🎯 <b>Hədəf A (TP_A 1.5R - 40%):</b> ${signal.TakeProfit1.ToString(CultureInfo.InvariantCulture)} (+{tp1Pct.ToString("F2", CultureInfo.InvariantCulture)}%) <i>[40% Bağla; BE/trail sonra]</i>");
             if (signal.TakeProfit2 > 0 && signal.TakeProfit2 != signal.TakeProfit1)
             {
-                sb.AppendLine($"🎯 <b>Hədəf B (TP_B - 50%):</b> ${signal.TakeProfit2.ToString(CultureInfo.InvariantCulture)} (+{tpBPct.ToString("F2", CultureInfo.InvariantCulture)}%) <i>[Qalan 50% Struktur]</i>");
+                sb.AppendLine($"🎯 <b>Hədəf B (TP_B - struktur, tavan yox):</b> ${signal.TakeProfit2.ToString(CultureInfo.InvariantCulture)} (+{tpBPct.ToString("F2", CultureInfo.InvariantCulture)}%) <i>[30% bağla, 30% trail]</i>");
             }
             sb.AppendLine($"⛔ <b>Stop Loss (SL):</b> ${signal.StopLoss.ToString(CultureInfo.InvariantCulture)} (-{slPct.ToString("F2", CultureInfo.InvariantCulture)}%)");
             sb.AppendLine($"⚖️ <b>Risk:Mükafat (R:R):</b> <b>{effectiveRr.ToString("F2", CultureInfo.InvariantCulture)}</b>");
@@ -118,33 +120,33 @@ namespace CryptoSense.Infrastructure.Telegram
             if (outcomeType.Contains("TP1") || outcomeType.Contains("TP_A") || outcomeType.Contains("Hədəf 1") || outcomeType.Contains("Hədəf A"))
             {
                 sb.AppendLine();
-                sb.AppendLine("🛡️ <b>PARTİAL CLOSE (50% BAĞLANDI) & BE QORUMA:</b>");
-                sb.AppendLine("• Mövqenin <b>50%-i Hədəf A (TP_A 1.00R) səviyyəsində mənfəətlə bağlandı ✅</b>");
-                sb.AppendLine($"• Stop Loss dərhal <b>GİRİŞƏ (Breakeven: ${signal.EntryPrice.ToString(CultureInfo.InvariantCulture)})</b> çəkildi (Sıfır Risk)!");
+                sb.AppendLine("🛡️ <b>PARTİAL CLOSE (40% BAĞLANDI):</b>");
+                sb.AppendLine("• Mövqenin <b>40%-i Hədəf A (TP_A 1.5R) səviyyəsində mənfəətlə bağlandı ✅</b>");
+                sb.AppendLine("• Breakeven / trailing stop sonrakı şam hərəkətlərinə əsasən aktivləşəcək.");
                 if (signal.TakeProfit2 > 0 && signal.TakeProfit2 != signal.TakeProfit1)
                 {
-                    sb.AppendLine($"• Qalan <b>50%</b> mövqe ilə <b>Hədəf B (TP_B: ${signal.TakeProfit2.ToString(CultureInfo.InvariantCulture)})</b> strukturu gözlənilir.");
+                    sb.AppendLine($"• Qalan mövqe ilə <b>Hədəf B (TP_B: ${signal.TakeProfit2.ToString(CultureInfo.InvariantCulture)})</b> strukturu gözlənilir.");
                 }
             }
             else if (outcomeType.Contains("TP2") || outcomeType.Contains("TP_B") || outcomeType.Contains("Hədəf 2") || outcomeType.Contains("Hədəf B") || outcomeType.Contains("TP3") || outcomeType.Contains("Hədəf 3"))
             {
                 sb.AppendLine();
-                sb.AppendLine("🏆 <b>TAM HƏDƏFƏ ÇATILDI:</b> Qalan 50% mövqe Hədəf B (TP_B) ilə tam bağlandı.");
+                sb.AppendLine("🏆 <b>HƏDƏF B (TP_B):</b> 30% bağlandı, qalan 30% trailing stop ilə davam edir.");
             }
-            else if (outcomeType.Contains("Breakeven") || outcomeType.Contains("Qorundu") || signal.IsPartial1Closed)
+            else if (outcomeType.Contains("Breakeven") || outcomeType.Contains("Qorundu") || outcomeType.Contains("TRAIL") || outcomeType.Contains("Trailing") || signal.IsPartial1Closed)
             {
                 sb.AppendLine();
                 sb.AppendLine("🛡️ <b>PARTİAL CLOSE NƏTİCƏSİ & RİSK MENECMENT:</b>");
                 if (signal.IsPartial2Closed)
                 {
-                    sb.AppendLine("• <b>TP1 Səviyyəsində:</b> Mövqenin <b>50%-i QAZANCLA BAĞLANIB ✅</b>");
-                    sb.AppendLine("• <b>TP2 Səviyyəsində:</b> Mövqenin <b>25%-i ƏLAVƏ QAZANCLA BAĞLANIB ✅</b>");
-                    sb.AppendLine("• <b>Qalan 25% Pay:</b> Trailing Stop (TP1) səviyyəsində qorunaraq bağlandı.");
+                    sb.AppendLine("• <b>TP1 Səviyyəsində:</b> Mövqenin <b>40%-i QAZANCLA BAĞLANIB ✅</b>");
+                    sb.AppendLine("• <b>TP2 Səviyyəsində:</b> Mövqenin <b>30%-i ƏLAVƏ QAZANCLA BAĞLANIB ✅</b>");
+                    sb.AppendLine("• <b>Qalan 30% Pay:</b> Trailing Stop / BE səviyyəsində qorunaraq bağlandı.");
                 }
                 else if (signal.IsPartial1Closed)
                 {
-                    sb.AppendLine("• <b>TP1 Səviyyəsində:</b> Mövqenin <b>50%-i QAZANCLA BAĞLANIB ✅</b>");
-                    sb.AppendLine("• <b>Qalan 50% Pay:</b> Giriş qiymətində (Breakeven) sıfır risklə qorunaraq bağlandı.");
+                    sb.AppendLine("• <b>TP1 Səviyyəsində:</b> Mövqenin <b>40%-i QAZANCLA BAĞLANIB ✅</b>");
+                    sb.AppendLine("• <b>Qalan 60% Pay:</b> Breakeven / Trailing Stop səviyyəsində qorunaraq bağlandı.");
                 }
                 else
                 {
