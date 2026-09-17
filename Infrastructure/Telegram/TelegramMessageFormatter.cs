@@ -29,8 +29,32 @@ namespace CryptoSense.Infrastructure.Telegram
                 ? (((BotConstants.Thresholds.Tp1Weight * tp1Dist) + (BotConstants.Thresholds.Tp2Weight * tpBDist)) / slDist)
                 : 0m;
 
+            var candleDuration = signal.Timeframe switch
+            {
+                "4h" => TimeSpan.FromHours(4),
+                "15m" => TimeSpan.FromMinutes(15),
+                "5m" => TimeSpan.FromMinutes(5),
+                _ => TimeSpan.FromHours(1)
+            };
+
+            var candleCloseUtc = signal.CandleCloseTimeUtc != default
+                ? signal.CandleCloseTimeUtc
+                : (signal.SourceCandleOpenTimeUtc != default ? signal.SourceCandleOpenTimeUtc + candleDuration : signal.GeneratedAt);
+
+            var nextSignalUtc = candleCloseUtc + candleDuration;
+
+            var signalTimeStr = !string.IsNullOrWhiteSpace(signal.TimestampFormatted) && signal.TimestampFormatted != "Hələ yoxdur"
+                ? signal.TimestampFormatted
+                : TimeHelper.FormatAz(signal.GeneratedAt);
+            var candleCloseStr = TimeHelper.FormatAz(candleCloseUtc);
+            var nextSignalStr = TimeHelper.FormatAz(nextSignalUtc);
+
             var sb = new StringBuilder();
             sb.AppendLine($"#{userSigNum} {directionLabel} SİQNAL | {cleanSymbol} ({signal.Timeframe})");
+            sb.AppendLine();
+            sb.AppendLine($"🕒 <b>Siqnalın Verilmə Vaxtı:</b> {signalTimeStr}");
+            sb.AppendLine($"🕯️ <b>Şamın Bağlanma Vaxtı:</b> {candleCloseStr}");
+            sb.AppendLine($"⏳ <b>Növbəti Siqnalın Gəlmə Vaxtı:</b> {nextSignalStr}");
             sb.AppendLine();
             sb.AppendLine($"🎯 <b>Siqnalın Gücü:</b> <b>{signal.ConfluenceScore.ToString("F1", CultureInfo.InvariantCulture)}%</b> (Güclü Təsdiq)");
             sb.AppendLine($"⚖️ <b>Risk / Mükafat (R:R):</b> <b>{effectiveRr.ToString("F2", CultureInfo.InvariantCulture)}</b>");
@@ -56,11 +80,37 @@ namespace CryptoSense.Infrastructure.Telegram
             var directionStr = (signal.Direction == SignalDirection.Buy || signal.SignalType.Contains("LONG")) ? "LONG" : "SHORT";
             bool isSl = outcomeType.Contains("Stop Loss") || outcomeType.Contains("SL") || signal.Status == SignalStatus.Failed || (!outcomeType.Contains("TP") && profitPct < 0);
 
+            var candleDuration = signal.Timeframe switch
+            {
+                "4h" => TimeSpan.FromHours(4),
+                "15m" => TimeSpan.FromMinutes(15),
+                "5m" => TimeSpan.FromMinutes(5),
+                _ => TimeSpan.FromHours(1)
+            };
+
+            var candleCloseUtc = signal.CandleCloseTimeUtc != default
+                ? signal.CandleCloseTimeUtc
+                : (signal.SourceCandleOpenTimeUtc != default ? signal.SourceCandleOpenTimeUtc + candleDuration : signal.GeneratedAt);
+
+            var nextSignalUtc = candleCloseUtc + candleDuration;
+
+            var signalTimeStr = !string.IsNullOrWhiteSpace(signal.TimestampFormatted) && signal.TimestampFormatted != "Hələ yoxdur"
+                ? signal.TimestampFormatted
+                : TimeHelper.FormatAz(signal.GeneratedAt);
+            var candleCloseStr = TimeHelper.FormatAz(candleCloseUtc);
+            var nextSignalStr = TimeHelper.FormatAz(nextSignalUtc);
+            var outcomeTimeStr = TimeHelper.NowFormatted;
+
             var sb = new StringBuilder();
             if (outcomeType.Contains("TP1") || outcomeType.Contains("TP_A") || outcomeType.Contains("Hədəf 1") || outcomeType.Contains("Hədəf A"))
             {
                 sb.AppendLine($"🎯 <b>#{userSigNum} NƏTİCƏ | {cleanSymbol} ({directionStr}) ✅</b>");
-                sb.AppendLine("📌 <b>Hədəf A (TP_A) Vuruldu!</b>");
+                sb.AppendLine("📌 <b>Hədəf A (TP_A) Vuruldu (UĞURLU OLDU) ✅</b>");
+                sb.AppendLine();
+                sb.AppendLine($"🕒 <b>Siqnalın Verilmə Vaxtı:</b> {signalTimeStr}");
+                sb.AppendLine($"🕯️ <b>Şamın Bağlanma Vaxtı:</b> {candleCloseStr}");
+                sb.AppendLine($"⚡ <b>İcra Vaxtı:</b> {outcomeTimeStr}");
+                sb.AppendLine($"⏳ <b>Növbəti Siqnalın Gəlmə Vaxtı:</b> {nextSignalStr}");
                 sb.AppendLine();
                 sb.AppendLine($"💵 <b>Cari Qiymət:</b> ${hitPrice.ToString(CultureInfo.InvariantCulture)}");
                 sb.AppendLine($"💰 <b>Xalis Qazanc:</b> +{Math.Abs(netPnl).ToString("F2", CultureInfo.InvariantCulture)}% (komissiya çıxılıb)");
@@ -76,7 +126,12 @@ namespace CryptoSense.Infrastructure.Telegram
             else if (outcomeType.Contains("TP2") || outcomeType.Contains("TP_B") || outcomeType.Contains("Hədəf 2") || outcomeType.Contains("Hədəf B"))
             {
                 sb.AppendLine($"🎯 <b>#{userSigNum} NƏTİCƏ | {cleanSymbol} ({directionStr}) ✅</b>");
-                sb.AppendLine("📌 <b>Hədəf B (TP_B) Vuruldu!</b>");
+                sb.AppendLine("📌 <b>Hədəf B (TP_B) Vuruldu (UĞURLU OLDU) ✅</b>");
+                sb.AppendLine();
+                sb.AppendLine($"🕒 <b>Siqnalın Verilmə Vaxtı:</b> {signalTimeStr}");
+                sb.AppendLine($"🕯️ <b>Şamın Bağlanma Vaxtı:</b> {candleCloseStr}");
+                sb.AppendLine($"⚡ <b>İcra Vaxtı:</b> {outcomeTimeStr}");
+                sb.AppendLine($"⏳ <b>Növbəti Siqnalın Gəlmə Vaxtı:</b> {nextSignalStr}");
                 sb.AppendLine();
                 sb.AppendLine($"💵 <b>Cari Qiymət:</b> ${hitPrice.ToString(CultureInfo.InvariantCulture)}");
                 sb.AppendLine($"💰 <b>Xalis Qazanc:</b> +{Math.Abs(netPnl).ToString("F2", CultureInfo.InvariantCulture)}% (komissiya çıxılıb)");
@@ -88,7 +143,12 @@ namespace CryptoSense.Infrastructure.Telegram
             else if (isSl)
             {
                 sb.AppendLine($"⛔ <b>#{userSigNum} NƏTİCƏ | {cleanSymbol} ({directionStr}) ❌</b>");
-                sb.AppendLine("📌 <b>Stop-Loss Vuruldu!</b>");
+                sb.AppendLine("📌 <b>Stop-Loss Vuruldu (UĞURSUZ OLDU) ❌</b>");
+                sb.AppendLine();
+                sb.AppendLine($"🕒 <b>Siqnalın Verilmə Vaxtı:</b> {signalTimeStr}");
+                sb.AppendLine($"🕯️ <b>Şamın Bağlanma Vaxtı:</b> {candleCloseStr}");
+                sb.AppendLine($"⚡ <b>İcra Vaxtı:</b> {outcomeTimeStr}");
+                sb.AppendLine($"⏳ <b>Növbəti Siqnalın Gəlmə Vaxtı:</b> {nextSignalStr}");
                 sb.AppendLine();
                 sb.AppendLine($"💵 <b>Bağlanış Qiyməti:</b> ${hitPrice.ToString(CultureInfo.InvariantCulture)}");
                 sb.AppendLine($"📉 <b>Xalis İtki:</b> -{Math.Abs(netPnl).ToString("F2", CultureInfo.InvariantCulture)}% (komissiya daxil)");
@@ -103,6 +163,11 @@ namespace CryptoSense.Infrastructure.Telegram
                 var pnlSign = netPnl >= 0 ? "+" : "";
                 sb.AppendLine($"🎯 <b>#{userSigNum} NƏTİCƏ | {cleanSymbol} ({directionStr}) {statusIcon}</b>");
                 sb.AppendLine("📌 <b>Mövqe Tam Bağlandı (Qorundu)</b>");
+                sb.AppendLine();
+                sb.AppendLine($"🕒 <b>Siqnalın Verilmə Vaxtı:</b> {signalTimeStr}");
+                sb.AppendLine($"🕯️ <b>Şamın Bağlanma Vaxtı:</b> {candleCloseStr}");
+                sb.AppendLine($"⚡ <b>İcra Vaxtı:</b> {outcomeTimeStr}");
+                sb.AppendLine($"⏳ <b>Növbəti Siqnalın Gəlmə Vaxtı:</b> {nextSignalStr}");
                 sb.AppendLine();
                 sb.AppendLine($"💵 <b>Bağlanış Qiyməti:</b> ${hitPrice.ToString(CultureInfo.InvariantCulture)}");
                 sb.AppendLine($"💰 <b>Ümumi Realizə Olunan Xalis Qazanc:</b> <b>{pnlSign}{netPnl.ToString("F2", CultureInfo.InvariantCulture)}%</b>");
