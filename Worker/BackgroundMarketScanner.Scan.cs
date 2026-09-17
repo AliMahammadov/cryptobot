@@ -75,7 +75,7 @@ namespace CryptoSense.Worker
 
                 // MÜVƏQQƏTİ TEST: İstifadəçinin istəyi ilə yeni sistemin siqnallarını test etmək üçün günlük itki limiti müvəqqəti bypass edilir.
                 // Sabah və ya test bitdikdən sonra şərt bərpa olunacaq.
-                bool bypassDailyLossForTesting = false;
+                bool bypassDailyLossForTesting = true;
                 if (!bypassDailyLossForTesting && todayClosedPnL <= BotConstants.Thresholds.DailyLossThreshold)
                 {
                     Interlocked.Increment(ref _hourlyTelemetry.SkipDailyLoss);
