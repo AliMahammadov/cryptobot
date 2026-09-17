@@ -602,6 +602,10 @@ namespace CryptoSense.Infrastructure.Telegram
                         await SendMessageAsync(resultMsg, chatId, backKb);
                 }
             }
+            else if (data == "cb_admin_test_all")
+            {
+                await ExecuteTestAllAlertsCommandAsync(chatId, userSettings, scope);
+            }
             else if (data == "cb_close_admin")
             {
                 userSettings.IsAdminOpen = false;

@@ -1253,6 +1253,12 @@ namespace CryptoSense.Infrastructure.Telegram
                 return;
             }
 
+            if (isAdmin && (text == "/test_all" || text.Equals("test all", StringComparison.OrdinalIgnoreCase) || text.Equals("test_all", StringComparison.OrdinalIgnoreCase)))
+            {
+                await ExecuteTestAllAlertsCommandAsync(chatId, userSettings, scope);
+                return;
+            }
+
 
             // =========================================================================
             // 6. AUTHENTICATED REGULAR & ADMIN USER ACTIONS
@@ -2242,6 +2248,111 @@ namespace CryptoSense.Infrastructure.Telegram
             {
                 Console.WriteLine($"[ExecuteTestChannelCommandAsync] Error: {ex.Message}");
                 await SendMessageAsync($"⚠️ Test icra edilərkən xəta baş verdi: <code>{ex.Message}</code>", chatId);
+            }
+        }
+
+        public async Task ExecuteTestAllAlertsCommandAsync(string chatId, UserSettings userSettings, IServiceScope scope)
+        {
+            try
+            {
+                await SendMessageAsync("🧪 <b>BÜTÜN BİLDİRİŞLƏRİN TESTİ BAŞLADI (10 Bildiriş ardıcıl göndərilir)...</b>", chatId);
+
+                // 1. LONG SİQNAL
+                var sigLong = new FuturesSignal
+                {
+                    Symbol = "SOLUSDT",
+                    SignalType = "GÜCLÜ LONG 🟢",
+                    Direction = SignalDirection.Buy,
+                    EntryPrice = 148.50m,
+                    EntryLow = 148.20m,
+                    EntryHigh = 148.80m,
+                    TakeProfit1 = 152.20m,
+                    TakeProfit2 = 155.80m,
+                    StopLoss = 146.00m,
+                    ConfluenceScore = 85.0m,
+                    Timeframe = "1h",
+                    TimestampFormatted = Domain.Common.TimeHelper.NowFormatted
+                };
+                await SendMessageAsync(TelegramMessageFormatter.FormatSignalAlert(sigLong, 1), chatId);
+
+                // 2. SHORT SİQNAL
+                var sigShort = new FuturesSignal
+                {
+                    Symbol = "AVAXUSDT",
+                    SignalType = "GÜCLÜ SHORT 🔴",
+                    Direction = SignalDirection.Sell,
+                    EntryPrice = 25.00m,
+                    EntryLow = 24.90m,
+                    EntryHigh = 25.10m,
+                    TakeProfit1 = 24.25m,
+                    TakeProfit2 = 23.60m,
+                    StopLoss = 25.50m,
+                    ConfluenceScore = 82.0m,
+                    Timeframe = "1h",
+                    TimestampFormatted = Domain.Common.TimeHelper.NowFormatted
+                };
+                await SendMessageAsync(TelegramMessageFormatter.FormatSignalAlert(sigShort, 2), chatId);
+
+                // 3. NƏTİCƏ: TP_A VURULDU
+                await SendMessageAsync(TelegramMessageFormatter.FormatOutcomeAlert(sigLong, 1, "Hədəf A (TP_A 1.5R)", 152.20m, 2.40m), chatId);
+
+                // 4. NƏTİCƏ: TP_B VURULDU
+                await SendMessageAsync(TelegramMessageFormatter.FormatOutcomeAlert(sigLong, 1, "Hədəf B (TP_B)", 155.80m, 4.80m), chatId);
+
+                // 5. NƏTİCƏ: MÖVQE TAM BAĞLANDI (TRAILING STOP / BREAKEVEN)
+                sigLong.CloseReason = "Trailing Stop aktivləşdi";
+                await SendMessageAsync(TelegramMessageFormatter.FormatOutcomeAlert(sigLong, 1, "Trailing Stop", 151.00m, 3.25m), chatId);
+
+                // 6. NƏTİCƏ: STOP-LOSS
+                sigShort.Status = SignalStatus.Failed;
+                sigShort.CloseReason = "SL səviyyəsi keçildi";
+                await SendMessageAsync(TelegramMessageFormatter.FormatOutcomeAlert(sigShort, 2, "Stop Loss (SL)", 25.50m, -2.10m), chatId);
+
+                // 7. BAZAR NƏZARƏTİ (HEARTBEAT)
+                var hbMsg = TelegramMessageFormatter.FormatLiveHeartbeat(
+                    chase: 0, corr: 0, slWide: 2, lowRr: 1, activeLocks: 1, sent: 0,
+                    nextCheckMinutes: 60, dataAgeMsBtc: 140, skipStale: 0, skipLag: 0,
+                    skipConfluence: 14, telegramFail: 0, skipGozleme: 8, skipBtcGate: 15,
+                    skipBtcRange: 0, skipCircuitBreaker: 0, skipMaxOpen: 0, skipDailyLoss: 0,
+                    maxConfluenceSeen: 71.5m);
+                await SendMessageAsync(hbMsg, chatId);
+
+                // 8. BİTCOİN KOMPASI
+                var compass = new BtcMarketCompass
+                {
+                    Price = 64250.00m,
+                    Change24h = 2.15m,
+                    BtcDominance = 57.20m,
+                    Ema20 = 64100m,
+                    Ema50 = 63800m,
+                    Rsi15m = 58.4m,
+                    Trend = "Bullish (Yüksəliş) 🟢",
+                    TimestampFormatted = Domain.Common.TimeHelper.NowFormatted
+                };
+                await SendMessageAsync(TelegramMessageFormatter.FormatBtcCompass(compass), chatId);
+
+                // 9. VOLATİLLİK / RİSK BİLDİRİŞİ
+                await SendMessageAsync(TelegramMessageFormatter.FormatVolatilityRiskAlert("PEPEUSDT", 0.00000850m, 18.40m, 4.2m, "Kəskin həcm sıçrayışı və spayk şam"), chatId);
+
+                // 10. GÜN SONU HESABATI
+                var stats = new PerformanceStats
+                {
+                    TotalSignals = 8,
+                    SuccessSignals = 7,
+                    FailedSignals = 1,
+                    WinRatePercent = 87.5m,
+                    TotalNetProfitPercent = 14.85m
+                };
+                var coins = new List<string> { "SOL", "BTC", "ETH", "NEAR", "SUI" };
+                var reasons = new List<string> { "Bazar konsolidasiyası olan cütlüklər kənarlaşdırıldı", "R:R < 2.00 olan setup-lar bloklandı" };
+                await SendMessageAsync(TelegramMessageFormatter.FormatDailyReport(stats, coins, reasons, isSuperAdmin: true), chatId);
+
+                await SendMessageAsync("✅ <b>Bütün 10 bildiriş uğurla göndərildi! Şriftləri və formatı yoxlaya bilərsiniz.</b>", chatId);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[ExecuteTestAllAlertsCommandAsync] Error: {ex.Message}");
+                await SendMessageAsync($"⚠️ Test icra edilərkən xəta: <code>{ex.Message}</code>", chatId);
             }
         }
     }

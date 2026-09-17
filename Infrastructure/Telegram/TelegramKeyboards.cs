@@ -253,7 +253,8 @@ namespace CryptoSense.Infrastructure.Telegram
                     },
                     new[]
                     {
-                        new { text = "🧹 Test Hesabları Sil", callback_data = "cb_admin_purge_test_users" }
+                        new { text = "🧹 Test Hesabları Sil", callback_data = "cb_admin_purge_test_users" },
+                        new { text = "🧪 Bütün Bildirişləri Test Et", callback_data = "cb_admin_test_all" }
                     },
                     new[]
                     {
