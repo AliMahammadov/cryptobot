@@ -82,9 +82,10 @@ namespace CryptoSense.Domain.Common
             /// <summary>Max daily loss threshold percentage before trading halts</summary>
             public const decimal DailyLossThreshold       = -3.0m;
             /// <summary>Min ADX for 1h signals</summary>
-            public const decimal MinAdx1h                 = 22m;
+            public const decimal MinAdx1h                 = 20m;
             /// <summary>Min ADX for 4h signals</summary>
             public const decimal MinAdx4h                 = 16m;
+            public const decimal MinVolumeSurgeRatio      = 0.85m;
             public const decimal RsiExhaustionLong        = 78m;
             public const decimal RsiExhaustionShort       = 22m;
 

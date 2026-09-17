@@ -75,7 +75,7 @@ namespace CryptoSense.Worker
 
                 // MÜVƏQQƏTİ TEST: İstifadəçinin istəyi ilə yeni sistemin siqnallarını test etmək üçün günlük itki limiti müvəqqəti bypass edilir.
                 // Sabah və ya test bitdikdən sonra şərt bərpa olunacaq.
-                bool bypassDailyLossForTesting = true;
+                bool bypassDailyLossForTesting = false;
                 if (!bypassDailyLossForTesting && todayClosedPnL <= BotConstants.Thresholds.DailyLossThreshold)
                 {
                     Interlocked.Increment(ref _hourlyTelemetry.SkipDailyLoss);
@@ -267,17 +267,22 @@ namespace CryptoSense.Worker
                             if (!isTradeQualified)
                             {
                                 // Strict single-bucket skip classification
-                                // Priority: BtcGate > Range > Confluence > SL > RR > Chase > Gozleme
-                                bool hasBtcGate = signal.AnalysisReasons != null && signal.AnalysisReasons.Any(r => r.Contains("SKIP_BTC_BEAR_LONG") || r.Contains("SKIP_BTC_4H_OPPOSE") || r.Contains("SKIP_HTF_OPPOSE"));
+                                // Priority: BtcGate > Range > Confluence > Volume > SL > RR > Chase > Gozleme
+                                bool hasBtcGate = signal.AnalysisReasons != null && signal.AnalysisReasons.Any(r => r.Contains("SKIP_BTC_BEAR_LONG") || r.Contains("SKIP_BTC_4H_OPPOSE") || r.Contains("SKIP_HTF_OPPOSE") || r.Contains("SKIP_BTC_RESIDUAL"));
                                 bool hasBtcRange = signal.AnalysisReasons != null && signal.AnalysisReasons.Any(r => r.Contains("SKIP_BTC_RANGE"));
                                 bool hasConfluence = signal.AnalysisReasons != null && signal.AnalysisReasons.Any(r => r.Contains("Confluence Filtri") || r.Contains("< 75.0%"));
+                                bool hasVolume = signal.AnalysisReasons != null && signal.AnalysisReasons.Any(r => r.Contains("SKIP_VOLUME"));
+                                bool hasResidual = signal.AnalysisReasons != null && signal.AnalysisReasons.Any(r => r.Contains("SKIP_BTC_RESIDUAL"));
+                                bool hasEth = signal.AnalysisReasons != null && signal.AnalysisReasons.Any(r => r.Contains("ETH SuperTrend") || r.Contains("ETH 1h"));
                                 bool hasSL = signal.AnalysisReasons != null && signal.AnalysisReasons.Any(r => r.Contains("SKIP_SL_TOO_WIDE") || r.Contains("SKIP_SL_TOO_TIGHT") || r.Contains("SKIP_NO_SWING"));
                                 bool hasRR = signal.AnalysisReasons != null && signal.AnalysisReasons.Any(r => r.Contains("SKIP_LOW_RR") || r.Contains("SKIP_NO_STRUCTURE_TARGET"));
                                 bool hasChase = signal.AnalysisReasons != null && signal.AnalysisReasons.Any(r => r.Contains("SKIP_CHASE"));
 
                                 if (hasBtcGate)
                                 {
-                                    if (signal.AnalysisReasons!.Any(r => r.Contains("SKIP_BTC_BEAR_LONG")))
+                                    if (signal.AnalysisReasons!.Any(r => r.Contains("SKIP_BTC_RESIDUAL")))
+                                        Interlocked.Increment(ref _hourlyTelemetry.SkipBtcResidual);
+                                    else if (signal.AnalysisReasons!.Any(r => r.Contains("SKIP_BTC_BEAR_LONG")))
                                         Interlocked.Increment(ref _hourlyTelemetry.SkipBtcBearLong);
                                     else
                                         Interlocked.Increment(ref _hourlyTelemetry.SkipBtc4hOppose);
@@ -289,6 +294,10 @@ namespace CryptoSense.Worker
                                 else if (hasConfluence)
                                 {
                                     Interlocked.Increment(ref _hourlyTelemetry.SkipConfluence);
+                                }
+                                else if (hasVolume)
+                                {
+                                    Interlocked.Increment(ref _hourlyTelemetry.SkipVolume);
                                 }
                                 else if (hasSL)
                                 {
@@ -431,6 +440,8 @@ namespace CryptoSense.Worker
                     skipStale = _hourlyTelemetry.SkipStale,
                     skipConfluence = _hourlyTelemetry.SkipConfluence,
                     skipGozleme = _hourlyTelemetry.SkipGozleme,
+                    skipVolume = _hourlyTelemetry.SkipVolume,
+                    skipBtcResidual = _hourlyTelemetry.SkipBtcResidual,
                     skipBtcBearLong = _hourlyTelemetry.SkipBtcBearLong,
                     skipBtcRange = _hourlyTelemetry.SkipBtcRange,
                     skipBtcGate = _hourlyTelemetry.SkipBtcGate,
@@ -448,7 +459,8 @@ namespace CryptoSense.Worker
 
                 int totalSkips = _hourlyTelemetry.SkipConfluence + _hourlyTelemetry.SkipGozleme +
                                  _hourlyTelemetry.SkipBtcBearLong + _hourlyTelemetry.SkipBtcRange +
-                                 _hourlyTelemetry.SkipBtc4hOppose + _hourlyTelemetry.SkipChase +
+                                 _hourlyTelemetry.SkipBtc4hOppose + _hourlyTelemetry.SkipBtcResidual +
+                                 _hourlyTelemetry.SkipVolume + _hourlyTelemetry.SkipChase +
                                  _hourlyTelemetry.SkipSL + _hourlyTelemetry.SkipRR +
                                  _hourlyTelemetry.SkipLag + _hourlyTelemetry.SkipStale + _hourlyTelemetry.SkipHourCap +
                                  _hourlyTelemetry.SkipCircuitBreaker + _hourlyTelemetry.SkipMaxOpen + _hourlyTelemetry.SkipDailyLoss;
@@ -461,8 +473,10 @@ namespace CryptoSense.Worker
                         ("MaxOpen", _hourlyTelemetry.SkipMaxOpen),
                         ("BtcGate", _hourlyTelemetry.SkipBtcGate),
                         ("BtcRange", _hourlyTelemetry.SkipBtcRange),
+                        ("BtcResidual", _hourlyTelemetry.SkipBtcResidual),
                         ("Gozleme", _hourlyTelemetry.SkipGozleme),
                         ("Confluence", _hourlyTelemetry.SkipConfluence),
+                        ("Volume", _hourlyTelemetry.SkipVolume),
                         ("Chase", _hourlyTelemetry.SkipChase),
                         ("SL", _hourlyTelemetry.SkipSL),
                         ("RR", _hourlyTelemetry.SkipRR),

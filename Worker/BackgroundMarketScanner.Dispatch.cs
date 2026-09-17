@@ -197,23 +197,23 @@ namespace CryptoSense.Worker
                     }
                 }
 
-                // 4. Hour cap (max 2 per hour, max 2 same dir)
+                // 4. Hour cap (max 3 per hour, max 3 same dir)
                 var hourKey = signal.CandleCloseTimeUtc.ToString("yyyyMMdd_HH");
                 var hourDispatches = _hourlyDispatches.GetOrAdd(hourKey, _ => new List<(string Symbol, SignalDirection Direction)>());
                 lock (hourDispatches)
                 {
-                    if (hourDispatches.Count >= 2)
+                    if (hourDispatches.Count >= 3)
                     {
                         Interlocked.Increment(ref _hourlyTelemetry.SkipHourCap);
-                        Console.WriteLine($"[MarketScanner] Hourly limit reached (2 signals sent for hour {hourKey}). Skipping {signal.Symbol}.");
+                        Console.WriteLine($"[MarketScanner] Hourly limit reached (3 signals sent for hour {hourKey}). Skipping {signal.Symbol}.");
                         return (false, "HourCap");
                     }
 
                     int sameDirectionCount = hourDispatches.Count(d => d.Direction == signal.Direction);
-                    if (sameDirectionCount >= 2)
+                    if (sameDirectionCount >= 3)
                     {
                         Interlocked.Increment(ref _hourlyTelemetry.SkipHourCap);
-                        Console.WriteLine($"[MarketScanner] Max 2 same direction signals reached for hour {hourKey} ({signal.Direction}). Skipping {signal.Symbol}.");
+                        Console.WriteLine($"[MarketScanner] Max 3 same direction signals reached for hour {hourKey} ({signal.Direction}). Skipping {signal.Symbol}.");
                         return (false, "HourCap");
                     }
                 }

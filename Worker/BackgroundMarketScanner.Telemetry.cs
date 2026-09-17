@@ -17,17 +17,19 @@ namespace CryptoSense.Worker
             public int SkipStale;
             public int SkipConfluence;  // Confluence < 75 (BLOCK, not PASS)
             public int SkipGozleme;     // GÖZLƏMƏ ⚪ (market neutral, ADX < 16, no setup)
+            public int SkipVolume;        // SKIP_VOLUME
+            public int SkipBtcResidual;   // SKIP_BTC_RESIDUAL
             public int SkipBtcBearLong; // SKIP_BTC_BEAR_LONG
             public int SkipBtcRange;    // SKIP_BTC_RANGE
             public int SkipBtc4hOppose; // SKIP_BTC_4H_OPPOSE
-            public int SkipHourCap;     // morningCap >=1 OR hourCap >=2
+            public int SkipHourCap;     // morningCap >=1 OR hourCap >=3
             public int TelegramFail;    // SendSignalAlertAsync returned false
             public int SkipCircuitBreaker;
             public int SkipMaxOpen;
             public int SkipDailyLoss;
             public decimal MaxConfluenceSeen = -1m;
 
-            public int SkipBtcGate => SkipBtcBearLong + SkipBtc4hOppose;
+            public int SkipBtcGate => SkipBtcBearLong + SkipBtc4hOppose + SkipBtcResidual;
 
             public ScanTelemetry Clone() => new ScanTelemetry
             {
@@ -42,6 +44,8 @@ namespace CryptoSense.Worker
                 SkipStale = this.SkipStale,
                 SkipConfluence = this.SkipConfluence,
                 SkipGozleme = this.SkipGozleme,
+                SkipVolume = this.SkipVolume,
+                SkipBtcResidual = this.SkipBtcResidual,
                 SkipBtcBearLong = this.SkipBtcBearLong,
                 SkipBtcRange = this.SkipBtcRange,
                 SkipBtc4hOppose = this.SkipBtc4hOppose,
@@ -66,6 +70,8 @@ namespace CryptoSense.Worker
                 SkipStale = 0;
                 SkipConfluence = 0;
                 SkipGozleme = 0;
+                SkipVolume = 0;
+                SkipBtcResidual = 0;
                 SkipBtcBearLong = 0;
                 SkipBtcRange = 0;
                 SkipBtc4hOppose = 0;

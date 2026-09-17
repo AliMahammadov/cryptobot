@@ -235,7 +235,11 @@ namespace CryptoSense.Application.Services
 
             if (slDistance > BotConstants.Thresholds.MaxSlAtr * atr14)
             {
-                return fail with { SkipReason = $"SKIP_SL_TOO_WIDE (SL {slDistance:F4} > {BotConstants.Thresholds.MaxSlAtr} * ATR)" };
+                slDistance = BotConstants.Thresholds.MaxSlAtr * atr14;
+                if (direction == SignalDirection.Buy)
+                    sl = calculationRefPrice - slDistance;
+                else
+                    sl = calculationRefPrice + slDistance;
             }
 
             // 05:00–07:00 +4 pəncərəsində 1h: əlavə filtr — SL minimum 1.70 ATR (nazik kitab)
@@ -468,7 +472,7 @@ namespace CryptoSense.Application.Services
                     // BTC 4h SuperTrend & Momentum Strength
                     try
                     {
-                        var btc4hKlines = await _marketData.GetKlinesAsync("BTCUSDT", "4h", 40);
+                        var btc4hKlines = await _marketData.GetKlinesAsync("BTCUSDT", "4h", 80);
                         if (btc4hKlines.Count >= 20)
                         {
                             var closedBtc4h = btc4hKlines.Count >= 2 ? btc4hKlines.Take(btc4hKlines.Count - 1).ToList() : btc4hKlines;
@@ -476,10 +480,10 @@ namespace CryptoSense.Application.Services
                             compass.IsBtc4hSuperTrendBullish = indBtc4h.SuperTrendVote == IndicatorVote.Bullish;
                             compass.Btc4hStrongShort =
                                 indBtc4h.SuperTrendVote == IndicatorVote.Bearish &&
-                                (indBtc4h.ConfluenceScore <= 40m || (indBtc4h.Ema20 < indBtc4h.Ema50 && closedBtc4h.Last().Close < indBtc4h.Ema50));
+                                (indBtc4h.ConfluenceScore <= 40m || (indBtc4h.Ema20 < indBtc4h.Ema50 && closedBtc4h.Last().Close <= indBtc4h.Ema50));
                             compass.Btc4hStrongLong =
                                 indBtc4h.SuperTrendVote == IndicatorVote.Bullish &&
-                                (indBtc4h.ConfluenceScore >= 60m || (indBtc4h.Ema20 > indBtc4h.Ema50 && closedBtc4h.Last().Close > indBtc4h.Ema50));
+                                (indBtc4h.ConfluenceScore >= 60m || (indBtc4h.Ema20 > indBtc4h.Ema50 && closedBtc4h.Last().Close >= indBtc4h.Ema50));
                         }
                     }
                     catch (Exception _ex) { Console.WriteLine($"[SignalEngine] BTC 4h compass calculation error: {_ex.Message}"); }
@@ -822,7 +826,7 @@ namespace CryptoSense.Application.Services
             // Candle Action Confirmations (Never enter against impulsive counter-trend bars)
             bool bullishCandleConfirmation = closedCandle.Close >= closedCandle.Open || buyerRejection;
             bool bearishCandleConfirmation = closedCandle.Close <= closedCandle.Open || sellerRejection;
-            bool volumeConfirmed = indicators.VolumeSurgeRatio >= 1.0m;
+            bool volumeConfirmed = indicators.VolumeSurgeRatio >= CryptoSense.Domain.Common.BotConstants.Thresholds.MinVolumeSurgeRatio;
 
             // Extreme Volatility & High-Risk Anomaly Check
             bool isExtremeVolatility = (indicators.Atr > 0 && currentPrice > 0 && (indicators.Atr / currentPrice) >= 0.055m) ||
@@ -878,6 +882,7 @@ namespace CryptoSense.Application.Services
                 confidence = 50;
                 if (!hasValidMarketRegime) reasons.Add($"Rejim Filtri: ADX ({indicators.Adx:F1}) < {minAdxRequired:F1} (Bazar zəif/yan konsolidasiyadadır)");
                 if (indicators.SuperTrendVote != IndicatorVote.Bullish && isUptrend) reasons.Add("SuperTrend təsdiqi yoxdur (Trend ziddiyyətlidir)");
+                if (!volumeConfirmed) reasons.Add($"SKIP_VOLUME: Vol {indicators.VolumeSurgeRatio:F2} < {CryptoSense.Domain.Common.BotConstants.Thresholds.MinVolumeSurgeRatio:F2}");
             }
 
             // Alt LONG təhlükəsizlik baryeri: BTC və ya ETH təsdiq etmirsə alt LONG qətiyyən buraxılmasın
@@ -901,15 +906,17 @@ namespace CryptoSense.Application.Services
             {
                 try
                 {
-                    var klines4h = await _marketData.GetKlinesAsync(symbol, "4h", 40);
+                    var klines4h = await _marketData.GetKlinesAsync(symbol, "4h", 80);
                     if (klines4h.Count >= 20)
                     {
                         var closed4h = klines4h.Count >= 2 ? klines4h.Take(klines4h.Count - 1).ToList() : klines4h;
                         var ind4h = _indicatorEngine.CalculateIndicators(closed4h);
                         decimal lastClose4h = closed4h.Last().Close;
-
-                        bool alignedLong = ind4h.SuperTrendVote == IndicatorVote.Bullish && lastClose4h > ind4h.Ema50;
-                        bool alignedShort = ind4h.SuperTrendVote == IndicatorVote.Bearish && lastClose4h < ind4h.Ema50;
+                        bool ema50Ready = closed4h.Count >= 50;
+                        bool alignedLong = ind4h.SuperTrendVote == IndicatorVote.Bullish
+                            && (!ema50Ready || lastClose4h >= ind4h.Ema50);
+                        bool alignedShort = ind4h.SuperTrendVote == IndicatorVote.Bearish
+                            && (!ema50Ready || lastClose4h <= ind4h.Ema50);
 
                         if (determinedType.Contains("LONG") && !alignedLong)
                         {
