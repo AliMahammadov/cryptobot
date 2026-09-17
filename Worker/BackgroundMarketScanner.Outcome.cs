@@ -644,6 +644,8 @@ namespace CryptoSense.Worker
                         if (losses >= 2)
                         {
                             _circuitBreakerUntil = DateTime.UtcNow.AddHours(4);
+                            _blockedDirection = sig.Direction;
+                            Console.WriteLine($"[CIRCUIT_BREAKER] Consecutive losses={losses}. Circuit breaker active until {_circuitBreakerUntil:HH:mm:ss}UTC. BlockedDirection={_blockedDirection}");
 
                             if ((DateTime.UtcNow - _lastCircuitBreakerAlertSent).TotalMinutes >= 60)
                             {
@@ -668,6 +670,19 @@ namespace CryptoSense.Worker
                             _consecutiveLossSignalIds.Clear();
                         }
                         Interlocked.Exchange(ref _consecutiveLosses, 0);
+                    }
+
+                    // Kilidi aç (b): əks istiqamətdə 1 delivered TP/qazanclı bağlanış
+                    if (sig.SignalAlertSent && !sig.IsTest && _blockedDirection != null && sig.Direction != _blockedDirection.Value)
+                    {
+                        bool isOppositeProfitable = sig.Status == SignalStatus.Success || 
+                                                    (sig.ResultPercent != null && sig.ResultPercent > 0m) || 
+                                                    (sig.CloseReason != null && sig.CloseReason.StartsWith("TP"));
+                        if (isOppositeProfitable)
+                        {
+                            Console.WriteLine($"[CIRCUIT_BREAKER] Blocked direction {_blockedDirection} unlocked: opposite profitable trade delivered on {sig.Symbol} ({sig.Direction})");
+                            _blockedDirection = null;
+                        }
                     }
 
                     var cooldownMinutes = sig.Timeframe switch

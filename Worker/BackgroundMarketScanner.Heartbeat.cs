@@ -69,7 +69,10 @@ namespace CryptoSense.Worker
                     skipCircuitBreaker: snapTelemetry.SkipCircuitBreaker,
                     skipMaxOpen: snapTelemetry.SkipMaxOpen,
                     skipDailyLoss: snapTelemetry.SkipDailyLoss,
-                    maxConfluenceSeen: snapTelemetry.MaxConfluenceSeen);
+                    maxConfluenceSeen: snapTelemetry.MaxConfluenceSeen,
+                    skipStaleTrend: snapTelemetry.SkipStaleTrend,
+                    skipBtcBounce: snapTelemetry.SkipBtcBounce,
+                    skipDirLock: snapTelemetry.SkipDirLock);
 
                 if (s.LastHeartbeatMessageId.HasValue)
                 {

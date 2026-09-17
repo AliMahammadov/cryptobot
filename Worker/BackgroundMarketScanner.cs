@@ -36,6 +36,8 @@ namespace CryptoSense.Worker
         private static readonly List<int> _consecutiveLossSignalIds = new();
         private static DateTime _circuitBreakerUntil = DateTime.MinValue;
         private static DateTime _lastCircuitBreakerAlertSent = DateTime.MinValue;
+        private static SignalDirection? _blockedDirection = null;
+        public static SignalDirection? BlockedDirection => _blockedDirection;
 
         private static int _nextSignalNumber = 0;
         private static readonly object _sendLock = new();

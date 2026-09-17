@@ -620,17 +620,24 @@ namespace CryptoSense.Infrastructure.Telegram
             int skipCircuitBreaker = 0,
             int skipMaxOpen = 0,
             int skipDailyLoss = 0,
-            decimal maxConfluenceSeen = -1)
+            decimal maxConfluenceSeen = -1,
+            int skipStaleTrend = 0,
+            int skipBtcBounce = 0,
+            int skipDirLock = 0)
         {
             var sb = new StringBuilder();
             sb.AppendLine("ℹ️ <b>Bazar Nəzarəti (Heartbeat)</b>");
-            sb.AppendLine($"A+ yoxdur | Chase:{chase} Corr:{corr} SL:{slWide} RR:{lowRr} Lag:{skipLag} Stale:{skipStale} Conf:{skipConfluence} Göndərildi:{sent} | Gözləmə:{skipGozleme} BtcGate:{skipBtcGate} Range:{skipBtcRange}");
+            sb.AppendLine($"A+ yoxdur | Chase:{chase} Corr:{corr} SL:{slWide} RR:{lowRr} Lag:{skipLag} Stale:{skipStale} Conf:{skipConfluence} Göndərildi:{sent} | Gözləmə:{skipGozleme} BtcGate:{skipBtcGate} Range:{skipBtcRange} StaleST:{skipStaleTrend} BtcBounce:{skipBtcBounce} DirLock:{skipDirLock}");
 
             if (sent == 0)
             {
                 if (skipCircuitBreaker > 0)
                 {
                     sb.AppendLine("📌 <b>Səbəb:</b> CircuitBreaker aktivdir (Risk qorunması)");
+                }
+                else if (skipDirLock > 0)
+                {
+                    sb.AppendLine("📌 <b>Səbəb:</b> İstiqamət kilidi aktivdir (DirLock — ardıcıl SL qorunması)");
                 }
                 else if (skipDailyLoss > 0)
                 {
@@ -646,6 +653,8 @@ namespace CryptoSense.Infrastructure.Telegram
                     {
                         ("BtcGate", skipBtcGate, "BTC Ayı (Bearish) rejimindədir — Alt LONG-lar bloklandı"),
                         ("Range", skipBtcRange, "BTC 1h Kompası Ranging (qeyri-müəyyən) rejimindədir"),
+                        ("StaleST", skipStaleTrend, "SuperTrend köhnəlib/gecikir (əks istiqamətdə 3 şam hərəkəti)"),
+                        ("BtcBounce", skipBtcBounce, "BTC 1h əks istiqamətdə impulsiv hərəkət edir (BTC Bounce/Dump)"),
                         ("Gözləmə", skipGozleme, "Bazar zəif konsolidasiyadadır (Gözləmə rejimi / ADX zəif)"),
                         ("Conf", skipConfluence, "Confluence balı 75%-dən aşağıdır"),
                         ("SL", slWide, "Stop-Loss məsafəsi çox genişdir (> 2.8%)"),

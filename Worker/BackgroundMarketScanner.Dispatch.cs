@@ -138,6 +138,14 @@ namespace CryptoSense.Worker
             {
                 var sym = signal.Symbol;
 
+                // 0. Direction lock check
+                if (_blockedDirection != null && signal.Direction == _blockedDirection.Value)
+                {
+                    Interlocked.Increment(ref _hourlyTelemetry.SkipDirLock);
+                    Console.WriteLine($"[MarketScanner] SKIP_DIR_LOCK: {sym} direction {signal.Direction} is locked by CircuitBreaker.");
+                    return (false, "DirLock");
+                }
+
                 // 1. Lock check
                 if (_coinActiveLocks.ContainsKey(sym))
                 {

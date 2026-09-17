@@ -27,6 +27,9 @@ namespace CryptoSense.Worker
             public int SkipCircuitBreaker;
             public int SkipMaxOpen;
             public int SkipDailyLoss;
+            public int SkipStaleTrend;  // SKIP_STALE_TREND
+            public int SkipBtcBounce;   // SKIP_BTC_BOUNCE
+            public int SkipDirLock;     // SKIP_DIR_LOCK
             public decimal MaxConfluenceSeen = -1m;
 
             public int SkipBtcGate => SkipBtcBearLong + SkipBtc4hOppose + SkipBtcResidual;
@@ -54,6 +57,9 @@ namespace CryptoSense.Worker
                 SkipCircuitBreaker = this.SkipCircuitBreaker,
                 SkipMaxOpen = this.SkipMaxOpen,
                 SkipDailyLoss = this.SkipDailyLoss,
+                SkipStaleTrend = this.SkipStaleTrend,
+                SkipBtcBounce = this.SkipBtcBounce,
+                SkipDirLock = this.SkipDirLock,
                 MaxConfluenceSeen = this.MaxConfluenceSeen
             };
 
@@ -80,6 +86,9 @@ namespace CryptoSense.Worker
                 SkipCircuitBreaker = 0;
                 SkipMaxOpen = 0;
                 SkipDailyLoss = 0;
+                SkipStaleTrend = 0;
+                SkipBtcBounce = 0;
+                SkipDirLock = 0;
                 MaxConfluenceSeen = -1m;
             }
         }

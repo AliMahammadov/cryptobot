@@ -54,6 +54,32 @@ namespace CryptoSense.Worker
             var unitOfWork = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
             var marketData = scope.ServiceProvider.GetRequiredService<IMarketDataProvider>();
 
+            // Kilidi aç (a): 4h bitəndə VƏ BTC 1h Regime artıq o istiqaməti təsdiqləmir
+            if (_blockedDirection != null && _circuitBreakerUntil == DateTime.MinValue)
+            {
+                try
+                {
+                    var sigEngine = scope.ServiceProvider.GetRequiredService<ISignalEngine>();
+                    var btcCompass = await sigEngine.GetBtcCompassAsync();
+                    bool directionStillConfirmed = (_blockedDirection == SignalDirection.Sell && btcCompass.Regime == BtcMarketRegime.Bearish)
+                        || (_blockedDirection == SignalDirection.Buy && btcCompass.Regime == BtcMarketRegime.Bullish);
+
+                    if (!directionStillConfirmed)
+                    {
+                        Console.WriteLine($"[CIRCUIT_BREAKER] Direction lock {_blockedDirection} unlocked: 4h passed and BTC regime ({btcCompass.Regime}) no longer confirms it.");
+                        _blockedDirection = null;
+                    }
+                    else
+                    {
+                        Console.WriteLine($"[CIRCUIT_BREAKER] 4h passed but BTC regime ({btcCompass.Regime}) still confirms {_blockedDirection}; direction lock persists.");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[BackgroundMarketScanner] Direction lock check swallowed: {ex.Message}");
+                }
+            }
+
             var openTradesCount = await unitOfWork.Signals.GetActiveSignalsCountAsync();
 
             // Portfolio-level risk management: Max 20 concurrent active positions across entire market!
@@ -267,8 +293,11 @@ namespace CryptoSense.Worker
                             if (!isTradeQualified)
                             {
                                 // Strict single-bucket skip classification
-                                // Priority: BtcGate > Range > Confluence > Volume > SL > RR > Chase > Gozleme
+                                // Priority: BtcGate > StaleTrend > BtcBounce > DirLock > Range > Confluence > Volume > SL > RR > Chase > Gozleme
                                 bool hasBtcGate = signal.AnalysisReasons != null && signal.AnalysisReasons.Any(r => r.Contains("SKIP_BTC_BEAR_LONG") || r.Contains("SKIP_BTC_4H_OPPOSE") || r.Contains("SKIP_HTF_OPPOSE") || r.Contains("SKIP_BTC_RESIDUAL"));
+                                bool hasStaleTrend = signal.AnalysisReasons != null && signal.AnalysisReasons.Any(r => r.Contains("SKIP_STALE_TREND"));
+                                bool hasBtcBounce = signal.AnalysisReasons != null && signal.AnalysisReasons.Any(r => r.Contains("SKIP_BTC_BOUNCE"));
+                                bool hasDirLock = signal.AnalysisReasons != null && signal.AnalysisReasons.Any(r => r.Contains("SKIP_DIR_LOCK"));
                                 bool hasBtcRange = signal.AnalysisReasons != null && signal.AnalysisReasons.Any(r => r.Contains("SKIP_BTC_RANGE"));
                                 bool hasConfluence = signal.AnalysisReasons != null && signal.AnalysisReasons.Any(r => r.Contains("Confluence Filtri") || r.Contains("< 75.0%"));
                                 bool hasVolume = signal.AnalysisReasons != null && signal.AnalysisReasons.Any(r => r.Contains("SKIP_VOLUME"));
@@ -286,6 +315,18 @@ namespace CryptoSense.Worker
                                         Interlocked.Increment(ref _hourlyTelemetry.SkipBtcBearLong);
                                     else
                                         Interlocked.Increment(ref _hourlyTelemetry.SkipBtc4hOppose);
+                                }
+                                else if (hasStaleTrend)
+                                {
+                                    Interlocked.Increment(ref _hourlyTelemetry.SkipStaleTrend);
+                                }
+                                else if (hasBtcBounce)
+                                {
+                                    Interlocked.Increment(ref _hourlyTelemetry.SkipBtcBounce);
+                                }
+                                else if (hasDirLock)
+                                {
+                                    Interlocked.Increment(ref _hourlyTelemetry.SkipDirLock);
                                 }
                                 else if (hasBtcRange)
                                 {
@@ -359,6 +400,12 @@ namespace CryptoSense.Worker
                             // HIGH-CONVICTION TRADE DISPATCH
                             if (isTradeQualified)
                             {
+                                if (_blockedDirection != null && signal.Direction == _blockedDirection.Value)
+                                {
+                                    Interlocked.Increment(ref _hourlyTelemetry.SkipDirLock);
+                                    Console.WriteLine($"[MarketScanner] SKIP_DIR_LOCK: {signal.Symbol} {signal.Direction} blocked by circuit breaker direction lock");
+                                    continue;
+                                }
                                 var candleDuration = signal.Timeframe switch
                                 {
                                     "4h" => TimeSpan.FromHours(4),
@@ -450,6 +497,10 @@ namespace CryptoSense.Worker
                     skipCircuitBreaker = _hourlyTelemetry.SkipCircuitBreaker,
                     skipMaxOpen = _hourlyTelemetry.SkipMaxOpen,
                     skipDailyLoss = _hourlyTelemetry.SkipDailyLoss,
+                    skipStaleTrend = _hourlyTelemetry.SkipStaleTrend,
+                    skipBtcBounce = _hourlyTelemetry.SkipBtcBounce,
+                    skipDirLock = _hourlyTelemetry.SkipDirLock,
+                    blockedDirection = _blockedDirection?.ToString() ?? "none",
                     maxConfluenceSeen = _hourlyTelemetry.MaxConfluenceSeen,
                     dataAgeMsBtc = btcSnapForLog?.DataAgeMs ?? -1,
                     btcSource = btcSnapForLog?.Source ?? "no_snap",
@@ -460,32 +511,52 @@ namespace CryptoSense.Worker
                 int totalSkips = _hourlyTelemetry.SkipConfluence + _hourlyTelemetry.SkipGozleme +
                                  _hourlyTelemetry.SkipBtcBearLong + _hourlyTelemetry.SkipBtcRange +
                                  _hourlyTelemetry.SkipBtc4hOppose + _hourlyTelemetry.SkipBtcResidual +
+                                 _hourlyTelemetry.SkipStaleTrend + _hourlyTelemetry.SkipBtcBounce + _hourlyTelemetry.SkipDirLock +
                                  _hourlyTelemetry.SkipVolume + _hourlyTelemetry.SkipChase +
                                  _hourlyTelemetry.SkipSL + _hourlyTelemetry.SkipRR +
                                  _hourlyTelemetry.SkipLag + _hourlyTelemetry.SkipStale + _hourlyTelemetry.SkipHourCap +
                                  _hourlyTelemetry.SkipCircuitBreaker + _hourlyTelemetry.SkipMaxOpen + _hourlyTelemetry.SkipDailyLoss;
                 if (_hourlyTelemetry.Sent == 0 && _hourlyTelemetry.CoinsScanned > 0 && totalSkips > 0)
                 {
-                    var skipCounts = new[]
+                    (string, int) dominant;
+                    if (_hourlyTelemetry.SkipCircuitBreaker > 0)
                     {
-                        ("CircuitBreaker", _hourlyTelemetry.SkipCircuitBreaker),
-                        ("DailyLoss", _hourlyTelemetry.SkipDailyLoss),
-                        ("MaxOpen", _hourlyTelemetry.SkipMaxOpen),
-                        ("BtcGate", _hourlyTelemetry.SkipBtcGate),
-                        ("BtcRange", _hourlyTelemetry.SkipBtcRange),
-                        ("BtcResidual", _hourlyTelemetry.SkipBtcResidual),
-                        ("Gozleme", _hourlyTelemetry.SkipGozleme),
-                        ("Confluence", _hourlyTelemetry.SkipConfluence),
-                        ("Volume", _hourlyTelemetry.SkipVolume),
-                        ("Chase", _hourlyTelemetry.SkipChase),
-                        ("SL", _hourlyTelemetry.SkipSL),
-                        ("RR", _hourlyTelemetry.SkipRR),
-                        ("Lag", _hourlyTelemetry.SkipLag),
-                        ("Stale", _hourlyTelemetry.SkipStale),
-                        ("HourCap", _hourlyTelemetry.SkipHourCap),
-                        ("TelegramFail", _hourlyTelemetry.TelegramFail)
-                    };
-                    var dominant = skipCounts.OrderByDescending(x => x.Item2).First();
+                        dominant = ("CircuitBreaker", _hourlyTelemetry.SkipCircuitBreaker);
+                    }
+                    else if (_hourlyTelemetry.SkipDirLock > 0)
+                    {
+                        dominant = ("DirLock", _hourlyTelemetry.SkipDirLock);
+                    }
+                    else if (_hourlyTelemetry.SkipDailyLoss > 0)
+                    {
+                        dominant = ("DailyLoss", _hourlyTelemetry.SkipDailyLoss);
+                    }
+                    else if (_hourlyTelemetry.SkipMaxOpen > 0)
+                    {
+                        dominant = ("MaxOpen", _hourlyTelemetry.SkipMaxOpen);
+                    }
+                    else
+                    {
+                        var skipCounts = new[]
+                        {
+                            ("BtcGate", _hourlyTelemetry.SkipBtcGate),
+                            ("BtcRange", _hourlyTelemetry.SkipBtcRange),
+                            ("BtcResidual", _hourlyTelemetry.SkipBtcResidual),
+                            ("StaleTrend", _hourlyTelemetry.SkipStaleTrend),
+                            ("BtcBounce", _hourlyTelemetry.SkipBtcBounce),
+                            ("Gozleme", _hourlyTelemetry.SkipGozleme),
+                            ("Confluence", _hourlyTelemetry.SkipConfluence),
+                            ("Volume", _hourlyTelemetry.SkipVolume),
+                            ("Chase", _hourlyTelemetry.SkipChase),
+                            ("SL", _hourlyTelemetry.SkipSL),
+                            ("RR", _hourlyTelemetry.SkipRR),
+                            ("Lag", _hourlyTelemetry.SkipLag),
+                            ("Stale", _hourlyTelemetry.SkipStale),
+                            ("HourCap", _hourlyTelemetry.SkipHourCap),
+                            ("TelegramFail", _hourlyTelemetry.TelegramFail)
+                        };
+                        dominant = skipCounts.OrderByDescending(x => x.Item2).First();
+                    }
                     Console.WriteLine($"[OVERFILTER_DIAG] sent=0 dominantSkip={dominant.Item1}:{dominant.Item2} totalSkips={totalSkips}");
 
                     var top5 = _overfilterDiag
