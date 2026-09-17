@@ -16,24 +16,8 @@ namespace CryptoSense.Infrastructure.Telegram
         {
             var isLong = signal.Direction == SignalDirection.Buy || signal.SignalType.Contains("LONG");
             var cleanSymbol = signal.Symbol.Replace("USDT", "");
-            var statusIcon = isLong ? "🟢" : "🔴";
-            var sentimentText = signal.NewsSentimentImpact.Contains("BULLISH") || signal.NewsSentimentImpact.Contains("MUSBET") || signal.NewsSentimentImpact.Contains("MÜSBƏT") ? "Müsbət 🟢" : (signal.NewsSentimentImpact.Contains("BEARISH") || signal.NewsSentimentImpact.Contains("MENFI") || signal.NewsSentimentImpact.Contains("MƏNFİ") ? "Mənfi 🔴" : "Neytral ⚪");
+            var directionLabel = isLong ? "🟢 LONG" : "🔴 SHORT";
 
-            var sb = new StringBuilder();
-            sb.AppendLine($"#{userSigNum} {statusIcon} <b>SİQNAL</b>");
-            sb.AppendLine();
-            sb.AppendLine($"🪙 <b>Coin:</b> {cleanSymbol} Futures ({signal.Timeframe})");
-            sb.AppendLine($"🕒 <b>Verilmə Tarixi:</b> {signal.TimestampFormatted}");
-            sb.AppendLine($"🎯 <b>Confluence Razılaşma Balı:</b> <b>{signal.ConfluenceScore.ToString("F1", CultureInfo.InvariantCulture)}%</b> (İndiqatorların razılığı)");
-            sb.AppendLine($"💵 <b>Giriş (Entry):</b> ${signal.EntryPrice.ToString(CultureInfo.InvariantCulture)}");
-            sb.AppendLine($"📡 <b>Mənbə:</b> <code>{signal.PriceSource}</code>");
-            sb.AppendLine($"⏱️ <b>DataAge:</b> {signal.DataAgeMs}ms");
-            if (signal.CandleCloseTimeUtc != default)
-            {
-                sb.AppendLine($"🕯️ <b>Şam bağlandı:</b> {CryptoSense.Domain.Common.TimeHelper.FormatAz(signal.CandleCloseTimeUtc)}");
-            }
-            sb.AppendLine($"📰 <b>Xəbər Sentimenti:</b> {sentimentText}");
-            sb.AppendLine("-----------------------------------");
             decimal tp1Dist = Math.Abs(signal.TakeProfit1 - signal.EntryPrice);
             decimal slDist = Math.Abs(signal.StopLoss - signal.EntryPrice);
             decimal tp1Pct = signal.EntryPrice > 0 ? (tp1Dist / signal.EntryPrice) * 100m : 0m;
@@ -45,122 +29,86 @@ namespace CryptoSense.Infrastructure.Telegram
                 ? (((BotConstants.Thresholds.Tp1Weight * tp1Dist) + (BotConstants.Thresholds.Tp2Weight * tpBDist)) / slDist)
                 : 0m;
 
+            var sb = new StringBuilder();
+            sb.AppendLine($"#{userSigNum} {directionLabel} SİQNAL | {cleanSymbol} ({signal.Timeframe})");
+            sb.AppendLine();
+            sb.AppendLine($"🎯 <b>Siqnalın Gücü:</b> <b>{signal.ConfluenceScore.ToString("F1", CultureInfo.InvariantCulture)}%</b> (Güclü Təsdiq)");
+            sb.AppendLine($"⚖️ <b>Risk / Mükafat (R:R):</b> <b>{effectiveRr.ToString("F2", CultureInfo.InvariantCulture)}</b>");
+            sb.AppendLine();
+            sb.AppendLine($"💵 <b>Giriş Qiyməti:</b> ${signal.EntryPrice.ToString(CultureInfo.InvariantCulture)}");
             sb.AppendLine($"📍 <b>Giriş Zonası:</b> ${signal.EntryLow.ToString(CultureInfo.InvariantCulture)} - ${signal.EntryHigh.ToString(CultureInfo.InvariantCulture)}");
-            sb.AppendLine($"🎯 <b>Hədəf A (TP_A 1.5R - 40%):</b> ${signal.TakeProfit1.ToString(CultureInfo.InvariantCulture)} (+{tp1Pct.ToString("F2", CultureInfo.InvariantCulture)}%) <i>[40% Bağla; BE/trail sonra]</i>");
+            sb.AppendLine();
+            sb.AppendLine($"🎯 <b>Hədəf A (1.5R):</b> ${signal.TakeProfit1.ToString(CultureInfo.InvariantCulture)} (+{tp1Pct.ToString("F1", CultureInfo.InvariantCulture)}%) ➔ [Mövqenin 40%-ni bağla]");
             if (signal.TakeProfit2 > 0 && signal.TakeProfit2 != signal.TakeProfit1)
             {
-                sb.AppendLine($"🎯 <b>Hədəf B (TP_B - struktur, tavan yox):</b> ${signal.TakeProfit2.ToString(CultureInfo.InvariantCulture)} (+{tpBPct.ToString("F2", CultureInfo.InvariantCulture)}%) <i>[30% bağla, 30% trail]</i>");
+                sb.AppendLine($"🎯 <b>Hədəf B (Struktur):</b> ${signal.TakeProfit2.ToString(CultureInfo.InvariantCulture)} (+{tpBPct.ToString("F1", CultureInfo.InvariantCulture)}%) ➔ [Mövqenin 30%-ni bağla, 30% saxla]");
             }
-            sb.AppendLine($"⛔ <b>Stop Loss (SL):</b> ${signal.StopLoss.ToString(CultureInfo.InvariantCulture)} (-{slPct.ToString("F2", CultureInfo.InvariantCulture)}%)");
-            sb.AppendLine($"⚖️ <b>Risk:Mükafat (R:R):</b> <b>{effectiveRr.ToString("F2", CultureInfo.InvariantCulture)}</b>");
+            sb.AppendLine($"⛔ <b>Stop Loss (SL):</b> ${signal.StopLoss.ToString(CultureInfo.InvariantCulture)} (-{slPct.ToString("F1", CultureInfo.InvariantCulture)}%)");
             sb.AppendLine("-----------------------------------");
+            sb.AppendLine("ℹ️ <b>Qeyd:</b> Hədəf A-ya çatdıqda Stop-u girişə (Breakeven) çəkin!");
             return sb.ToString();
         }
 
         public static string FormatOutcomeAlert(FuturesSignal signal, int userSigNum, string outcomeType, decimal hitPrice, decimal profitPct)
         {
             decimal netPnl = signal.NetResultPercent != 0 ? signal.NetResultPercent : profitPct;
-            decimal grossPnl = signal.GrossResultPercent != 0 ? signal.GrossResultPercent : (netPnl + 0.10m);
-
-            bool isNeutral = signal.Status == SignalStatus.Neutral || (outcomeType.Contains("Breakeven") && netPnl < 0.20m);
-            bool isExplicitFail = outcomeType.Contains("Stop Loss") || outcomeType.Contains("SL") || signal.Status == SignalStatus.Failed || (!isNeutral && profitPct < 0);
-            bool isExplicitWin = !isNeutral && (signal.Status == SignalStatus.Success || outcomeType.Contains("Hədəf") || outcomeType.Contains("TP") || outcomeType.Contains("Uğurlu") || outcomeType.Contains("Ugurlu") || (outcomeType.Contains("Breakeven") && netPnl >= 0.20m) || signal.Tp1Notified || profitPct >= 0);
-
-            bool isWin = isExplicitWin && !isExplicitFail && !isNeutral;
-            if (outcomeType.Contains("Stop Loss") || outcomeType.Contains("SL"))
-            {
-                isWin = false;
-            }
-
-            if (!isWin && !isNeutral && profitPct > 0)
-            {
-                profitPct = -Math.Abs(profitPct);
-            }
-
             var cleanSymbol = signal.Symbol.Replace("USDT", "");
             var directionStr = (signal.Direction == SignalDirection.Buy || signal.SignalType.Contains("LONG")) ? "LONG" : "SHORT";
+            bool isSl = outcomeType.Contains("Stop Loss") || outcomeType.Contains("SL") || signal.Status == SignalStatus.Failed || (!outcomeType.Contains("TP") && profitPct < 0);
 
             var sb = new StringBuilder();
-            if (isNeutral)
+            if (outcomeType.Contains("TP1") || outcomeType.Contains("TP_A") || outcomeType.Contains("Hədəf 1") || outcomeType.Contains("Hədəf A"))
             {
-                sb.AppendLine($"🎯 <b>#{userSigNum} NƏTİCƏ HESABATI (NEYTRAL ⚪)</b>");
-                sb.AppendLine($"📌 <b>#{userSigNum} nömrəli əməliyyat üzrə: Breakeven (Xalis {(netPnl >= 0 ? "+" : "")}{netPnl.ToString("F2", CultureInfo.InvariantCulture)}% - NEYTRAL) ⚪</b>");
-            }
-            else if (outcomeType.Contains("Stop Loss") || outcomeType.Contains("SL") || !isWin)
-            {
-                sb.AppendLine($"⛔ <b>#{userSigNum} NƏTİCƏ HESABATI</b>");
-                sb.AppendLine($"📌 <b>#{userSigNum} nömrəli əməliyyat üzrə: {(outcomeType.Contains("Stop Loss") ? "Stop-Loss vurdu" : outcomeType)} (UĞURSUZ OLDU) ❌</b>");
+                sb.AppendLine($"🎯 <b>#{userSigNum} NƏTİCƏ | {cleanSymbol} ({directionStr}) ✅</b>");
+                sb.AppendLine("📌 <b>Hədəf A (TP_A) Vuruldu!</b>");
                 sb.AppendLine();
-                sb.AppendLine($"⚠️ <b>Təcili əməliyyatı dayandırın!</b>");
+                sb.AppendLine($"💵 <b>Cari Qiymət:</b> ${hitPrice.ToString(CultureInfo.InvariantCulture)}");
+                sb.AppendLine($"💰 <b>Xalis Qazanc:</b> +{Math.Abs(netPnl).ToString("F2", CultureInfo.InvariantCulture)}% (komissiya çıxılıb)");
+                sb.AppendLine();
+                sb.AppendLine("🛡️ <b>İCRA TƏLƏBİ:</b>");
+                sb.AppendLine("• Mövqenin 40%-ni mənfəətlə bağlayın.");
+                sb.AppendLine($"• Stop Loss-u giriş qiymətinə (${signal.EntryPrice.ToString(CultureInfo.InvariantCulture)}) çəkin (Artıq risksizdir).");
+                if (signal.TakeProfit2 > 0)
+                {
+                    sb.AppendLine($"• Qalan 60% ilə Hədəf B (${signal.TakeProfit2.ToString(CultureInfo.InvariantCulture)}) gözlənilir.");
+                }
             }
-            else if (outcomeType.Contains("Müddəti") || outcomeType.Contains("Bitdi") || outcomeType.Contains("Tamamlandı"))
+            else if (outcomeType.Contains("TP2") || outcomeType.Contains("TP_B") || outcomeType.Contains("Hədəf 2") || outcomeType.Contains("Hədəf B"))
             {
-                var signStr = profitPct >= 0 ? "+" : "";
-                sb.AppendLine($"🎯 <b>#{userSigNum} NƏTİCƏ HESABATI (MÜDDƏT BİTDİ)</b>");
-                sb.AppendLine($"📌 <b>#{userSigNum} nömrəli əməliyyat üzrə: {outcomeType} ({signStr}{profitPct.ToString("F2", CultureInfo.InvariantCulture)}%) ⚪</b>");
+                sb.AppendLine($"🎯 <b>#{userSigNum} NƏTİCƏ | {cleanSymbol} ({directionStr}) ✅</b>");
+                sb.AppendLine("📌 <b>Hədəf B (TP_B) Vuruldu!</b>");
+                sb.AppendLine();
+                sb.AppendLine($"💵 <b>Cari Qiymət:</b> ${hitPrice.ToString(CultureInfo.InvariantCulture)}");
+                sb.AppendLine($"💰 <b>Xalis Qazanc:</b> +{Math.Abs(netPnl).ToString("F2", CultureInfo.InvariantCulture)}% (komissiya çıxılıb)");
+                sb.AppendLine();
+                sb.AppendLine("🏆 <b>İCRA TƏLƏBİ:</b>");
+                sb.AppendLine("• Mövqenin daha 30%-ni bağlayın.");
+                sb.AppendLine("• Qalan 30% payı Trailing Stop ilə trend bitənə qədər saxlayın.");
+            }
+            else if (isSl)
+            {
+                sb.AppendLine($"⛔ <b>#{userSigNum} NƏTİCƏ | {cleanSymbol} ({directionStr}) ❌</b>");
+                sb.AppendLine("📌 <b>Stop-Loss Vuruldu!</b>");
+                sb.AppendLine();
+                sb.AppendLine($"💵 <b>Bağlanış Qiyməti:</b> ${hitPrice.ToString(CultureInfo.InvariantCulture)}");
+                sb.AppendLine($"📉 <b>Xalis İtki:</b> -{Math.Abs(netPnl).ToString("F2", CultureInfo.InvariantCulture)}% (komissiya daxil)");
+                sb.AppendLine($"🏷️ <b>Səbəb:</b> SL səviyyəsi keçildi");
+                sb.AppendLine();
+                sb.AppendLine("⚠️ Mövqeni dərhal bağlayın və yeni siqnalı gözləyin.");
             }
             else
             {
-                var statusText = outcomeType.Contains("✅") ? outcomeType : $"{outcomeType} (UĞURLU OLDU) ✅";
-                sb.AppendLine($"🎯 <b>#{userSigNum} NƏTİCƏ HESABATI</b>");
-                sb.AppendLine($"📌 <b>#{userSigNum} nömrəli əməliyyat üzrə: {statusText}</b>");
-            }
-
-            sb.AppendLine();
-            sb.AppendLine($"🪙 <b>Cütlük:</b> {cleanSymbol} Futures ({directionStr} - {signal.Timeframe})");
-            sb.AppendLine($"📍 <b>İlkin Giriş Qiyməti:</b> ${signal.EntryPrice.ToString(CultureInfo.InvariantCulture)}");
-            sb.AppendLine($"💵 <b>Bağlanış / Last:</b> ${hitPrice.ToString(CultureInfo.InvariantCulture)} (DataAge: {signal.DataAgeMs}ms)");
-            sb.AppendLine($"📊 <b>Gross PnL:</b> {(grossPnl >= 0 ? "+" : "")}{grossPnl.ToString("F2", CultureInfo.InvariantCulture)}%");
-            sb.AppendLine($"💰 <b>Net PnL (fee -0.10%):</b> {(netPnl >= 0 ? "+" : "")}{netPnl.ToString("F2", CultureInfo.InvariantCulture)}%");
-            sb.AppendLine($"📈 <b>MFE:</b> +{signal.MfePercent.ToString("F2", CultureInfo.InvariantCulture)}% | <b>MAE:</b> -{Math.Abs(signal.MaePercent).ToString("F2", CultureInfo.InvariantCulture)}%");
-            sb.AppendLine($"🏷️ <b>Səbəb:</b> {signal.CloseReason ?? outcomeType}");
-            sb.AppendLine($"🕒 <b>Siqnal Vaxtı:</b> {signal.TimestampFormatted}");
-            sb.AppendLine($"🕒 <b>Yenilənmə Vaxtı:</b> {CryptoSense.Domain.Common.TimeHelper.NowFormatted}");
-
-            if (outcomeType.Contains("TP1") || outcomeType.Contains("TP_A") || outcomeType.Contains("Hədəf 1") || outcomeType.Contains("Hədəf A"))
-            {
+                // Trailing, BE, or Time Expiry
+                var statusIcon = netPnl >= 0 ? "✅" : "⚪";
+                var pnlSign = netPnl >= 0 ? "+" : "";
+                sb.AppendLine($"🎯 <b>#{userSigNum} NƏTİCƏ | {cleanSymbol} ({directionStr}) {statusIcon}</b>");
+                sb.AppendLine("📌 <b>Mövqe Tam Bağlandı (Qorundu)</b>");
                 sb.AppendLine();
-                sb.AppendLine("🛡️ <b>PARTİAL CLOSE (40% BAĞLANDI):</b>");
-                sb.AppendLine("• Mövqenin <b>40%-i Hədəf A (TP_A 1.5R) səviyyəsində mənfəətlə bağlandı ✅</b>");
-                sb.AppendLine("• Breakeven / trailing stop sonrakı şam hərəkətlərinə əsasən aktivləşəcək.");
-                if (signal.TakeProfit2 > 0 && signal.TakeProfit2 != signal.TakeProfit1)
-                {
-                    sb.AppendLine($"• Qalan mövqe ilə <b>Hədəf B (TP_B: ${signal.TakeProfit2.ToString(CultureInfo.InvariantCulture)})</b> strukturu gözlənilir.");
-                }
-            }
-            else if (outcomeType.Contains("TP2") || outcomeType.Contains("TP_B") || outcomeType.Contains("Hədəf 2") || outcomeType.Contains("Hədəf B") || outcomeType.Contains("TP3") || outcomeType.Contains("Hədəf 3"))
-            {
+                sb.AppendLine($"💵 <b>Bağlanış Qiyməti:</b> ${hitPrice.ToString(CultureInfo.InvariantCulture)}");
+                sb.AppendLine($"💰 <b>Ümumi Realizə Olunan Xalis Qazanc:</b> <b>{pnlSign}{netPnl.ToString("F2", CultureInfo.InvariantCulture)}%</b>");
+                sb.AppendLine($"🏷️ <b>Səbəb:</b> {signal.CloseReason ?? outcomeType}");
                 sb.AppendLine();
-                sb.AppendLine("🏆 <b>HƏDƏF B (TP_B):</b> 30% bağlandı, qalan 30% trailing stop ilə davam edir.");
-            }
-            else if (outcomeType.Contains("Breakeven") || outcomeType.Contains("Qorundu") || outcomeType.Contains("TRAIL") || outcomeType.Contains("Trailing") || signal.IsPartial1Closed)
-            {
-                sb.AppendLine();
-                sb.AppendLine("🛡️ <b>PARTİAL CLOSE NƏTİCƏSİ & RİSK MENECMENT:</b>");
-                if (signal.IsPartial2Closed)
-                {
-                    sb.AppendLine("• <b>TP1 Səviyyəsində:</b> Mövqenin <b>40%-i QAZANCLA BAĞLANIB ✅</b>");
-                    sb.AppendLine("• <b>TP2 Səviyyəsində:</b> Mövqenin <b>30%-i ƏLAVƏ QAZANCLA BAĞLANIB ✅</b>");
-                    sb.AppendLine("• <b>Qalan 30% Pay:</b> Trailing Stop / BE səviyyəsində qorunaraq bağlandı.");
-                }
-                else if (signal.IsPartial1Closed)
-                {
-                    sb.AppendLine("• <b>TP1 Səviyyəsində:</b> Mövqenin <b>40%-i QAZANCLA BAĞLANIB ✅</b>");
-                    sb.AppendLine("• <b>Qalan 60% Pay:</b> Breakeven / Trailing Stop səviyyəsində qorunaraq bağlandı.");
-                }
-                else
-                {
-                    sb.AppendLine("• Mövqe giriş qiymətində (Breakeven) risksiz bağlandı.");
-                }
-                sb.AppendLine($"• <b>Ümumi Realizə Olunan Xalis Qazanc:</b> <b>{(profitPct >= 0 ? "+" : "")}{profitPct.ToString("F2", CultureInfo.InvariantCulture)}%</b>");
-            }
-            else if (outcomeType.Contains("Müddəti") || outcomeType.Contains("Bitdi"))
-            {
-                sb.AppendLine();
-                sb.AppendLine("⏱️ <b>MÜDDƏT BİTMƏSİ MENECMENTİ:</b>");
-                sb.AppendLine("• Müəyyən olunmuş maksimal gözləmə müddəti tamamlandı.");
-                sb.AppendLine("• TP və ya SL səviyyələrinə çatmadan mövqe cari bazar qiyməti ilə bağlandı.");
-                sb.AppendLine($"• <b>Realizə Olunan Nəticə:</b> <b>{(profitPct >= 0 ? "+" : "")}{profitPct.ToString("F2", CultureInfo.InvariantCulture)}%</b>");
+                sb.AppendLine("✅ Mövqe mənfəətlə tam qapadıldı, risk sıfırdır.");
             }
 
             return sb.ToString();
@@ -349,7 +297,7 @@ namespace CryptoSense.Infrastructure.Telegram
             sb.AppendLine($"💎 <b>Profit Factor:</b> <b>{stats.ProfitFactor.ToString("F2", CultureInfo.InvariantCulture)}</b> | <b>Expectancy:</b> <b>{stats.ExpectancyR.ToString("F2", CultureInfo.InvariantCulture)}R</b>");
             sb.AppendLine($"📉 <b>Maksimum Drawdown:</b> -{stats.MaxDrawdownPercent.ToString("F2", CultureInfo.InvariantCulture)}%");
             sb.AppendLine("-----------------------------------");
-            sb.AppendLine($"🎯 <b>Hədəf Bölgüsü:</b> TP3: {stats.Tp3HitsCount} ({stats.Tp3HitRatePercent}%) | TP1/TP2: {stats.PartialHitsCount} | BE (Neytral): {stats.BreakevenHitsCount} | Vaxt Bitdi: {stats.TimeExpiredCount}");
+            sb.AppendLine($"🎯 <b>Hədəf Bölgüsü:</b> Hədəf B (TP_B): {stats.Tp3HitsCount} ({stats.Tp3HitRatePercent}%) | Hədəf A (TP_A 1.5R): {stats.PartialHitsCount} | BE (Neytral): {stats.BreakevenHitsCount} | Vaxt Bitdi: {stats.TimeExpiredCount}");
             sb.AppendLine("-----------------------------------");
             return sb.ToString();
         }
@@ -573,7 +521,7 @@ namespace CryptoSense.Infrastructure.Telegram
 
         public static string FormatTerminalDashboard(UserSettings settings, int activePositionsCount, string lastSignalTime)
         {
-            var statusIcon = settings.IsActive ? "İşləyir 🟢" : "Dayandırılıb 🔴";
+            var statusIcon = settings.IsActive ? "Aktiv 🟢" : "Dayandırılıb 🔴";
             var tfDisplay = string.IsNullOrWhiteSpace(settings.Timeframe) || settings.Timeframe == "Təyin olunmayıb"
                 ? "Təyin olunmayıb ⚠️"
                 : (BotConstants.Timeframe.IsAll(settings.Timeframe) ? "1h, 4h" : settings.Timeframe);
@@ -582,56 +530,45 @@ namespace CryptoSense.Infrastructure.Telegram
             string coinCount;
             if (settings.PortfolioMode == "Combined")
             {
-                portModeName = "🔥 40 Coin + Fərdi Coinlər (Kombinə)";
-                coinCount = $"{settings.Coins.Count} ədəd (40 Standart + {settings.CustomCoins.Count} Fərdi)";
+                portModeName = "40 Koin + Fərdi";
+                coinCount = $"{settings.Coins.Count} ədəd";
             }
             else if (settings.PortfolioMode == "Custom")
             {
-                portModeName = "⭐ Mənim Coinlərim (Fərdi)";
-                coinCount = settings.CustomCoins.Count > 0 ? $"{settings.CustomCoins.Count} ədəd (Fərdi)" : "0 ədəd (Boşdur)";
+                portModeName = "Seçilmiş Koinlərim";
+                coinCount = settings.CustomCoins.Count > 0 ? $"{settings.CustomCoins.Count} ədəd" : "0 ədəd (Boşdur)";
             }
             else if (settings.PortfolioMode == "Standard40")
             {
-                portModeName = "🪙 Standart 40 Coin";
-                coinCount = $"{settings.Coins.Count} ədəd (İnstitusional 40)";
+                portModeName = "Standart 40 Koin";
+                coinCount = $"{settings.Coins.Count} ədəd";
             }
             else
             {
                 portModeName = "Təyin olunmayıb ⚠️";
-                coinCount = "0 ədəd (Seçilməyib)";
+                coinCount = "0 ədəd";
             }
 
             var sb = new StringBuilder();
-            sb.AppendLine("🤖 <b>CryptoSense v2.0 | Canlı Terminal</b>");
+            sb.AppendLine("🤖 <b>CryptoSense | Terminal</b>");
             sb.AppendLine("━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-            sb.AppendLine($"💼 <b>Aktiv Portfel:</b> <b>{portModeName}</b>");
-            sb.AppendLine($"⏱ <b>Zaman Rejimi:</b> <code>{tfDisplay}</code>");
-            sb.AppendLine($"🪙 <b>İzlənən Coinlər:</b> <code>{coinCount}</code>");
-            sb.AppendLine($"⚡ <b>Açıq Mövqelər:</b> <code>{activePositionsCount} ədəd (Maksimum: 20)</code>");
-            sb.AppendLine($"🔔 <b>Skaner Vəziyyəti:</b> <b>{statusIcon}</b>");
+            sb.AppendLine($"💼 <b>Portfel:</b> <b>{portModeName}</b>");
+            sb.AppendLine($"⏱ <b>Zaman:</b> <code>{tfDisplay}</code>");
+            sb.AppendLine($"🪙 <b>İzlənən Koinlər:</b> <code>{coinCount}</code>");
+            sb.AppendLine($"⚡ <b>Açıq Mövqelər:</b> <code>{activePositionsCount} / 20</code>");
+            sb.AppendLine($"🔔 <b>Bildirişlər:</b> <b>{statusIcon}</b>");
             sb.AppendLine($"🕒 <b>Son Siqnal:</b> <code>{(string.IsNullOrEmpty(lastSignalTime) ? "Hələ yoxdur" : lastSignalTime)}</code>");
             sb.AppendLine("━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-            if (string.IsNullOrWhiteSpace(settings.Timeframe) || settings.Timeframe == "Təyin olunmayıb" || settings.Coins.Count == 0 || !settings.IsActive)
-            {
-                sb.AppendLine("⚠️ <i>Hələ heç bir əməliyyat və zaman aralığı seçilməyib. Bazar sistemini başlatmaq üçün aşağıdakı düymələrlə portfel və zaman aralığını seçin.</i>");
-            }
-            else
-            {
-                sb.AppendLine("<i>Aşağıdakı düymələrlə portfeli və parametrləri tənzimləyin:</i>");
-            }
             return sb.ToString();
         }
 
         public static string FormatStopConfirmPrompt()
         {
             var sb = new StringBuilder();
-            sb.AppendLine("⚠️ <b>Bildirişləri Dayandırmaq</b>");
-            sb.AppendLine("━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-            sb.AppendLine("Siqnal və bazar bildirişlərini dayandırmaq istədiyinizə əminsiniz?");
-            sb.AppendLine("• Bot sizin üçün yeni siqnal bildirişləri göndərməyəcək.");
-            sb.AppendLine("• Mövcud açıq mövqeləriniz izlənmədə qalacaq.");
-            sb.AppendLine("━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-            sb.AppendLine("Davam etmək istədiyinizə əminsiniz?");
+            sb.AppendLine("⚠️ <b>Bildirişləri Dayandırmaq</b>\n");
+            sb.AppendLine("Siqnal bildirişlərini dayandırmaq istəyirsiniz?");
+            sb.AppendLine("• Yeni siqnallar göndərilməyəcək.");
+            sb.AppendLine("• Açıq mövqelər nəzarətdə qalacaq.");
             return sb.ToString();
         }
 
@@ -686,8 +623,8 @@ namespace CryptoSense.Infrastructure.Telegram
             decimal maxConfluenceSeen = -1)
         {
             var sb = new StringBuilder();
-            sb.AppendLine("&#8505;&#65039; <b>Bazar N&#601;zar&#601;ti (Heartbeat)</b>");
-            sb.AppendLine($"A+ yoxdur | Chase:{chase} Corr:{corr} SL:{slWide} RR:{lowRr} Lag:{skipLag} Stale:{skipStale} Conf:{skipConfluence} G&#246;nd&#601;rildi:{sent} | G&#246;zl&#601;m&#601;:{skipGozleme} BtcGate:{skipBtcGate} Range:{skipBtcRange}");
+            sb.AppendLine("ℹ️ <b>Bazar Nəzarəti (Heartbeat)</b>");
+            sb.AppendLine($"A+ yoxdur | Chase:{chase} Corr:{corr} SL:{slWide} RR:{lowRr} Lag:{skipLag} Stale:{skipStale} Conf:{skipConfluence} Göndərildi:{sent} | Gözləmə:{skipGozleme} BtcGate:{skipBtcGate} Range:{skipBtcRange}");
 
             if (sent == 0)
             {
@@ -733,14 +670,14 @@ namespace CryptoSense.Infrastructure.Telegram
             }
 
             if (telegramFail > 0)
-                sb.AppendLine($"&#9888;&#65039; <b>TELEGRAM_FAIL={telegramFail}</b> &#8212; signal haz&#305;rland&#305;, lakin g&#246;nd&#601;rilm&#601;di!");
+                sb.AppendLine($"⚠️ <b>TELEGRAM_FAIL={telegramFail}</b> — siqnal hazırlandı, lakin göndərilmədi!");
             if (dataAgeMsBtc < 0)
-                sb.AppendLine("&#128993; BTC DataAge: <code>&#246;l&#231;&#252;lm&#601;yib (snap yoxdur)</code>");
+                sb.AppendLine("🟡 BTC DataAge: <code>ölçülməyib (snap yoxdur)</code>");
             else if (dataAgeMsBtc > BotConstants.Thresholds.MaxDataAgeMs)
-                sb.AppendLine($"&#128308; <b>WS GECİKİR DataAge:{dataAgeMsBtc}ms &gt; 3500ms</b>");
+                sb.AppendLine($"🔴 <b>WS GECİKİR DataAge:{dataAgeMsBtc}ms > 3500ms</b>");
             else
-                sb.AppendLine($"&#128994; BTC DataAge: <code>{dataAgeMsBtc}ms</code> (WS sa&#287;lam)");
-            sb.AppendLine($"&#8987; <b>N&#246;vb&#601;ti yoxlama:</b> {nextCheckMinutes} d&#601;q");
+                sb.AppendLine($"🟢 BTC DataAge: <code>{dataAgeMsBtc}ms</code> (WS sağlam)");
+            sb.AppendLine($"⏱ <b>Növbəti yoxlama:</b> {nextCheckMinutes} dəq");
             return sb.ToString();
         }
 

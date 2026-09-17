@@ -213,25 +213,21 @@ namespace CryptoSense.Infrastructure.Telegram
                 userSettings.Coins = new List<string>(Default40Coins);
                 SaveSettings();
 
-                var msg = "🪙 <b>Standart 40 Coin Portfeli Seçildi 🟢</b>\n\n" +
-                          "Bütün 40 əsas institusional coin Binance USD-M fyuçers bazarı üzrə 24/7 analiz edilir.\n\n" +
-                          "<i>Zəhmət olmasa bu portfel üçün ticarət zaman kəsiyini seçin:</i>";
+                var msg = "🪙 <b>Standart 40 Koin Portfeli Seçildi 🟢</b>\n\n" +
+                          "Ən likvid 40 koin 24/7 analiz edilir.\n" +
+                          "<i>Zəhmət olmasa ticarət zaman aralığını seçin:</i>";
                 await EditMessageTextAsync(chatId, messageId, msg, TelegramKeyboards.BuildStandard40TimeframeKeyboard());
             }
             else if (data == "cb_portfolio_custom")
             {
                 var cleanCustom = userSettings.CustomCoins.Count > 0 
                     ? string.Join(", ", userSettings.CustomCoins.Select(c => c.Replace("USDT", "")))
-                    : "<i>(Hələ heç bir fərdi coin əlavə olunmayıb)</i>";
+                    : "<i>(Hələ heç bir koin əlavə olunmayıb)</i>";
 
-                var msg = "⭐ <b>Fərdi Coin Portfeli İdarəetməsi</b>\n\n" +
-                          $"🪙 <b>Sizin Əlavə Etdiyiniz Coinlər ({userSettings.CustomCoins.Count} ədəd):</b>\n" +
+                var msg = "⭐ <b>Fərdi Koin Portfeli</b>\n\n" +
+                          $"🪙 <b>Seçdiyiniz Koinlər ({userSettings.CustomCoins.Count} ədəd):</b>\n" +
                           $"{cleanCustom}\n\n" +
-                          "Aşağıdakı seçimlərdən birini edin:\n" +
-                          "• <b>🎯 Yalnız Fərdi Coinlər:</b> Yalnız sizin seçdiyiniz coinləri izləyir\n" +
-                          "• <b>🔥 40 + Fərdi Coin (Kombinə):</b> Həm standart 40, həm də sizin coinləri birlikdə izləyir\n" +
-                          "• <b>➕ Coin Əlavə Et:</b> İstədiyiniz yeni coini portfelə qatın\n" +
-                          "• <b>🗑 Coin Sil:</b> Portfeldən coin çıxarın";
+                          "<i>Rejimi və ya koinləri tənzimləyin:</i>";
                 await EditMessageTextAsync(chatId, messageId, msg, TelegramKeyboards.BuildCustomCoinsKeyboard(userSettings));
             }
             else if (data == "cb_cust_mode_only")
@@ -242,11 +238,11 @@ namespace CryptoSense.Infrastructure.Telegram
 
                 var cleanCustom = userSettings.CustomCoins.Count > 0 
                     ? string.Join(", ", userSettings.CustomCoins.Select(c => c.Replace("USDT", "")))
-                    : "<i>(Boşdur - Əvvəlcə coin əlavə edin)</i>";
+                    : "<i>(Boşdur - Əvvəlcə koin əlavə edin)</i>";
 
-                var msg = "🎯 <b>Yalnız Fərdi Coinlər Rejimi Seçildi!</b>\n\n" +
-                          $"🪙 <b>İzlənən Coinlər ({userSettings.Coins.Count} ədəd):</b>\n{cleanCustom}\n\n" +
-                          "<i>Zəhmət olmasa bu portfel üçün ticarət zaman kəsiyini seçin:</i>";
+                var msg = "🎯 <b>Yalnız Seçilmiş Koinlər Rejimi Seçildi!</b>\n\n" +
+                          $"🪙 <b>İzlənən Koinlər ({userSettings.Coins.Count} ədəd):</b>\n{cleanCustom}\n\n" +
+                          "<i>Zəhmət olmasa ticarət zaman aralığını seçin:</i>";
                 await EditMessageTextAsync(chatId, messageId, msg, TelegramKeyboards.BuildCustomCoinsKeyboard(userSettings));
             }
             else if (data == "cb_cust_mode_comb")
@@ -257,7 +253,7 @@ namespace CryptoSense.Infrastructure.Telegram
                 userSettings.Coins = combSet.ToList();
                 SaveSettings();
 
-                var msg = "🔥 <b>40 Standart + Fərdi Coinlər (Kombinə) Rejimi Seçildi!</b>\n\n" +
+                var msg = "🔥 <b>40 Koin + Seçilmiş Koinlərim Rejimi Seçildi!</b>\n\n" +
                           $"📊 <b>Ümumi İzlənən Coin Sayı:</b> <b>{userSettings.Coins.Count} ədəd</b>\n" +
                           $"• Standart: 40 institusional coin\n" +
                           $"• Fərdi: {userSettings.CustomCoins.Count} ədəd əlavə coin\n\n" +

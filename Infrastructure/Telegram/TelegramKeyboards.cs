@@ -7,9 +7,9 @@ namespace CryptoSense.Infrastructure.Telegram
         public static object BuildTerminalInlineKeyboard(UserSettings settings, bool isTestMode = false, bool isAdmin = false)
         {
             var toggleText = settings.IsActive ? "🛑 Bildirişləri Dayandır" : "▶️ Bildirişləri Başlat";
-            var stdLabel = settings.PortfolioMode == "Standard40" ? "🪙 Standart 40 Coin 🟢" : "🪙 Standart 40 Coin";
-            var custLabel = settings.PortfolioMode == "Custom" ? "⭐ Fərdi Coinlərim 🟢" : 
-                           (settings.PortfolioMode == "Combined" ? "🔥 40 + Fərdi Coin 🟢" : "⭐ Mənim Coinlərim");
+            var stdLabel = settings.PortfolioMode == "Standard40" ? "🪙 Standart 40 Koin 🟢" : "🪙 Standart 40 Koin";
+            var custLabel = settings.PortfolioMode == "Custom" ? "⭐ Seçilmiş Koinlərim 🟢" : 
+                           (settings.PortfolioMode == "Combined" ? "🔥 40 + Fərdi Koin 🟢" : "⭐ Seçilmiş Koinlərim");
 
             var rows = new System.Collections.Generic.List<object[]>
             {
@@ -20,8 +20,8 @@ namespace CryptoSense.Infrastructure.Telegram
                 },
                 new object[]
                 {
-                    new { text = "🧭 Bitcoin Trend", callback_data = "cb_btc" },
-                    new { text = "📊 Canlı Statistika", callback_data = "cb_stats" }
+                    new { text = "🧭 Bitcoin Kompası", callback_data = "cb_btc" },
+                    new { text = "📊 Statistika", callback_data = "cb_stats" }
                 },
                 new object[]
                 {
@@ -54,7 +54,7 @@ namespace CryptoSense.Infrastructure.Telegram
 
             rows.Add(new object[]
             {
-                new { text = "🔽 Terminalı Bağla / Yerinə Qayıt", callback_data = "cb_close_terminal" }
+                new { text = "🔽 Menyunı Bağla", callback_data = "cb_close_terminal" }
             });
 
             return new
