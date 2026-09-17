@@ -249,7 +249,11 @@ namespace CryptoSense.Application.Services
             {
                 if (slDistance < BotConstants.Thresholds.ThinBookAtr * atr14)
                 {
-                    return fail with { SkipReason = $"SKIP_SL_TOO_TIGHT (Thin book SL {slDistance:F4} < {BotConstants.Thresholds.ThinBookAtr} * ATR)" };
+                    slDistance = BotConstants.Thresholds.ThinBookAtr * atr14;
+                    if (direction == SignalDirection.Buy)
+                        sl = calculationRefPrice - slDistance;
+                    else
+                        sl = calculationRefPrice + slDistance;
                 }
             }
 
@@ -306,8 +310,7 @@ namespace CryptoSense.Application.Services
                 }
                 else
                 {
-                    tp2 = calculationRefPrice + 2.50m * riskR;
-                    reasons?.Add("TP2_FALLBACK_2R5: no cluster beyond 1.5R");
+                    return fail with { SkipReason = "SKIP_NO_STRUCTURE_TARGET" };
                 }
                 if (tp2 <= tp1)
                 {
@@ -324,8 +327,7 @@ namespace CryptoSense.Application.Services
                 }
                 else
                 {
-                    tp2 = calculationRefPrice - 2.50m * riskR;
-                    reasons?.Add("TP2_FALLBACK_2R5: no cluster beyond 1.5R");
+                    return fail with { SkipReason = "SKIP_NO_STRUCTURE_TARGET" };
                 }
                 if (tp2 >= tp1)
                 {
@@ -340,14 +342,12 @@ namespace CryptoSense.Application.Services
             decimal tp3 = 0m;
 
             decimal tp1DistActual = Math.Abs(tp1 - calculationRefPrice);
-            decimal tp2DistActual = Math.Abs(tp2 - calculationRefPrice);
-            decimal weightedTpDist = (BotConstants.Thresholds.Tp1Weight * tp1DistActual) + (BotConstants.Thresholds.Tp2Weight * tp2DistActual);
-            decimal rrRatio = riskR > 0 ? (weightedTpDist / riskR) : 0m;
+            decimal rrRatio = riskR > 0 ? (tp1DistActual / riskR) : 0m;
 
             if (rrRatio < BotConstants.Thresholds.MinRiskReward)
             {
-                Console.WriteLine($"[SignalEngine] R:R filter blocked (Weighted R:R {rrRatio:F2} < {BotConstants.Thresholds.MinRiskReward:F2})");
-                return fail with { SkipReason = $"SKIP_LOW_RR (Weighted R:R {rrRatio:F2} < {BotConstants.Thresholds.MinRiskReward:F2})" };
+                Console.WriteLine($"[SignalEngine] R:R filter blocked (R:R {rrRatio:F2} < {BotConstants.Thresholds.MinRiskReward:F2})");
+                return fail with { SkipReason = $"SKIP_LOW_RR (R:R {rrRatio:F2} < {BotConstants.Thresholds.MinRiskReward:F2})" };
             }
 
             return new SrTargetResult(
@@ -409,10 +409,6 @@ namespace CryptoSense.Application.Services
 
                 // BTC 1h SuperTrend + HH/HL = rejim (Problem 8)
                 var btc1hKlines = await _marketData.GetKlinesAsync("BTCUSDT", "1h", 60);
-                if (btc1hKlines.Count < 20)
-                {
-                    btc1hKlines = await _marketData.GetKlinesAsync("BTCUSDT", "15m", 60);
-                }
 
                 if (btc1hKlines.Count > 0)
                 {
@@ -743,6 +739,7 @@ namespace CryptoSense.Application.Services
             bool isStructuralBreakout = hasHigherLow && (recentAltSwingHigh > 0 && closedCandle.Close > recentAltSwingHigh);
 
             decimal btcResidualFeature = 0m;
+            decimal rawResidual = 0m;
             if (isAltcoin && closedKlines.Count >= 20)
             {
                 try
@@ -788,7 +785,8 @@ namespace CryptoSense.Application.Services
                             }
                             decimal beta = varBtc > 0 ? cov / varBtc : 0m;
                             decimal residual = altR.Last() - (beta * btcR.Last());
-                            btcResidualFeature = (decimal)Math.Tanh((double)(residual / 0.012m));
+                            rawResidual = residual;
+                            btcResidualFeature = rawResidual;
 
                             var lastAlt = altSubset.Last();
                             var lastBtc = btcSubset.Last();
@@ -804,6 +802,7 @@ namespace CryptoSense.Application.Services
             {
                 altBtcCorr = 1.0m;
                 btcResidualFeature = 0m;
+                rawResidual = 0m;
                 altRs = 0m;
             }
 
@@ -812,41 +811,6 @@ namespace CryptoSense.Application.Services
             // BTC QAPI: BTC özü kompas tərəfindən bloklanmır (öz SuperTrend/confluence saxlanılır).
             bool btc4hStrongLong = btcCompass.Btc4hStrongLong;
             bool btc4hStrongShort = btcCompass.Btc4hStrongShort;
-
-            bool btcResidualLongOk = !isAltcoin || indicators.BtcResidualFeature >= -0.35m;
-            bool btcResidualShortOk = !isAltcoin || indicators.BtcResidualFeature <= 0.35m;
-
-            bool ethLongOk = true;
-            bool ethShortOk = true;
-
-            if (isAltcoin)
-            {
-                // Mean-reversion: BTC Bullish && ReturnCorr>=0.50 && residual>0 && !breakdown → SHORT skip
-                if (btcCompass.Regime == BtcMarketRegime.Bullish && altBtcCorr >= 0.50m && indicators.BtcResidualFeature > 0m && !isStructuralBreakdown)
-                {
-                    btcResidualShortOk = false;
-                }
-
-                // ETH eyni timeframe SuperTrend (şam rəngi yox)
-                try
-                {
-                    var ethKlines = await _marketData.GetKlinesAsync("ETHUSDT", timeframe, 25);
-                    var closedEth = ethKlines.Count >= 2 ? ethKlines.Take(ethKlines.Count - 1).ToList() : ethKlines;
-                    if (closedEth.Count >= 10)
-                    {
-                        var (_, ethIsBullish) = _indicatorEngine.CalculateSuperTrend(closedEth, 10, 3.0m);
-                        if (!ethIsBullish && altBtcCorr >= 0.65m && !isStructuralBreakout)
-                        {
-                            ethLongOk = false;
-                        }
-                        if (ethIsBullish && altBtcCorr >= 0.65m && !isStructuralBreakdown)
-                        {
-                            ethShortOk = false;
-                        }
-                    }
-                }
-                catch (Exception _ex) { Console.WriteLine($"[SignalEngine] Swallowed ETH exception: {_ex.Message}"); }
-            }
 
             // Market Regime & Chop Filter (Minimum ADX required: 16 for 4h, 22 for 1h)
             decimal minAdxRequired = timeframe == "4h"
@@ -885,8 +849,6 @@ namespace CryptoSense.Application.Services
                 hasValidMarketRegime &&
                 volumeSoftOk &&
                 rsiLongOk &&
-                btcResidualLongOk &&
-                ethLongOk &&
                 bullishCandleConfirmation)
             {
                 direction = SignalDirection.Buy;
@@ -901,8 +863,6 @@ namespace CryptoSense.Application.Services
                      hasValidMarketRegime &&
                      volumeSoftOk &&
                      rsiShortOk &&
-                     btcResidualShortOk &&
-                     ethShortOk &&
                      bearishCandleConfirmation)
             {
                 direction = SignalDirection.Sell;
@@ -918,23 +878,25 @@ namespace CryptoSense.Application.Services
                 if (!volumeSoftOk) reasons.Add($"SKIP_VOLUME: Vol {indicators.VolumeSurgeRatio:F2} < {CryptoSense.Domain.Common.BotConstants.Thresholds.MinVolumeSurgeRatio:F2}");
             }
 
-            // Alt LONG təhlükəsizlik baryeri: BTC və ya ETH təsdiq etmirsə alt LONG qətiyyən buraxılmasın
-            if (isAltcoin && determinedType.Contains("LONG"))
+            // 4B) Residual veto — xam residual, ATR ilə:
+            decimal atrPctResidual = (indicators.Atr > 0 && calculationRefPrice > 0)
+                ? (indicators.Atr / calculationRefPrice)
+                : 0.01m;
+
+            if (isAltcoin && determinedType.Contains("LONG") && rawResidual < -0.35m * atrPctResidual)
             {
-                if (!btcResidualLongOk)
-                {
-                    determinedType = "GÖZLƏMƏ ⚪";
-                    confidence = 50;
-                    reasons.Add("SKIP_BTC_RESIDUAL: BTC residual zəif — alt LONG bloklandı");
-                }
-                else if (!ethLongOk)
-                {
-                    determinedType = "GÖZLƏMƏ ⚪";
-                    confidence = 50;
-                    reasons.Add("ETH SuperTrend Bearish: altcoin LONG üçün ETH təsdiqi yoxdur");
-                }
+                determinedType = "GÖZLƏMƏ ⚪";
+                confidence = 50;
+                reasons.Add("SKIP_BTC_RESIDUAL: alt residual < -0.35 * atrPct");
+            }
+            else if (isAltcoin && determinedType.Contains("SHORT") && rawResidual > 0.35m * atrPctResidual)
+            {
+                determinedType = "GÖZLƏMƏ ⚪";
+                confidence = 50;
+                reasons.Add("SKIP_BTC_RESIDUAL: alt residual > +0.35 * atrPct");
             }
 
+            // Coin 4h HTF alignment (80 kline, ema50Ready, SKIP_HTF_OPPOSE) SAXLA.
             if (timeframe == "1h" && (determinedType.Contains("LONG") || determinedType.Contains("SHORT")))
             {
                 try
@@ -968,19 +930,27 @@ namespace CryptoSense.Application.Services
                 catch (Exception _ex) { Console.WriteLine($"[SignalEngine] Swallowed exception: {_ex.Message}"); }
             }
 
-            if (isAltcoin && determinedType.Contains("SHORT"))
+            // 4C) BTC REJİM QAPISI — determinedType LONG/SHORT olandan SONRA, SKIP_STALE_TREND-dən ƏVVƏL:
+            // BTC özü də daxil (istisna yox):
+            if (determinedType.Contains("LONG") || determinedType.Contains("SHORT"))
             {
-                if (!btcResidualShortOk)
+                if (btcCompass.Regime == BtcMarketRegime.Ranging)
                 {
                     determinedType = "GÖZLƏMƏ ⚪";
                     confidence = 50;
-                    reasons.Add("SKIP_BTC_RESIDUAL: BTC residual və ya mean-reversion qaydası — alt SHORT bloklandı");
+                    reasons.Add("SKIP_BTC_REGIME: range — yeni siqnal yox");
                 }
-                else if (!ethShortOk)
+                else if (btcCompass.Regime == BtcMarketRegime.Bullish && (determinedType.Contains("SHORT") || direction == SignalDirection.Sell))
                 {
                     determinedType = "GÖZLƏMƏ ⚪";
                     confidence = 50;
-                    reasons.Add("ETH SuperTrend Bullish: altcoin SHORT üçün ETH təsdiqi yoxdur (ADA #72 filtri)");
+                    reasons.Add("SKIP_BTC_REGIME: bull — yalnız LONG");
+                }
+                else if (btcCompass.Regime == BtcMarketRegime.Bearish && (determinedType.Contains("LONG") || direction == SignalDirection.Buy))
+                {
+                    determinedType = "GÖZLƏMƏ ⚪";
+                    confidence = 50;
+                    reasons.Add("SKIP_BTC_REGIME: bear — yalnız SHORT");
                 }
             }
 
@@ -1032,8 +1002,8 @@ namespace CryptoSense.Application.Services
                 }
             }
 
-            // --- SKIP_BTC_BOUNCE (altcoin-lər, BTC 1h) ---
-            if (isAltcoin && (determinedType.Contains("LONG") || determinedType.Contains("SHORT")))
+            // --- SKIP_BTC_BOUNCE (disabled per single BTC compass specification) ---
+            if (false && isAltcoin && (determinedType.Contains("LONG") || determinedType.Contains("SHORT")))
             {
                 if (determinedType.Contains("SHORT")
                     && (btcCompass.Regime == BtcMarketRegime.Ranging || btcCompass.Regime == BtcMarketRegime.Bullish)
@@ -1053,8 +1023,8 @@ namespace CryptoSense.Application.Services
                 }
             }
 
-            // --- ADDITIVE GATE B: BTC 4h güclü əks istiqamət (1h və 4h alt tətbiq olunur) ---
-            if (isLiveScan
+            // --- ADDITIVE GATE B: BTC 4h güclü əks istiqamət (disabled per single BTC compass specification) ---
+            if (false && isLiveScan
                 && (timeframe == "1h" || timeframe == "4h")
                 && isAltcoin
                 && (determinedType.Contains("LONG") || determinedType.Contains("SHORT")))
@@ -1104,8 +1074,8 @@ namespace CryptoSense.Application.Services
                 "3m" => 60,
                 "5m" => 60,
                 "15m" => 90,
-                "4h" => 4320,
-                _ => 2160
+                "4h" => CryptoSense.Domain.Common.BotConstants.Thresholds.MaxHoldingHours4h * 60,
+                _ => CryptoSense.Domain.Common.BotConstants.Thresholds.MaxHoldingHours1h * 60
             };
 
             int sigNumber = 0; // Number is assigned strictly upon send-success in BackgroundMarketScanner

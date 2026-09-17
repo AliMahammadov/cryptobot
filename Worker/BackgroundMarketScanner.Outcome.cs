@@ -229,21 +229,23 @@ namespace CryptoSense.Worker
             {
                 if (sig.OutcomeAlertSent || sig.IsClosed) return;
 
-                // Maksimum ömür yalnız timeframe TTL ilə: 1h -> 8 saat (480 dəq), 4h -> 24 saat (1440 dəq).
-                int ttlMinutes = sig.Timeframe == "4h" ? 1440 : 480;
+                // Maksimum ömür yalnız timeframe TTL ilə: 1h -> 36 saat (2160 dəq), 4h -> 96 saat (5760 dəq).
+                int ttlMinutes = sig.Timeframe == "4h"
+                    ? BotConstants.Thresholds.MaxHoldingHours4h * 60
+                    : BotConstants.Thresholds.MaxHoldingHours1h * 60;
                 DateTime expiryUtc = (sig.ExpiryTimeUtc != default && sig.ExpiryTimeUtc > sig.GeneratedAt)
                     ? sig.ExpiryTimeUtc
                     : sig.GeneratedAt.AddMinutes(ttlMinutes);
 
-                // Açıq siqnalların (o cümlədən cari 4h BTC/DOGE) 3 saatda kəsilməməsi üçün timeframe TTL təmin edilir:
-                if (sig.Timeframe == "4h" && (expiryUtc - sig.GeneratedAt).TotalMinutes < 1440)
+                // Açıq siqnalların 3 saatda kəsilməməsi üçün timeframe TTL təmin edilir:
+                if (sig.Timeframe == "4h" && (expiryUtc - sig.GeneratedAt).TotalMinutes < BotConstants.Thresholds.MaxHoldingHours4h * 60)
                 {
-                    expiryUtc = sig.GeneratedAt.AddMinutes(1440);
+                    expiryUtc = sig.GeneratedAt.AddMinutes(BotConstants.Thresholds.MaxHoldingHours4h * 60);
                     sig.ExpiryTimeUtc = expiryUtc;
                 }
-                else if (sig.Timeframe == "1h" && (expiryUtc - sig.GeneratedAt).TotalMinutes < 480)
+                else if (sig.Timeframe == "1h" && (expiryUtc - sig.GeneratedAt).TotalMinutes < BotConstants.Thresholds.MaxHoldingHours1h * 60)
                 {
-                    expiryUtc = sig.GeneratedAt.AddMinutes(480);
+                    expiryUtc = sig.GeneratedAt.AddMinutes(BotConstants.Thresholds.MaxHoldingHours1h * 60);
                     sig.ExpiryTimeUtc = expiryUtc;
                 }
 

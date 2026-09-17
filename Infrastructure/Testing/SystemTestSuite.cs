@@ -967,10 +967,10 @@ namespace CryptoSense.Infrastructure.Testing
                 return Task.FromResult(true);
             });
 
-            // 35. Risk:Reward Gate: R:R = (weighted TP) / (SL məsafəsi) < 2.00 -> SKIP_RR
-            await AssertTest("Test 42: Risk:Reward Gate - R:R < 2.00 Strictly Blocked & Format Verified", () =>
+            // 35. Risk:Reward Gate: R:R = TP1 / SL < 1.50 -> SKIP_RR
+            await AssertTest("Test 42: Risk:Reward Gate - R:R < 1.50 Strictly Blocked & Format Verified", () =>
             {
-                // Case 1: Bad R:R (e.g. BTC TP1 +1.08%, SL -1.01%, R:R = 1.07 < 2.00)
+                // Case 1: Bad R:R (e.g. BTC TP1 +1.08%, SL -1.01%, R:R = 1.07 < 1.50)
                 decimal entryPrice = 78350.00m;
                 decimal badTp1 = 79200.00m;
                 decimal badSl = 77560.55m;
@@ -992,7 +992,7 @@ namespace CryptoSense.Infrastructure.Testing
                 string log = $"[MarketScanner] SKIP_RR send=NO BTCUSDT tp1%={badTp1Pct:F2}% sl%={badSlPct:F2}% rr={badRr:F2}";
                 Console.WriteLine(log);
 
-                // Case 2: Good R:R (e.g. TP1 +2.12%, SL -1.01%, R:R >= 2.00)
+                // Case 2: Good R:R (e.g. TP1 +2.12%, SL -1.01%, R:R >= 1.50)
                 decimal goodSlDist = badSlDist;
                 decimal goodTp1Dist = goodSlDist * 2.10m;
                 decimal goodTp1 = entryPrice + goodTp1Dist;

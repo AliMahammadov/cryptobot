@@ -29,9 +29,7 @@ namespace CryptoSense.Application.Services
             }
 
             decimal tp1Dist = Math.Abs(signal.TakeProfit1 - entry);
-            decimal tpBDist = Math.Abs(signal.TakeProfit2 - entry);
-            decimal weightedTpDist = (BotConstants.Thresholds.Tp1Weight * tp1Dist) + (BotConstants.Thresholds.Tp2Weight * tpBDist);
-            decimal effectiveRr = slDist > 0 ? (weightedTpDist / slDist) : 0m;
+            decimal effectiveRr = slDist > 0 ? (tp1Dist / slDist) : 0m;
             if (effectiveRr < BotConstants.Thresholds.MinRiskReward)
             {
                 return (false, "RR");
