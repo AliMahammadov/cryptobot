@@ -56,6 +56,7 @@ namespace CryptoSense.Domain.Entities
         public string Btc1hCandleColor { get; set; } = "Green";
         public bool BtcRising3 { get; set; }
         public bool BtcFalling3 { get; set; }
+        public decimal BtcNet3hPct { get; set; } = 0m;
         public string Summary { get; set; } = "";
         public string EmaStructure { get; set; } = "";
         public string TimestampFormatted { get; set; } = CryptoSense.Domain.Common.TimeHelper.NowFormatted;

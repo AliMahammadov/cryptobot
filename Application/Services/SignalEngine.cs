@@ -466,6 +466,11 @@ namespace CryptoSense.Application.Services
                         compass.BtcFalling3 = b2.Close > b1.Close && b1.Close > b0.Close;
                     }
 
+                    decimal btcNet3h = 0;
+                    if (closed1h.Count >= 4 && closed1h[^4].Open > 0)
+                        btcNet3h = (closed1h[^1].Close - closed1h[^4].Open) / closed1h[^4].Open * 100m;
+                    compass.BtcNet3hPct = btcNet3h;
+
                     // Rejim təyini: BTC 1h SuperTrend + HH/HL = rejim (Problem 8)
                     if (isSuperTrendBullish && hasHhHl)
                     {
@@ -1032,7 +1037,7 @@ namespace CryptoSense.Application.Services
             {
                 if (determinedType.Contains("SHORT")
                     && (btcCompass.Regime == BtcMarketRegime.Ranging || btcCompass.Regime == BtcMarketRegime.Bullish)
-                    && btcCompass.BtcRising3)
+                    && (btcCompass.BtcRising3 || btcCompass.BtcNet3hPct >= 0.60m))
                 {
                     determinedType = "GÖZLƏMƏ ⚪";
                     confidence = 50;
@@ -1040,7 +1045,7 @@ namespace CryptoSense.Application.Services
                 }
                 else if (determinedType.Contains("LONG")
                     && (btcCompass.Regime == BtcMarketRegime.Ranging || btcCompass.Regime == BtcMarketRegime.Bearish)
-                    && btcCompass.BtcFalling3)
+                    && (btcCompass.BtcFalling3 || btcCompass.BtcNet3hPct <= -0.60m))
                 {
                     determinedType = "GÖZLƏMƏ ⚪";
                     confidence = 50;
