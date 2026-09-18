@@ -809,6 +809,12 @@ namespace CryptoSense.Infrastructure.Telegram
                 _userStates.TryRemove(chatId, out _);
                 _ = DeleteMessageAsync(chatId, messageId);
 
+                if (userSettings.LastAdminMessageId.HasValue)
+                {
+                    _ = DeleteMessageAsync(chatId, userSettings.LastAdminMessageId.Value);
+                    userSettings.LastAdminMessageId = null;
+                }
+
                 var compass = await signalEngine.GetBtcCompassAsync();
                 var tel = BackgroundMarketScanner.LatestTelemetrySnapshot ?? new();
                 var bakuDayStartUtc = DateTime.UtcNow.AddHours(4).Date.AddHours(-4);
@@ -831,21 +837,8 @@ namespace CryptoSense.Infrastructure.Telegram
 
                 var inlineKb = TelegramKeyboards.BuildAdminTerminalInlineKeyboard();
 
-                if (userSettings.LastAdminMessageId.HasValue)
-                {
-                    bool edited = await EditMessageTextAsync(chatId, userSettings.LastAdminMessageId.Value, adminLive, inlineKb);
-                    if (!edited)
-                    {
-                        var newAdminMsgId = await SendMessageReturnIdAsync(adminLive, chatId, inlineKb);
-                        userSettings.LastAdminMessageId = newAdminMsgId;
-                    }
-                }
-                else
-                {
-                    var newAdminMsgId = await SendMessageReturnIdAsync(adminLive, chatId, inlineKb);
-                    userSettings.LastAdminMessageId = newAdminMsgId;
-                }
-
+                var newAdminMsgId = await SendMessageReturnIdAsync(adminLive, chatId, inlineKb);
+                userSettings.LastAdminMessageId = newAdminMsgId;
                 userSettings.IsAdminOpen = true;
                 SaveSettings();
                 return;
@@ -865,6 +858,12 @@ namespace CryptoSense.Infrastructure.Telegram
                 _userStates.TryRemove(chatId, out _);
                 _ = DeleteMessageAsync(chatId, messageId);
 
+                if (userSettings.LastTerminalMessageId.HasValue)
+                {
+                    _ = DeleteMessageAsync(chatId, userSettings.LastTerminalMessageId.Value);
+                    userSettings.LastTerminalMessageId = null;
+                }
+
                 var unitOfWork = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
                 var openCount = await unitOfWork.Signals.GetUserOpenSignalsCountAsync(chatId);
                 var lastDeliveredUtc = await unitOfWork.Signals.GetLastDeliveredSignalTimeUtcAsync(chatId);
@@ -875,24 +874,10 @@ namespace CryptoSense.Infrastructure.Telegram
                 var dashText = TelegramMessageFormatter.FormatTerminalDashboard(userSettings, openCount, lastTime);
                 var inlineKb = TelegramKeyboards.BuildTerminalInlineKeyboard(userSettings, _testModeChats.ContainsKey(chatId), isAdmin);
 
-                if (userSettings.LastTerminalMessageId.HasValue)
-                {
-                    bool edited = await EditMessageTextAsync(chatId, userSettings.LastTerminalMessageId.Value, dashText, inlineKb);
-                    if (!edited)
-                    {
-                        var newMsgId = await SendMessageReturnIdAsync(dashText, chatId, inlineKb);
-                        userSettings.LastTerminalMessageId = newMsgId;
-                    }
-                }
-                else
-                {
-                    var newMsgId = await SendMessageReturnIdAsync(dashText, chatId, inlineKb);
-                    userSettings.LastTerminalMessageId = newMsgId;
-                }
-
+                var newMsgId = await SendMessageReturnIdAsync(dashText, chatId, inlineKb);
+                userSettings.LastTerminalMessageId = newMsgId;
                 userSettings.IsTerminalOpen = true;
                 SaveSettings();
-                _ = BuildAndSendPortfolioSummaryAsync(chatId, userSettings, forceRefresh: false);
                 return;
             }
 
