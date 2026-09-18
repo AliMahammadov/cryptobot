@@ -229,7 +229,6 @@ namespace CryptoSense.Infrastructure.Persistence.Repositories
             }
 
             var all = await query.ToListAsync();
-            var closed = all.Where(s => s.Status != SignalStatus.Open || s.IsClosed).ToList();
 
             bool hasSpecificTf = !string.IsNullOrEmpty(specificTimeframe) && !BotConstants.Timeframe.IsAll(specificTimeframe);
 
@@ -241,58 +240,68 @@ namespace CryptoSense.Infrastructure.Persistence.Repositories
                 && (userCoins == null || userCoins.Count == 0 || userCoins.Contains(s.Symbol))
                 && (!hasSpecificTf || s.Timeframe == specificTimeframe));
 
-            return CalculateStatsFromSignals(closed, openSignalsCount);
+            return CalculateStatsFromSignals(all, openSignalsCount);
         }
 
-        private static PerformanceStats CalculateStatsFromSignals(List<FuturesSignal> closed, int openSignalsCount)
+        private static PerformanceStats CalculateStatsFromSignals(List<FuturesSignal> all, int openSignalsCount)
         {
-            var timeSignals = closed.Where(s =>
-                !s.IsPartial1Closed
-                && s.CloseReason != "TP_A" && s.CloseReason != "TP_B"
-                && s.CloseReason != "TP1" && s.CloseReason != "TP2" && s.CloseReason != "TP3"
-                && (s.CloseReason == "TIME" || (s.OutcomeStatus != null && s.OutcomeStatus.Contains("Müddəti")))
+            static bool HitTp1(FuturesSignal s) =>
+                s.IsPartial1Closed
+                || s.Tp1Notified
+                || s.CloseReason == "TP_A"
+                || s.CloseReason == "TP1";
+
+            static bool HitTp2(FuturesSignal s) =>
+                s.Tp2Notified
+                || s.CloseReason == "TP_B"
+                || s.CloseReason == "TP2"
+                || s.CloseReason == "TP3"
+                || (s.OutcomeStatus != null && s.OutcomeStatus.Contains("TP3"));
+
+            var successSignals = all.Where(s => HitTp1(s) || HitTp2(s) || s.Status == SignalStatus.Success).ToList();
+
+            var failedSignals = all.Where(s =>
+                !HitTp1(s) && !HitTp2(s) &&
+                (s.CloseReason == "SL" || s.CloseReason == "SL_RESTART_CATCHUP" ||
+                 (s.Status == SignalStatus.Failed && s.CloseReason != "TIME" && s.CloseReason != "BE" && s.CloseReason != "NO_EDGE"))
             ).ToList();
 
-            var tpSignals = closed.Where(s => !timeSignals.Contains(s) && (
-                                              s.IsPartial1Closed ||
-                                              s.CloseReason == "TP_A" ||
-                                              s.CloseReason == "TP_B" ||
-                                              s.CloseReason == "TP1" ||
-                                              s.CloseReason == "TP2" ||
-                                              s.CloseReason == "TP3" ||
-                                              s.Status == SignalStatus.Success)).ToList();
+            var neutralSignals = all.Where(s =>
+                !HitTp1(s) && !HitTp2(s) &&
+                (s.CloseReason == "BE" || s.CloseReason == "NO_EDGE" || s.Status == SignalStatus.Neutral ||
+                 (s.OutcomeStatus != null && s.OutcomeStatus.Contains("Breakeven")))
+            ).ToList();
 
-            var slSignals = closed.Where(s => !timeSignals.Contains(s) && !tpSignals.Contains(s) && (s.CloseReason == "SL" || s.CloseReason == "SL_RESTART_CATCHUP")).ToList();
+            var timeSignals = all.Where(s =>
+                !HitTp1(s) && !HitTp2(s) &&
+                (s.CloseReason == "TIME" || (s.OutcomeStatus != null && s.OutcomeStatus.Contains("Müddəti")))
+            ).ToList();
 
-            var beSignals = closed.Where(s => !timeSignals.Contains(s) && !tpSignals.Contains(s) && !slSignals.Contains(s) && 
-                                              (s.CloseReason == "BE" || s.CloseReason == "NO_EDGE" || s.Status == SignalStatus.Neutral || 
-                                              (s.OutcomeStatus != null && s.OutcomeStatus.Contains("Breakeven")))).ToList();
-
-            var otherFailed = closed.Where(s => !timeSignals.Contains(s) && !tpSignals.Contains(s) && !slSignals.Contains(s) && !beSignals.Contains(s) && 
-                                                (s.Status == SignalStatus.Failed || (s.ResultPercent.HasValue && s.ResultPercent.Value < -0.20m))).ToList();
-
-            int successCount = tpSignals.Count;
-            int failedCount = slSignals.Count + otherFailed.Count;
-            int beCount = beSignals.Count;
+            int successCount = successSignals.Count;
+            int failedCount = failedSignals.Count;
+            int beCount = neutralSignals.Count;
             int timeCount = timeSignals.Count;
+
+            int partialHitsCount = all.Count(HitTp1);
+            int tp3HitsCount = all.Count(HitTp2);
 
             var stats = new PerformanceStats
             {
-                TotalSignals = closed.Count + openSignalsCount,
+                TotalSignals = all.Count,
                 OpenSignals = openSignalsCount,
                 SuccessSignals = successCount,
                 FailedSignals = failedCount,
                 NeutralSignals = beCount,
                 BreakevenHitsCount = beCount,
                 TimeExpiredCount = timeCount,
-                PartialHitsCount = closed.Count(s => s.IsPartial1Closed || s.CloseReason == "TP_A" || s.CloseReason == "TP1"),
-                Tp3HitsCount = closed.Count(s => s.CloseReason == "TP_B" || s.CloseReason == "TP3" || (s.OutcomeStatus != null && s.OutcomeStatus.Contains("TP3")))
+                PartialHitsCount = partialHitsCount,
+                Tp3HitsCount = tp3HitsCount
             };
 
             int decisiveTrades = stats.SuccessSignals + stats.FailedSignals;
             stats.WinRatePercent = decisiveTrades > 0 ? Math.Round(((decimal)stats.SuccessSignals / decisiveTrades) * 100, 1) : (stats.SuccessSignals > 0 ? 100m : 0m);
 
-            var results = closed.Where(s => s.ResultPercent.HasValue).Select(s => s.ResultPercent!.Value).ToList();
+            var results = all.Where(s => s.ResultPercent.HasValue).Select(s => s.ResultPercent!.Value).ToList();
             if (results.Count > 0)
             {
                 stats.TotalNetProfitPercent = Math.Round(results.Sum(), 2);
@@ -322,7 +331,7 @@ namespace CryptoSense.Infrastructure.Persistence.Repositories
                 }
 
                 // Prioritet 5: Max Drawdown
-                var orderedTrades = closed.Where(s => s.ResultPercent.HasValue).OrderBy(s => s.GeneratedAt).ToList();
+                var orderedTrades = all.Where(s => s.ResultPercent.HasValue).OrderBy(s => s.GeneratedAt).ToList();
                 decimal peakEquity = 0;
                 decimal currentEquity = 0;
                 decimal maxDrawdown = 0;
@@ -644,11 +653,10 @@ namespace CryptoSense.Infrastructure.Persistence.Repositories
             }
 
             var userSignals = await query.ToListAsync();
-            var closed = userSignals.Where(s => s.Status != SignalStatus.Open || s.IsClosed).ToList();
             var openList = userSignals.Where(s => s.Status == SignalStatus.Open && !s.IsClosed).ToList();
             int openSignalsCount = openList.Count;
 
-            return CalculateStatsFromSignals(closed, openSignalsCount);
+            return CalculateStatsFromSignals(userSignals, openSignalsCount);
         }
 
         public async Task<int> CleanupOrphanedSignalsAsync()

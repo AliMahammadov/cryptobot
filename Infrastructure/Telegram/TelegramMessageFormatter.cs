@@ -322,6 +322,7 @@ namespace CryptoSense.Infrastructure.Telegram
             sb.AppendLine("-----------------------------------");
             sb.AppendLine($"📌 <b>Ümumi Əməliyyatlar:</b> {stats.TotalSignals} ədəd");
             sb.AppendLine($"🟡 <b>Açıq İzlənən:</b> {stats.OpenSignals} ədəd");
+            sb.AppendLine($"✅ <b>Uğurlu (TP1 və ya TP2):</b> {stats.SuccessSignals} əməliyyat");
             sb.AppendLine($"✅ <b>TP1 vuran:</b> {stats.PartialHitsCount} əməliyyat");
             sb.AppendLine($"✅✅ <b>TP2 vuran:</b> {stats.Tp3HitsCount} əməliyyat");
             sb.AppendLine($"❌ <b>SL olan:</b> {stats.FailedSignals} əməliyyat");
@@ -861,10 +862,12 @@ namespace CryptoSense.Infrastructure.Telegram
             var sb = new StringBuilder();
             sb.AppendLine(isSuperAdmin ? "📊 <b>GÜN SONU HESABATI (Qlobal Sistem)</b>" : "📊 <b>GÜN SONU ŞƏXSİ HESABATINIZ</b>");
             sb.AppendLine($"🕒 <b>Tarix:</b> <code>{CryptoSense.Domain.Common.TimeHelper.NowFormatted}</code>");
-            sb.AppendLine("-----------------------------------");
             sb.AppendLine($"📌 <b>Ümumi Siqnallar:</b> {stats.TotalSignals} ədəd");
-            sb.AppendLine($"✅ <b>Uğurlu (TP):</b> {stats.SuccessSignals} ədəd");
-            sb.AppendLine($"❌ <b>Uğursuz (SL):</b> {stats.FailedSignals} ədəd");
+            sb.AppendLine($"✅ <b>Uğurlu (TP1 və ya TP2):</b> {stats.SuccessSignals} ədəd");
+            sb.AppendLine($"✅ <b>TP1 vuran:</b> {stats.PartialHitsCount} ədəd");
+            sb.AppendLine($"✅✅ <b>TP2 vuran:</b> {stats.Tp3HitsCount} ədəd");
+            sb.AppendLine($"❌ <b>SL:</b> {stats.FailedSignals} ədəd");
+            sb.AppendLine($"⚪ <b>Neytral:</b> {stats.NeutralSignals} ədəd");
             sb.AppendLine($"🎯 <b>Günlük Win Rate:</b> <b>{stats.WinRatePercent.ToString("F1", CultureInfo.InvariantCulture)}%</b>");
             sb.AppendLine($"📈 <b>Günlük Xalis PnL:</b> <b>{(stats.TotalNetProfitPercent >= 0 ? "+" : "")}{stats.TotalNetProfitPercent.ToString("F2", CultureInfo.InvariantCulture)}%</b>");
             sb.AppendLine("-----------------------------------");
