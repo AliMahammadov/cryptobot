@@ -18,7 +18,7 @@ namespace CryptoSense.Infrastructure.Telegram
         {
             var isLong = signal.Direction == SignalDirection.Buy || signal.SignalType.Contains("LONG");
             var cleanSymbol = signal.Symbol.Replace("USDT", "");
-            var directionLabel = isLong ? "LONG" : "SHORT";
+            var dirEmoji = isLong ? "🟢" : "🔴";
 
             decimal tp1Dist = Math.Abs(signal.TakeProfit1 - signal.EntryPrice);
             decimal slDist = Math.Abs(signal.StopLoss - signal.EntryPrice);
@@ -44,7 +44,7 @@ namespace CryptoSense.Infrastructure.Telegram
             var genTime = signal.GeneratedAt != default ? signal.GeneratedAt : DateTime.UtcNow;
 
             var sb = new StringBuilder();
-            sb.AppendLine($"#{userSigNum}  {directionLabel}  {cleanSymbol}  {signal.Timeframe}");
+            sb.AppendLine($"{dirEmoji}  #{userSigNum}  {cleanSymbol}  {signal.Timeframe}");
             sb.AppendLine($"{TimeHelper.ClockAz(genTime)}  |  şam {TimeHelper.ClockAz(candleCloseUtc)}");
             sb.AppendLine();
             sb.AppendLine($"Giriş  {signal.EntryPrice.ToString(CultureInfo.InvariantCulture)}");
@@ -87,7 +87,7 @@ namespace CryptoSense.Infrastructure.Telegram
             var sb = new StringBuilder();
             if (outcomeType.Contains("TP1") || outcomeType.Contains("TP_A") || outcomeType.Contains("Hədəf 1") || outcomeType.Contains("Hədəf A"))
             {
-                sb.AppendLine($"#{userSigNum}  TP1  {cleanSymbol}  {directionStr}");
+                sb.AppendLine($"#{userSigNum}  TP1  {cleanSymbol}  {directionStr}  ✅");
                 sb.AppendLine(timeLine);
                 sb.AppendLine($"Qiymət  {hitPrice.ToString(CultureInfo.InvariantCulture)}");
                 sb.AppendLine($"PnL     +{Math.Abs(netPnl).ToString("F2", CultureInfo.InvariantCulture)}%   (40% bağlandı)");
@@ -95,7 +95,7 @@ namespace CryptoSense.Infrastructure.Telegram
             }
             else if (outcomeType.Contains("TP2") || outcomeType.Contains("TP_B") || outcomeType.Contains("Hədəf 2") || outcomeType.Contains("Hədəf B"))
             {
-                sb.AppendLine($"#{userSigNum}  TP2  {cleanSymbol}  {directionStr}");
+                sb.AppendLine($"#{userSigNum}  TP2  {cleanSymbol}  {directionStr}  ✅✅");
                 sb.AppendLine(timeLine);
                 sb.AppendLine($"Qiymət  {hitPrice.ToString(CultureInfo.InvariantCulture)}");
                 sb.AppendLine($"PnL     +{Math.Abs(netPnl).ToString("F2", CultureInfo.InvariantCulture)}%   (30% bağlandı)");
@@ -103,7 +103,7 @@ namespace CryptoSense.Infrastructure.Telegram
             }
             else if (isSl)
             {
-                sb.AppendLine($"#{userSigNum}  SL  {cleanSymbol}  {directionStr}");
+                sb.AppendLine($"#{userSigNum}  SL  {cleanSymbol}  {directionStr}  ❌");
                 sb.AppendLine(timeLine);
                 sb.AppendLine($"Qiymət  {hitPrice.ToString(CultureInfo.InvariantCulture)}");
                 sb.AppendLine($"PnL     -{Math.Abs(netPnl).ToString("F2", CultureInfo.InvariantCulture)}%   mövqe bağlı");
@@ -209,7 +209,7 @@ namespace CryptoSense.Infrastructure.Telegram
             var pnlSign = stats.TotalNetProfitPercent >= 0 ? "+" : "";
             var sb = new StringBuilder();
             sb.AppendLine($"BUGÜN  {TimeHelper.ClockNow}");
-            sb.AppendLine($"{stats.TotalSignals} kart  |  {stats.SuccessSignals} TP  |  {stats.FailedSignals} SL  |  PnL {pnlSign}{stats.TotalNetProfitPercent.ToString("F2", CultureInfo.InvariantCulture)}%");
+            sb.AppendLine($"{stats.TotalSignals} kart  |  TP1 ×{stats.PartialHitsCount}  TP2 ×{stats.Tp3HitsCount}  |  SL ×{stats.FailedSignals}  |  PnL {pnlSign}{stats.TotalNetProfitPercent.ToString("F2", CultureInfo.InvariantCulture)}%");
             return sb.ToString().TrimEnd();
         }
 
@@ -260,8 +260,9 @@ namespace CryptoSense.Infrastructure.Telegram
                 sb.AppendLine("-----------------------------------");
                 sb.AppendLine("📌 <b>Ümumi Analizlər:</b> 0 ədəd");
                 sb.AppendLine("🟡 <b>Açıq İzlənən:</b> 0 ədəd");
-                sb.AppendLine("✅ <b>Uğurlu (Qazanc / Hədəfə Çatan):</b> 0 ədəd");
-                sb.AppendLine("❌ <b>Uğursuz:</b> 0 ədəd");
+                sb.AppendLine("✅ <b>TP1 vuran:</b> 0 əməliyyat");
+                sb.AppendLine("✅✅ <b>TP2 vuran:</b> 0 əməliyyat");
+                sb.AppendLine("❌ <b>SL olan:</b> 0 əməliyyat");
                 sb.AppendLine("-----------------------------------");
                 sb.AppendLine("🎯 <b>Real Qələbə Faizi (Win Rate):</b> <b>0.0%</b>");
                 sb.AppendLine("📈 <b>Xalis Nəticə (PnL):</b> <b>+0.00%</b>");
@@ -276,8 +277,9 @@ namespace CryptoSense.Infrastructure.Telegram
             sb.AppendLine("-----------------------------------");
             sb.AppendLine($"📌 <b>Ümumi Əməliyyatlar:</b> {stats.TotalSignals} ədəd");
             sb.AppendLine($"🟡 <b>Açıq İzlənən:</b> {stats.OpenSignals} ədəd");
-            sb.AppendLine($"🎯 <b>TP (Tam / Qismən Qazanc):</b> {stats.SuccessSignals} ədəd");
-            sb.AppendLine($"⛔ <b>SL (Uğursuz):</b> {stats.FailedSignals} ədəd");
+            sb.AppendLine($"✅ <b>TP1 vuran:</b> {stats.PartialHitsCount} əməliyyat");
+            sb.AppendLine($"✅✅ <b>TP2 vuran:</b> {stats.Tp3HitsCount} əməliyyat");
+            sb.AppendLine($"❌ <b>SL olan:</b> {stats.FailedSignals} əməliyyat");
             sb.AppendLine($"⚪ <b>NEYTRAL / Breakeven:</b> {stats.BreakevenHitsCount} ədəd");
             sb.AppendLine("-----------------------------------");
             sb.AppendLine($"🎯 <b>Real Qələbə Faizi (Win Rate):</b> <b>{stats.WinRatePercent.ToString("F1", CultureInfo.InvariantCulture)}%</b>");
@@ -285,8 +287,6 @@ namespace CryptoSense.Infrastructure.Telegram
             sb.AppendLine($"📊 <b>Orta Əməliyyat Gəliri:</b> {(stats.AvgProfitPerTradePercent >= 0 ? "+" : "")}{stats.AvgProfitPerTradePercent.ToString("F2", CultureInfo.InvariantCulture)}%");
             sb.AppendLine($"💎 <b>Profit Factor:</b> <b>{stats.ProfitFactor.ToString("F2", CultureInfo.InvariantCulture)}</b> | <b>Expectancy:</b> <b>{stats.ExpectancyR.ToString("F2", CultureInfo.InvariantCulture)}R</b>");
             sb.AppendLine($"📉 <b>Maksimum Drawdown:</b> -{stats.MaxDrawdownPercent.ToString("F2", CultureInfo.InvariantCulture)}%");
-            sb.AppendLine("-----------------------------------");
-            sb.AppendLine($"🎯 <b>Hədəf Bölgüsü:</b> Hədəf B (TP_B): {stats.Tp3HitsCount} ({stats.Tp3HitRatePercent}%) | Hədəf A (TP_A 1.5R): {stats.PartialHitsCount} | BE (Neytral): {stats.BreakevenHitsCount} | Vaxt Bitdi: {stats.TimeExpiredCount}");
             sb.AppendLine("-----------------------------------");
             return sb.ToString();
         }

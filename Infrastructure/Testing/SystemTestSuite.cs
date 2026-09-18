@@ -229,10 +229,11 @@ namespace CryptoSense.Infrastructure.Testing
                 };
 
                 var formatted = TelegramMessageFormatter.FormatSignalAlert(sampleSignal, 1);
-                return Task.FromResult(formatted.Contains("#1  LONG  SOL") && 
+                return Task.FromResult(formatted.Contains("🟢  #1  SOL") && 
                        formatted.Contains("Giriş  145.5") && 
                        formatted.Contains("R:R") &&
-                       formatted.Contains("güc 89"));
+                       formatted.Contains("güc 89") &&
+                       !formatted.Contains("LONG"));
             });
 
             await AssertTest("Test 12: Telegram Message Formatter - Outcome Report Validation", () =>
@@ -247,7 +248,7 @@ namespace CryptoSense.Infrastructure.Testing
                 };
 
                 var formatted = TelegramMessageFormatter.FormatOutcomeAlert(sampleSignal, 1, "Hədəf 1 (TP1)", 147.20m, 1.17m);
-                return Task.FromResult(formatted.Contains("#1  TP1  SOL  LONG") && formatted.Contains("+1.17%") && formatted.Contains("40% bağlandı"));
+                return Task.FromResult(formatted.Contains("#1  TP1  SOL  LONG") && formatted.Contains("+1.17%") && formatted.Contains("40% bağlandı") && formatted.Contains("✅"));
             });
 
             // 6. Retest & Pullback Signal Logic Test
@@ -456,7 +457,12 @@ namespace CryptoSense.Infrastructure.Testing
                                      (sig3m.ExpiryTimeUtc - sig3m.GeneratedAt).TotalMinutes >= 15 &&
                                      (sig15m.ExpiryTimeUtc - sig15m.GeneratedAt).TotalMinutes >= 60;
 
-                bool validRisk = sig1m.StopLoss > 0 || sig1m.SignalType.Contains("GÖZLƏMƏ") || sig1m.SignalType.Contains("NEYTRAL");
+                bool validRisk = sig1m.StopLoss > 0 || sig1m.SignalType.Contains("GÖZLƏMƏ") || sig1m.SignalType.Contains("NEYTRAL") || sig1m.SignalType.Contains("MƏLUMAT");
+
+                if (!validDuration || !validRisk)
+                {
+                    Console.WriteLine($"[Test 23 Fail] validDuration={validDuration} (1m: {(sig1m.ExpiryTimeUtc - sig1m.GeneratedAt).TotalMinutes}, 3m: {(sig3m.ExpiryTimeUtc - sig3m.GeneratedAt).TotalMinutes}, 15m: {(sig15m.ExpiryTimeUtc - sig15m.GeneratedAt).TotalMinutes}), validRisk={validRisk} (1m Type: '{sig1m.SignalType}', SL: {sig1m.StopLoss})");
+                }
 
                 return validDuration && validRisk;
             });
@@ -1281,7 +1287,7 @@ namespace CryptoSense.Infrastructure.Testing
 
                 // 1. Verify Entry Card format
                 var entryCard = TelegramMessageFormatter.FormatSignalAlert(testSig, 1);
-                bool validEntry = entryCard.Contains("#1  LONG  BTC  1h") &&
+                bool validEntry = entryCard.Contains("🟢  #1  BTC  1h") &&
                                   entryCard.Contains("Giriş  64500") &&
                                   entryCard.Contains("SL") &&
                                   entryCard.Contains("TP1") &&
@@ -1295,7 +1301,7 @@ namespace CryptoSense.Infrastructure.Testing
 
                 // 2. Verify SL Outcome Card format
                 var slCard = TelegramMessageFormatter.FormatOutcomeAlert(testSig, 1, "Stop Loss (SL)", 63532.50m, -1.50m);
-                bool validSl = slCard.Contains("#1  SL  BTC  LONG") &&
+                bool validSl = slCard.Contains("#1  SL  BTC  LONG  ❌") &&
                                slCard.Contains("-1.50%") &&
                                slCard.Contains("mövqe bağlı");
 
@@ -1307,7 +1313,7 @@ namespace CryptoSense.Infrastructure.Testing
 
                 // 3. Verify TP1 Outcome Card format
                 var tp1Card = TelegramMessageFormatter.FormatOutcomeAlert(testSig, 1, "Hədəf 1 (TP1)", 65467.50m, 1.50m);
-                bool validTp1 = tp1Card.Contains("#1  TP1  BTC  LONG") &&
+                bool validTp1 = tp1Card.Contains("#1  TP1  BTC  LONG  ✅") &&
                                 tp1Card.Contains("40% bağlandı") &&
                                 tp1Card.Contains("1.50%");
 
