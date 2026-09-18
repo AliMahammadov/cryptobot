@@ -1864,7 +1864,7 @@ namespace CryptoSense.Infrastructure.Telegram
             {
                 try
                 {
-                    var url = $"https://api.telegram.org/bot{_config.TelegramBotToken}/getUpdates?offset={_lastUpdateId + 1}&timeout=20";
+                    var url = $"https://api.telegram.org/bot{_config.TelegramBotToken}/getUpdates?offset={_lastUpdateId + 1}&timeout=20&allowed_updates=%5B%22message%22%2C%22callback_query%22%5D";
                     var response = await _httpClient.GetStringAsync(url, stoppingToken);
                     using var doc = JsonDocument.Parse(response);
                     
@@ -1984,11 +1984,17 @@ namespace CryptoSense.Infrastructure.Telegram
                                     cbMessageId = cbMsg.GetProperty("message_id").GetInt64();
                                 }
 
+                                Console.WriteLine($"[TG_CB_RAW] data={cbData} chat={cbChatId} msg={cbMessageId}");
+
                                 // Kiber-hücum / brute-force early return: bloklanan şəxs tam səssiz atılır (answerCallbackQuery belə çağırılmır)
                                 if (IsTelegramUserBlocked(fromUserId, cbChatId, fromUser))
                                 {
                                     continue;
                                 }
+
+                                var toast = !string.IsNullOrEmpty(cbData)
+                                    ? (cbData.Length > 20 ? cbData.Substring(0, 20) : cbData)
+                                    : null;
 
                                 if (cb.TryGetProperty("message", out var cbMsgCheck))
                                 {
@@ -1996,7 +2002,7 @@ namespace CryptoSense.Infrastructure.Telegram
                                     var cbChatType = cbChatObj.TryGetProperty("type", out var cbTypeEl) ? cbTypeEl.GetString() : "private";
                                     if (cbChatType != "private")
                                     {
-                                        _ = AnswerCallbackQueryAsync(cbId);
+                                        _ = AnswerCallbackQueryAsync(cbId, toast);
                                         continue;
                                     }
                                 }
@@ -2008,7 +2014,7 @@ namespace CryptoSense.Infrastructure.Telegram
                                     {
                                         try
                                         {
-                                            await AnswerCallbackQueryAsync(cbId);
+                                            await AnswerCallbackQueryAsync(cbId, toast);
                                             await HandleCallbackQueryAsync(cbChatId, cbMessageId, cbData, fromUser, fromUserId);
                                         }
                                         catch (Exception ex)
