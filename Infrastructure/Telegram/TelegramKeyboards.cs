@@ -208,6 +208,11 @@ namespace CryptoSense.Infrastructure.Telegram
                     },
                     new[]
                     {
+                        new { text = "Açıqlar", callback_data = "cb_open" },
+                        new { text = "Bu gün", callback_data = "cb_today" }
+                    },
+                    new[]
+                    {
                         new { text = "➕ İstifadəçi Yarat", callback_data = "cb_admin_create_user" },
                         new { text = "👥 İstifadəçilər", callback_data = "cb_admin_list_users" }
                     },
@@ -232,7 +237,6 @@ namespace CryptoSense.Infrastructure.Telegram
                     },
                     new[]
                     {
-                        new { text = "⬅️ Əsas Terminala Qayıt", callback_data = "cb_menu" },
                         new { text = "🔽 Paneli Bağla", callback_data = "cb_close_admin" }
                     }
                 }
@@ -248,8 +252,7 @@ namespace CryptoSense.Infrastructure.Telegram
                 {
                     new[]
                     {
-                        new { text = "⬅️ Admin Panelinə Qayıt", callback_data = "cb_admin_menu" },
-                        new { text = "🎛 Əsas Terminal", callback_data = "cb_menu" }
+                        new { text = "⬅️ Admin Panelinə Qayıt", callback_data = "cb_admin_menu" }
                     }
                 }
             };
@@ -286,8 +289,7 @@ namespace CryptoSense.Infrastructure.Telegram
                 {
                     keyboard = new[]
                     {
-                        new[] { new { text = "Terminal" }, new { text = "Açıqlar" }, new { text = "Bu gün" } },
-                        new[] { new { text = "Admin" } }
+                        new[] { new { text = "Terminal" }, new { text = "Admin" } }
                     },
                     resize_keyboard = true,
                     one_time_keyboard = false
@@ -298,7 +300,7 @@ namespace CryptoSense.Infrastructure.Telegram
             {
                 keyboard = new[]
                 {
-                    new[] { new { text = "Terminal" }, new { text = "Açıqlar" }, new { text = "Bu gün" } }
+                    new[] { new { text = "Terminal" } }
                 },
                 resize_keyboard = true,
                 one_time_keyboard = false

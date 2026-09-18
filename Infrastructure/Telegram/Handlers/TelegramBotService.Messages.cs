@@ -10,6 +10,7 @@ using CryptoSense.Domain.Common;
 using CryptoSense.Domain.Entities;
 using CryptoSense.Domain.Enums;
 using CryptoSense.Domain.Interfaces;
+using CryptoSense.Worker;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -108,7 +109,8 @@ namespace CryptoSense.Infrastructure.Telegram
                                    text.Contains("Esas Terminal") || 
                                    text == "Terminal" ||
                                    text == "👑 Admin Paneli" || 
-                                   text.Contains("Admin Paneli");
+                                   text.Contains("Admin Paneli") ||
+                                   text == "Admin";
 
             if (!isToggleCommand)
             {
@@ -807,44 +809,50 @@ namespace CryptoSense.Infrastructure.Telegram
                 _userStates.TryRemove(chatId, out _);
                 _ = DeleteMessageAsync(chatId, messageId);
 
-                // Toggle logic: If user clicked "👑 Admin Paneli" and it is already open, close it cleanly
-                if (userSettings.IsAdminOpen && userSettings.LastAdminMessageId.HasValue)
-                {
-                    var oldAdminMsgId = userSettings.LastAdminMessageId.Value;
-                    userSettings.IsAdminOpen = false;
-                    userSettings.LastAdminMessageId = null;
-                    SaveSettings();
-                    await DeleteMessageAsync(chatId, oldAdminMsgId);
-                    return;
-                }
+                var compass = await signalEngine.GetBtcCompassAsync();
+                var tel = BackgroundMarketScanner.LatestTelemetrySnapshot ?? new();
+                var bakuDayStartUtc = DateTime.UtcNow.AddHours(4).Date.AddHours(-4);
+                var todayPnl = await uow.Signals.GetClosedPnlSinceAsync(bakuDayStartUtc);
+                var cbUntil = BackgroundMarketScanner.CircuitBreakerUntil;
+                var blocked = BackgroundMarketScanner.BlockedDirection;
+                var openLocks = BackgroundMarketScanner.OpenLockCount;
+                var lastScan = BackgroundMarketScanner.LastScanUtc != default ? BackgroundMarketScanner.LastScanUtc : DateTime.UtcNow;
+                var head = TelegramMessageFormatter.GetShortGitCommitHash();
 
-                // If Terminal was open, close it so they don't duplicate
-                if (userSettings.IsTerminalOpen && userSettings.LastTerminalMessageId.HasValue)
-                {
-                    _ = DeleteMessageAsync(chatId, userSettings.LastTerminalMessageId.Value);
-                    userSettings.IsTerminalOpen = false;
-                    userSettings.LastTerminalMessageId = null;
-                }
+                var adminLive = TelegramMessageFormatter.FormatAdminLive(
+                    compass,
+                    tel,
+                    cbUntil,
+                    blocked,
+                    openLocks,
+                    todayPnl,
+                    head,
+                    lastScan);
+
+                var inlineKb = TelegramKeyboards.BuildAdminTerminalInlineKeyboard();
 
                 if (userSettings.LastAdminMessageId.HasValue)
                 {
-                    _ = DeleteMessageAsync(chatId, userSettings.LastAdminMessageId.Value);
-                    userSettings.LastAdminMessageId = null;
+                    bool edited = await EditMessageTextAsync(chatId, userSettings.LastAdminMessageId.Value, adminLive, inlineKb);
+                    if (!edited)
+                    {
+                        var newAdminMsgId = await SendMessageReturnIdAsync(adminLive, chatId, inlineKb);
+                        userSettings.LastAdminMessageId = newAdminMsgId;
+                    }
+                }
+                else
+                {
+                    var newAdminMsgId = await SendMessageReturnIdAsync(adminLive, chatId, inlineKb);
+                    userSettings.LastAdminMessageId = newAdminMsgId;
                 }
 
-                var allUsers = await userManager.GetAllUsersAsync();
-                var totalCount = allUsers.Count;
-                var activeCount = allUsers.Count(u => u.IsActive);
-                var adminDash = TelegramMessageFormatter.FormatAdminDashboard(totalCount, activeCount);
-                var newAdminMsgId = await SendMessageReturnIdAsync(adminDash, chatId, TelegramKeyboards.BuildAdminTerminalInlineKeyboard());
-                userSettings.LastAdminMessageId = newAdminMsgId;
                 userSettings.IsAdminOpen = true;
                 SaveSettings();
                 return;
             }
 
             // =========================================================================
-            // 3.1 DEDICATED TERMINAL TOGGLE (INSTANT OPEN / CLOSE WITH NO RESIDUAL BUBBLES)
+            // 3.1 DEDICATED TERMINAL (INSTANT LIVE REFRESH / NO TOGGLE-CLOSE)
             // =========================================================================
             bool isExplicitTerminal = text == "🎛 Əsas Terminal" || 
                                       text.Contains("Əsas Terminal") || 
@@ -857,32 +865,6 @@ namespace CryptoSense.Infrastructure.Telegram
                 _userStates.TryRemove(chatId, out _);
                 _ = DeleteMessageAsync(chatId, messageId);
 
-                // Toggle logic: If user clicked 🎛 Əsas Terminal and it is already open, cleanly collapse it into place!
-                if (userSettings.IsTerminalOpen && userSettings.LastTerminalMessageId.HasValue)
-                {
-                    var oldMsgId = userSettings.LastTerminalMessageId.Value;
-                    userSettings.IsTerminalOpen = false;
-                    userSettings.LastTerminalMessageId = null;
-                    SaveSettings();
-                    await DeleteMessageAsync(chatId, oldMsgId);
-                    return;
-                }
-
-                // If Admin was open, close it
-                if (userSettings.IsAdminOpen && userSettings.LastAdminMessageId.HasValue)
-                {
-                    _ = DeleteMessageAsync(chatId, userSettings.LastAdminMessageId.Value);
-                    userSettings.IsAdminOpen = false;
-                    userSettings.LastAdminMessageId = null;
-                }
-
-                // If opening a new terminal, remove previous one if any
-                if (userSettings.LastTerminalMessageId.HasValue)
-                {
-                    _ = DeleteMessageAsync(chatId, userSettings.LastTerminalMessageId.Value);
-                    userSettings.LastTerminalMessageId = null;
-                }
-
                 var unitOfWork = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
                 var openCount = await unitOfWork.Signals.GetUserOpenSignalsCountAsync(chatId);
                 var lastDeliveredUtc = await unitOfWork.Signals.GetLastDeliveredSignalTimeUtcAsync(chatId);
@@ -893,8 +875,21 @@ namespace CryptoSense.Infrastructure.Telegram
                 var dashText = TelegramMessageFormatter.FormatTerminalDashboard(userSettings, openCount, lastTime);
                 var inlineKb = TelegramKeyboards.BuildTerminalInlineKeyboard(userSettings, _testModeChats.ContainsKey(chatId), isAdmin);
 
-                var newMsgId = await SendMessageReturnIdAsync(dashText, chatId, inlineKb);
-                userSettings.LastTerminalMessageId = newMsgId;
+                if (userSettings.LastTerminalMessageId.HasValue)
+                {
+                    bool edited = await EditMessageTextAsync(chatId, userSettings.LastTerminalMessageId.Value, dashText, inlineKb);
+                    if (!edited)
+                    {
+                        var newMsgId = await SendMessageReturnIdAsync(dashText, chatId, inlineKb);
+                        userSettings.LastTerminalMessageId = newMsgId;
+                    }
+                }
+                else
+                {
+                    var newMsgId = await SendMessageReturnIdAsync(dashText, chatId, inlineKb);
+                    userSettings.LastTerminalMessageId = newMsgId;
+                }
+
                 userSettings.IsTerminalOpen = true;
                 SaveSettings();
                 _ = BuildAndSendPortfolioSummaryAsync(chatId, userSettings, forceRefresh: false);
@@ -937,7 +932,27 @@ namespace CryptoSense.Infrastructure.Telegram
                     list.Add((num, sig));
                 }
 
-                var openMsg = TelegramMessageFormatter.FormatOpenSignalsList(list);
+                var livePriceDict = new Dictionary<string, decimal>(StringComparer.OrdinalIgnoreCase);
+                var liveCache = scope.ServiceProvider.GetService<CryptoSense.Application.Services.LivePriceCache>();
+                if (liveCache != null)
+                {
+                    foreach (var item in list)
+                    {
+                        var s = item.Signal;
+                        var snap = liveCache.GetSnapshot(s.Symbol) 
+                            ?? liveCache.GetSnapshot(s.CleanSymbol)
+                            ?? liveCache.GetSnapshot(s.Symbol + "USDT")
+                            ?? liveCache.GetSnapshot(s.Symbol.Replace("1000", ""))
+                            ?? liveCache.GetSnapshot("1000" + s.Symbol);
+                        if (snap != null && snap.Last > 0)
+                        {
+                            livePriceDict[s.Symbol] = snap.Last;
+                            livePriceDict[s.CleanSymbol] = snap.Last;
+                        }
+                    }
+                }
+
+                var openMsg = TelegramMessageFormatter.FormatOpenSignalsList(list, livePriceDict);
                 await SendMessageAsync(openMsg, chatId, TelegramKeyboards.BuildUserKeyboard(userSettings, isAdmin));
                 return;
             }

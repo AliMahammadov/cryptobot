@@ -183,7 +183,7 @@ namespace CryptoSense.Infrastructure.Telegram
             return sb.ToString().TrimEnd();
         }
 
-        public static string FormatOpenSignalsList(List<(int Num, FuturesSignal Signal)> signals)
+        public static string FormatOpenSignalsList(List<(int Num, FuturesSignal Signal)> signals, IReadOnlyDictionary<string, decimal>? live = null)
         {
             if (signals.Count == 0)
                 return "Açıq mövqe yoxdur";
@@ -199,7 +199,32 @@ namespace CryptoSense.Infrastructure.Telegram
                 var tf = sig.Timeframe;
                 var entry = sig.EntryPrice.ToString(CultureInfo.InvariantCulture);
                 var sl = sig.StopLoss.ToString(CultureInfo.InvariantCulture);
-                sb.AppendLine($"#{n} {coin} {dir} {tf} giriş {entry} SL {sl}");
+
+                decimal currentPrice = 0m;
+                bool hasLive = false;
+                if (live != null)
+                {
+                    if (live.TryGetValue(sig.Symbol, out currentPrice) && currentPrice > 0)
+                        hasLive = true;
+                    else if (live.TryGetValue(sig.CleanSymbol, out currentPrice) && currentPrice > 0)
+                        hasLive = true;
+                    else if (live.TryGetValue(sig.Symbol + "USDT", out currentPrice) && currentPrice > 0)
+                        hasLive = true;
+                }
+
+                if (hasLive && sig.EntryPrice > 0)
+                {
+                    var pnl = isLong
+                        ? ((currentPrice - sig.EntryPrice) / sig.EntryPrice) * 100m
+                        : ((sig.EntryPrice - currentPrice) / sig.EntryPrice) * 100m;
+                    var pnlStr = pnl.ToString("+0.00;-0.00", CultureInfo.InvariantCulture);
+                    var priceStr = currentPrice.ToString(CultureInfo.InvariantCulture);
+                    sb.AppendLine($"#{n} {coin} {dir} {tf} giriş {entry} SL {sl}  indi {priceStr}  {pnlStr}%");
+                }
+                else
+                {
+                    sb.AppendLine($"#{n} {coin} {dir} {tf} giriş {entry} SL {sl}");
+                }
             }
             return sb.ToString().TrimEnd();
         }

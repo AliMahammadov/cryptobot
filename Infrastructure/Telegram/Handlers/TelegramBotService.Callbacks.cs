@@ -402,7 +402,69 @@ namespace CryptoSense.Infrastructure.Telegram
                                "• <b>Açıq mövqelər toxunulmaz saxlanıldı.</b>\n" +
                                $"• <b>Qorunan Portfeliniz:</b> {userSettings.Coins.Count} ədəd coin qorunub saxlanıldı.\n\n" +
                                "<i>Yenidən başlamaq üçün aşağıdakı düymə ilə Terminala qayıdın və portfel/zaman seçin.</i>";
-                await EditMessageTextAsync(chatId, messageId, resetMsg, TelegramKeyboards.BuildBackToTerminalKeyboard());
+                bool edited = await EditMessageTextAsync(chatId, messageId, resetMsg, TelegramKeyboards.BuildBackToTerminalKeyboard());
+                if (!edited)
+                {
+                    await SendMessageReturnIdAsync(resetMsg, chatId, TelegramKeyboards.BuildBackToTerminalKeyboard());
+                }
+            }
+            else if (data == "cb_open")
+            {
+                var openSignals = await unitOfWork.Signals.GetUserOpenSignalsAsync(chatId);
+                if (openSignals.Count == 0)
+                {
+                    await SendMessageAsync("Açıq mövqe yoxdur", chatId);
+                }
+                else
+                {
+                    var list = new List<(int Num, FuturesSignal Signal)>();
+                    foreach (var sig in openSignals)
+                    {
+                        int num = 0;
+                        if (sig.UserSignalNumbers.TryGetValue(chatId, out var n) && n > 0)
+                        {
+                            num = n;
+                        }
+                        else
+                        {
+                            num = await unitOfWork.Signals.GetUserSignalNumberAsync(sig.Id, chatId);
+                        }
+                        if (num == 0) num = sig.SignalNumber;
+                        list.Add((num, sig));
+                    }
+
+                    var livePriceDict = new Dictionary<string, decimal>(StringComparer.OrdinalIgnoreCase);
+                    var liveCache = scope.ServiceProvider.GetService<CryptoSense.Application.Services.LivePriceCache>();
+                    if (liveCache != null)
+                    {
+                        foreach (var item in list)
+                        {
+                            var s = item.Signal;
+                            var snap = liveCache.GetSnapshot(s.Symbol) 
+                                ?? liveCache.GetSnapshot(s.CleanSymbol)
+                                ?? liveCache.GetSnapshot(s.Symbol + "USDT")
+                                ?? liveCache.GetSnapshot(s.Symbol.Replace("1000", ""))
+                                ?? liveCache.GetSnapshot("1000" + s.Symbol);
+                            if (snap != null && snap.Last > 0)
+                            {
+                                livePriceDict[s.Symbol] = snap.Last;
+                                livePriceDict[s.CleanSymbol] = snap.Last;
+                            }
+                        }
+                    }
+
+                    var openMsg = TelegramMessageFormatter.FormatOpenSignalsList(list, livePriceDict);
+                    await SendMessageAsync(openMsg, chatId);
+                }
+            }
+            else if (data == "cb_today")
+            {
+                var stats = (isCallerAdmin || chatId == SuperAdminChatId)
+                    ? await unitOfWork.Signals.GetPerformanceStatsAsync(userSettings.Timeframe, userCoins: null, isAllTime: false)
+                    : await signalEngine.GetUserPerformanceStatsAsync(chatId, userSettings.Timeframe, userSettings.Coins, isAllTime: false);
+
+                var todayMsg = TelegramMessageFormatter.FormatTodayStatsStrip(stats);
+                await SendMessageAsync(todayMsg, chatId);
             }
             else if (data == "cb_admin_menu" || data == "cb_admin_live")
             {
