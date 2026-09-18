@@ -440,6 +440,12 @@ namespace CryptoSense.Application.Services
                     bool hasLhLl = shList.Count >= 2 && slList.Count >= 2 &&
                                    shList[^1] < shList[^2] && slList[^1] < slList[^2];
 
+                    decimal lastClose = closed1h.Last().Close;
+                    bool bosBull = shList.Count > 0 && lastClose > shList[^1];  // close son swing high-ı qırdı
+                    bool bosBear = slList.Count > 0 && lastClose < slList[^1];  // close son swing low-u qırdı
+                    bool structBull = hasHhHl || bosBull;
+                    bool structBear = hasLhLl || bosBear;
+
                     compass.HasHigherHighsHigherLows = hasHhHl;
                     compass.HasLowerHighsLowerLows = hasLhLl;
 
@@ -468,13 +474,13 @@ namespace CryptoSense.Application.Services
                     compass.BtcNet3hPct = btcNet3h;
 
                     // Rejim təyini: BTC 1h SuperTrend + HH/HL = rejim (Problem 8)
-                    if (isSuperTrendBullish && hasHhHl)
+                    if (isSuperTrendBullish && structBull)
                     {
                         compass.Regime = BtcMarketRegime.Bullish;
                         compass.Trend = "YÜKSƏLİŞ (BULLISH) 🟢";
                         compass.Summary = "Bitcoin 1h SuperTrend və HH/HL strukturu yüksəlişdədir (Bullish rejim).";
                     }
-                    else if (!isSuperTrendBullish && hasLhLl)
+                    else if (!isSuperTrendBullish && structBear)
                     {
                         compass.Regime = BtcMarketRegime.Bearish;
                         compass.Trend = "ENİŞ (BEARISH) 🔴";
@@ -999,58 +1005,6 @@ namespace CryptoSense.Application.Services
                         confidence = 50;
                         reasons.Add("SKIP_STALE_TREND: ST bullish amma 3 bağlanış enir — dump, long yox");
                     }
-                }
-            }
-
-            // --- SKIP_BTC_BOUNCE (disabled per single BTC compass specification) ---
-            if (false && isAltcoin && (determinedType.Contains("LONG") || determinedType.Contains("SHORT")))
-            {
-                if (determinedType.Contains("SHORT")
-                    && (btcCompass.Regime == BtcMarketRegime.Ranging || btcCompass.Regime == BtcMarketRegime.Bullish)
-                    && (btcCompass.BtcRising3 || btcCompass.BtcNet3hPct >= 0.60m))
-                {
-                    determinedType = "GÖZLƏMƏ ⚪";
-                    confidence = 50;
-                    reasons.Add("SKIP_BTC_BOUNCE: BTC bounce-a short yox");
-                }
-                else if (determinedType.Contains("LONG")
-                    && (btcCompass.Regime == BtcMarketRegime.Ranging || btcCompass.Regime == BtcMarketRegime.Bearish)
-                    && (btcCompass.BtcFalling3 || btcCompass.BtcNet3hPct <= -0.60m))
-                {
-                    determinedType = "GÖZLƏMƏ ⚪";
-                    confidence = 50;
-                    reasons.Add("SKIP_BTC_BOUNCE: BTC dump-a long yox");
-                }
-            }
-
-            // --- ADDITIVE GATE B: BTC 4h güclü əks istiqamət (disabled per single BTC compass specification) ---
-            if (false && isLiveScan
-                && (timeframe == "1h" || timeframe == "4h")
-                && isAltcoin
-                && (determinedType.Contains("LONG") || determinedType.Contains("SHORT")))
-            {
-                if (btcCompass.Regime == BtcMarketRegime.Ranging)
-                {
-                    Console.WriteLine("[BTC4H_GATE] ranging=1 opposeSkipped=1");
-                }
-                else
-                {
-                    try
-                    {
-                        if (determinedType.Contains("LONG") && btc4hStrongShort)
-                        {
-                            determinedType = "GÖZLƏMƏ ⚪";
-                            confidence = 50;
-                            reasons.Add($"SKIP_BTC_4H_OPPOSE: BTC 4h güclü SHORT — {timeframe} alt LONG bloklandı");
-                        }
-                        else if (determinedType.Contains("SHORT") && btc4hStrongLong)
-                        {
-                            determinedType = "GÖZLƏMƏ ⚪";
-                            confidence = 50;
-                            reasons.Add($"SKIP_BTC_4H_OPPOSE: BTC 4h güclü LONG — {timeframe} alt SHORT bloklandı");
-                        }
-                    }
-                    catch (Exception _ex) { Console.WriteLine($"[SignalEngine] BTC4h gate swallowed: {_ex.Message}"); }
                 }
             }
 
