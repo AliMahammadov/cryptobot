@@ -892,53 +892,79 @@ namespace CryptoSense.Infrastructure.Telegram
             if (isOpenPositionsClick)
             {
                 _userStates.TryRemove(chatId, out _);
+                _ = DeleteMessageAsync(chatId, messageId);
+
+                if (userSettings.IsAdminOpen && userSettings.LastAdminMessageId.HasValue)
+                {
+                    _ = DeleteMessageAsync(chatId, userSettings.LastAdminMessageId.Value);
+                    userSettings.LastAdminMessageId = null;
+                }
+                else if (userSettings.LastTerminalMessageId.HasValue)
+                {
+                    _ = DeleteMessageAsync(chatId, userSettings.LastTerminalMessageId.Value);
+                    userSettings.LastTerminalMessageId = null;
+                }
+
                 var unitOfWork = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
                 var openSignals = await unitOfWork.Signals.GetUserOpenSignalsAsync(chatId);
 
+                string openMsg;
                 if (openSignals.Count == 0)
                 {
-                    await SendMessageAsync("Açıq mövqe yoxdur", chatId, TelegramKeyboards.BuildUserKeyboard(userSettings, isAdmin));
-                    return;
+                    openMsg = "Açıq mövqe yoxdur";
                 }
-
-                var list = new List<(int Num, FuturesSignal Signal)>();
-                foreach (var sig in openSignals)
+                else
                 {
-                    int num = 0;
-                    if (sig.UserSignalNumbers.TryGetValue(chatId, out var n) && n > 0)
+                    var list = new List<(int Num, FuturesSignal Signal)>();
+                    foreach (var sig in openSignals)
                     {
-                        num = n;
-                    }
-                    else
-                    {
-                        num = await unitOfWork.Signals.GetUserSignalNumberAsync(sig.Id, chatId);
-                    }
-                    if (num == 0) num = sig.SignalNumber;
-                    list.Add((num, sig));
-                }
-
-                var livePriceDict = new Dictionary<string, decimal>(StringComparer.OrdinalIgnoreCase);
-                var liveCache = scope.ServiceProvider.GetService<CryptoSense.Application.Services.LivePriceCache>();
-                if (liveCache != null)
-                {
-                    foreach (var item in list)
-                    {
-                        var s = item.Signal;
-                        var snap = liveCache.GetSnapshot(s.Symbol) 
-                            ?? liveCache.GetSnapshot(s.CleanSymbol)
-                            ?? liveCache.GetSnapshot(s.Symbol + "USDT")
-                            ?? liveCache.GetSnapshot(s.Symbol.Replace("1000", ""))
-                            ?? liveCache.GetSnapshot("1000" + s.Symbol);
-                        if (snap != null && snap.Last > 0)
+                        int num = 0;
+                        if (sig.UserSignalNumbers.TryGetValue(chatId, out var n) && n > 0)
                         {
-                            livePriceDict[s.Symbol] = snap.Last;
-                            livePriceDict[s.CleanSymbol] = snap.Last;
+                            num = n;
+                        }
+                        else
+                        {
+                            num = await unitOfWork.Signals.GetUserSignalNumberAsync(sig.Id, chatId);
+                        }
+                        if (num == 0) num = sig.SignalNumber;
+                        list.Add((num, sig));
+                    }
+
+                    var livePriceDict = new Dictionary<string, decimal>(StringComparer.OrdinalIgnoreCase);
+                    var liveCache = scope.ServiceProvider.GetService<CryptoSense.Application.Services.LivePriceCache>();
+                    if (liveCache != null)
+                    {
+                        foreach (var item in list)
+                        {
+                            var s = item.Signal;
+                            var snap = liveCache.GetSnapshot(s.Symbol) 
+                                ?? liveCache.GetSnapshot(s.CleanSymbol)
+                                ?? liveCache.GetSnapshot(s.Symbol + "USDT")
+                                ?? liveCache.GetSnapshot(s.Symbol.Replace("1000", ""))
+                                ?? liveCache.GetSnapshot("1000" + s.Symbol);
+                            if (snap != null && snap.Last > 0)
+                            {
+                                livePriceDict[s.Symbol] = snap.Last;
+                                livePriceDict[s.CleanSymbol] = snap.Last;
+                            }
                         }
                     }
+
+                    openMsg = TelegramMessageFormatter.FormatOpenSignalsList(list, livePriceDict);
                 }
 
-                var openMsg = TelegramMessageFormatter.FormatOpenSignalsList(list, livePriceDict);
-                await SendMessageAsync(openMsg, chatId, TelegramKeyboards.BuildUserKeyboard(userSettings, isAdmin));
+                var backKb = userSettings.IsAdminOpen ? TelegramKeyboards.BuildBackToAdminKeyboard() : TelegramKeyboards.BuildBackToTerminalKeyboard();
+                var newMsgId = await SendMessageReturnIdAsync(openMsg, chatId, backKb);
+                if (userSettings.IsAdminOpen)
+                {
+                    userSettings.LastAdminMessageId = newMsgId;
+                }
+                else
+                {
+                    userSettings.LastTerminalMessageId = newMsgId;
+                }
+                SaveSettings();
                 return;
             }
 
@@ -953,13 +979,36 @@ namespace CryptoSense.Infrastructure.Telegram
             if (isTodayStatsClick)
             {
                 _userStates.TryRemove(chatId, out _);
+                _ = DeleteMessageAsync(chatId, messageId);
+
+                if (userSettings.IsAdminOpen && userSettings.LastAdminMessageId.HasValue)
+                {
+                    _ = DeleteMessageAsync(chatId, userSettings.LastAdminMessageId.Value);
+                    userSettings.LastAdminMessageId = null;
+                }
+                else if (userSettings.LastTerminalMessageId.HasValue)
+                {
+                    _ = DeleteMessageAsync(chatId, userSettings.LastTerminalMessageId.Value);
+                    userSettings.LastTerminalMessageId = null;
+                }
+
                 var unitOfWork = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
                 var stats = (isAdmin || chatId == SuperAdminChatId)
-                    ? await unitOfWork.Signals.GetPerformanceStatsAsync(userSettings.Timeframe, userCoins: null, isAllTime: false)
-                    : await signalEngine.GetUserPerformanceStatsAsync(chatId, userSettings.Timeframe, userSettings.Coins, isAllTime: false);
+                    ? await unitOfWork.Signals.GetPerformanceStatsAsync(specificTimeframe: null, userCoins: null, isAllTime: false)
+                    : await signalEngine.GetUserPerformanceStatsAsync(chatId, specificTimeframe: null, userCoins: null, isAllTime: false);
 
                 var todayMsg = TelegramMessageFormatter.FormatTodayStatsStrip(stats);
-                await SendMessageAsync(todayMsg, chatId, TelegramKeyboards.BuildUserKeyboard(userSettings, isAdmin));
+                var backKb = userSettings.IsAdminOpen ? TelegramKeyboards.BuildBackToAdminKeyboard() : TelegramKeyboards.BuildBackToTerminalKeyboard();
+                var newMsgId = await SendMessageReturnIdAsync(todayMsg, chatId, backKb);
+                if (userSettings.IsAdminOpen)
+                {
+                    userSettings.LastAdminMessageId = newMsgId;
+                }
+                else
+                {
+                    userSettings.LastTerminalMessageId = newMsgId;
+                }
+                SaveSettings();
                 return;
             }
 

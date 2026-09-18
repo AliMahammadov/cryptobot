@@ -234,7 +234,27 @@ namespace CryptoSense.Infrastructure.Telegram
             var pnlSign = stats.TotalNetProfitPercent >= 0 ? "+" : "";
             var sb = new StringBuilder();
             sb.AppendLine($"BUGÜN  {TimeHelper.ClockNow}");
-            sb.AppendLine($"{stats.TotalSignals} kart  |  TP1 ×{stats.PartialHitsCount}  TP2 ×{stats.Tp3HitsCount}  |  SL ×{stats.FailedSignals}  |  PnL {pnlSign}{stats.TotalNetProfitPercent.ToString("F2", CultureInfo.InvariantCulture)}%");
+            sb.AppendLine($"{stats.TotalSignals} kart  |  TP1 ×{stats.PartialHitsCount}  TP2 ×{stats.Tp3HitsCount}  |  SL ×{stats.FailedSignals}  |  NEUTRAL ×{stats.NeutralSignals}  |  PnL {pnlSign}{stats.TotalNetProfitPercent.ToString("F2", CultureInfo.InvariantCulture)}%");
+            return sb.ToString().TrimEnd();
+        }
+
+        public static string FormatAdminStatsBreakdown(PerformanceStats overall, List<(string Username, PerformanceStats Stats)> userStatsList)
+        {
+            var sb = new StringBuilder();
+            var pnlSign = overall.TotalNetProfitPercent >= 0 ? "+" : "";
+            sb.AppendLine($"ADMIN STATS  {TimeHelper.ClockNow}");
+            sb.AppendLine($"ÜMUMİ  TP1 ×{overall.PartialHitsCount}  TP2 ×{overall.Tp3HitsCount}  SL ×{overall.FailedSignals}  NEUTRAL ×{overall.NeutralSignals}  PnL {pnlSign}{overall.TotalNetProfitPercent.ToString("F2", CultureInfo.InvariantCulture)}%");
+
+            if (userStatsList != null && userStatsList.Count > 0)
+            {
+                sb.AppendLine("---");
+                foreach (var u in userStatsList)
+                {
+                    var uPnlSign = u.Stats.TotalNetProfitPercent >= 0 ? "+" : "";
+                    sb.AppendLine($"{u.Username}  TP1 ×{u.Stats.PartialHitsCount}  TP2 ×{u.Stats.Tp3HitsCount}  SL ×{u.Stats.FailedSignals}  N ×{u.Stats.NeutralSignals}  PnL {uPnlSign}{u.Stats.TotalNetProfitPercent.ToString("F2", CultureInfo.InvariantCulture)}%");
+                }
+            }
+
             return sb.ToString().TrimEnd();
         }
 

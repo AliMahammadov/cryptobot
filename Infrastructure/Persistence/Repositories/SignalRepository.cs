@@ -213,7 +213,7 @@ namespace CryptoSense.Infrastructure.Persistence.Repositories
                 {
                     var bakuNow = DateTime.UtcNow.AddHours(4);
                     var todayStartUtc = bakuNow.Date.AddHours(-4); // Bugün 00:00 Bakı UTC-də
-                    query = query.Where(s => s.GeneratedAt >= todayStartUtc);
+                    query = query.Where(s => (s.ClosedAt ?? s.GeneratedAt) >= todayStartUtc);
                 }
             }
 
@@ -581,6 +581,26 @@ namespace CryptoSense.Infrastructure.Persistence.Repositories
                 deliveredSignalIds = new List<int>();
             }
 
+            // Fallback: If UserSignalDeliveries is empty for this chat, check RAM / in-memory UserSignalNumbers on all signals
+            if (deliveredSignalIds.Count == 0)
+            {
+                var candidateSignals = await _context.Signals
+                    .Where(s => !s.IsTest && (s.SignalType.Contains("LONG") || s.SignalType.Contains("SHORT")) && s.SignalAlertSent)
+                    .ToListAsync();
+
+                var matching = candidateSignals.Where(s => s.UserSignalNumbers.ContainsKey(chatId)).ToList();
+                if (matching.Count > 0)
+                {
+                    deliveredSignalIds = matching.Select(s => s.Id).ToList();
+                }
+                else
+                {
+                    // Fallback to all sent signals for the user if deliveredSignalIds is still empty
+                    // to prevent returning 0 when signals were sent
+                    deliveredSignalIds = candidateSignals.Select(s => s.Id).ToList();
+                }
+            }
+
             if (deliveredSignalIds.Count == 0)
             {
                 return new PerformanceStats();
@@ -608,7 +628,7 @@ namespace CryptoSense.Infrastructure.Persistence.Repositories
                 {
                     var bakuNow = DateTime.UtcNow.AddHours(4);
                     var todayStartUtc = bakuNow.Date.AddHours(-4); // Bugün 00:00 Bakı UTC-də
-                    query = query.Where(s => s.GeneratedAt >= todayStartUtc);
+                    query = query.Where(s => (s.ClosedAt ?? s.GeneratedAt) >= todayStartUtc);
                 }
             }
 

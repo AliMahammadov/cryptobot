@@ -347,13 +347,35 @@ namespace CryptoSense.Infrastructure.Telegram
             }
             else if (data == "cb_stats" || data == "cb_stats_today" || data == "cb_stats_alltime")
             {
-                bool isAllTime = (data == "cb_stats_alltime");
-                var stats = (isCallerAdmin || chatId == SuperAdminChatId)
-                    ? await unitOfWork.Signals.GetPerformanceStatsAsync(userSettings.Timeframe, userCoins: null, isAllTime: isAllTime)
-                    : await signalEngine.GetUserPerformanceStatsAsync(chatId, userSettings.Timeframe, userSettings.Coins, isAllTime: isAllTime);
-                var tfLabel = (string.IsNullOrWhiteSpace(userSettings.Timeframe) || userSettings.Timeframe == "Təyin olunmayıb" || BotConstants.Timeframe.IsAll(userSettings.Timeframe)) ? "1h, 4h" : userSettings.Timeframe;
-                var statsMsg = TelegramMessageFormatter.FormatPerformanceStats(stats, tfLabel, isAllTime: isAllTime);
-                await EditMessageTextAsync(chatId, messageId, statsMsg, TelegramKeyboards.BuildStatsKeyboard(isAllTime: isAllTime));
+                bool isAdminUser = (isCallerAdmin || chatId == SuperAdminChatId);
+                if (isAdminUser)
+                {
+                    var overall = await unitOfWork.Signals.GetPerformanceStatsAsync(specificTimeframe: null, userCoins: null, isAllTime: false);
+                    var userManager = scope.ServiceProvider.GetRequiredService<IUserManagerService>();
+                    var allUsers = await userManager.GetAllUsersAsync();
+
+                    var userStatsList = new List<(string Username, PerformanceStats Stats)>();
+                    foreach (var u in allUsers)
+                    {
+                        if (!string.IsNullOrWhiteSpace(u.TelegramChatId))
+                        {
+                            var uStats = await signalEngine.GetUserPerformanceStatsAsync(u.TelegramChatId, specificTimeframe: null, userCoins: null, isAllTime: false);
+                            userStatsList.Add((u.Username, uStats));
+                        }
+                    }
+
+                    var adminStatsMsg = TelegramMessageFormatter.FormatAdminStatsBreakdown(overall, userStatsList);
+                    var backKb = userSettings.IsAdminOpen ? TelegramKeyboards.BuildBackToAdminKeyboard() : TelegramKeyboards.BuildBackToTerminalKeyboard();
+                    await EditMessageTextAsync(chatId, messageId, adminStatsMsg, backKb);
+                }
+                else
+                {
+                    bool isAllTime = (data == "cb_stats_alltime");
+                    var stats = await signalEngine.GetUserPerformanceStatsAsync(chatId, specificTimeframe: null, userCoins: null, isAllTime: isAllTime);
+                    var tfLabel = "1h, 4h";
+                    var statsMsg = TelegramMessageFormatter.FormatPerformanceStats(stats, tfLabel, isAllTime: isAllTime);
+                    await EditMessageTextAsync(chatId, messageId, statsMsg, TelegramKeyboards.BuildStatsKeyboard(isAllTime: isAllTime));
+                }
             }
             else if (data == "cb_status")
             {
@@ -410,10 +432,14 @@ namespace CryptoSense.Infrastructure.Telegram
             }
             else if (data == "cb_open")
             {
+                await DeleteMessageAsync(chatId, messageId);
+                var backKb = userSettings.IsAdminOpen ? TelegramKeyboards.BuildBackToAdminKeyboard() : TelegramKeyboards.BuildBackToTerminalKeyboard();
+
                 var openSignals = await unitOfWork.Signals.GetUserOpenSignalsAsync(chatId);
+                string openMsg;
                 if (openSignals.Count == 0)
                 {
-                    await SendMessageAsync("Açıq mövqe yoxdur", chatId);
+                    openMsg = "Açıq mövqe yoxdur";
                 }
                 else
                 {
@@ -453,18 +479,40 @@ namespace CryptoSense.Infrastructure.Telegram
                         }
                     }
 
-                    var openMsg = TelegramMessageFormatter.FormatOpenSignalsList(list, livePriceDict);
-                    await SendMessageAsync(openMsg, chatId);
+                    openMsg = TelegramMessageFormatter.FormatOpenSignalsList(list, livePriceDict);
                 }
+
+                var newMsgId = await SendMessageReturnIdAsync(openMsg, chatId, backKb);
+                if (userSettings.IsAdminOpen)
+                {
+                    userSettings.LastAdminMessageId = newMsgId;
+                }
+                else
+                {
+                    userSettings.LastTerminalMessageId = newMsgId;
+                }
+                SaveSettings();
             }
             else if (data == "cb_today")
             {
+                await DeleteMessageAsync(chatId, messageId);
+                var backKb = userSettings.IsAdminOpen ? TelegramKeyboards.BuildBackToAdminKeyboard() : TelegramKeyboards.BuildBackToTerminalKeyboard();
+
                 var stats = (isCallerAdmin || chatId == SuperAdminChatId)
-                    ? await unitOfWork.Signals.GetPerformanceStatsAsync(userSettings.Timeframe, userCoins: null, isAllTime: false)
-                    : await signalEngine.GetUserPerformanceStatsAsync(chatId, userSettings.Timeframe, userSettings.Coins, isAllTime: false);
+                    ? await unitOfWork.Signals.GetPerformanceStatsAsync(specificTimeframe: null, userCoins: null, isAllTime: false)
+                    : await signalEngine.GetUserPerformanceStatsAsync(chatId, specificTimeframe: null, userCoins: null, isAllTime: false);
 
                 var todayMsg = TelegramMessageFormatter.FormatTodayStatsStrip(stats);
-                await SendMessageAsync(todayMsg, chatId);
+                var newMsgId = await SendMessageReturnIdAsync(todayMsg, chatId, backKb);
+                if (userSettings.IsAdminOpen)
+                {
+                    userSettings.LastAdminMessageId = newMsgId;
+                }
+                else
+                {
+                    userSettings.LastTerminalMessageId = newMsgId;
+                }
+                SaveSettings();
             }
             else if (data == "cb_admin_menu" || data == "cb_admin_live")
             {
@@ -555,11 +603,25 @@ namespace CryptoSense.Infrastructure.Telegram
             }
             else if (data == "cb_admin_stats")
             {
-                var stats = await signalEngine.GetPerformanceStatsAsync(userSettings.Timeframe, userSettings.Coins);
-                var statsMsg = TelegramMessageFormatter.FormatPerformanceStats(stats, "Qlobal Admin");
-                bool edited = await EditMessageTextAsync(chatId, messageId, statsMsg, TelegramKeyboards.BuildBackToAdminKeyboard());
+                var overall = await unitOfWork.Signals.GetPerformanceStatsAsync(specificTimeframe: null, userCoins: null, isAllTime: false);
+                var userManager = scope.ServiceProvider.GetRequiredService<IUserManagerService>();
+                var allUsers = await userManager.GetAllUsersAsync();
+
+                var userStatsList = new List<(string Username, PerformanceStats Stats)>();
+                foreach (var u in allUsers)
+                {
+                    if (!string.IsNullOrWhiteSpace(u.TelegramChatId))
+                    {
+                        var uStats = await signalEngine.GetUserPerformanceStatsAsync(u.TelegramChatId, specificTimeframe: null, userCoins: null, isAllTime: false);
+                        userStatsList.Add((u.Username, uStats));
+                    }
+                }
+
+                var adminStatsMsg = TelegramMessageFormatter.FormatAdminStatsBreakdown(overall, userStatsList);
+                var backKb = userSettings.IsAdminOpen ? TelegramKeyboards.BuildBackToAdminKeyboard() : TelegramKeyboards.BuildBackToTerminalKeyboard();
+                bool edited = await EditMessageTextAsync(chatId, messageId, adminStatsMsg, backKb);
                 if (!edited)
-                    await SendMessageAsync(statsMsg, chatId, TelegramKeyboards.BuildBackToAdminKeyboard());
+                    await SendMessageAsync(adminStatsMsg, chatId, backKb);
             }
             else if (data == "cb_close_terminal")
             {

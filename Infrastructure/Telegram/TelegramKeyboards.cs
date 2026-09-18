@@ -23,6 +23,10 @@ namespace CryptoSense.Infrastructure.Telegram
                     },
                     new[]
                     {
+                        new { text = "📊 Statistika", callback_data = "cb_stats" }
+                    },
+                    new[]
+                    {
                         new { text = toggleText, callback_data = "cb_toggle" }
                     },
                     new[]
