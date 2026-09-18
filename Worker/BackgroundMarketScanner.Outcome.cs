@@ -404,7 +404,6 @@ namespace CryptoSense.Worker
                     // 5. Long Time Expiry (Yalnız timeframe TTL çatanda)
                     else if (isMaxTimeReached && !sig.OutcomeAlertSent)
                     {
-                        if (sig.Tp1Notified) return;
                         sig.OutcomeAlertSent = true;
                         sig.IsClosed = true;
                         sig.ClosePrice = exitPrice;
@@ -577,7 +576,6 @@ namespace CryptoSense.Worker
                     // 5. Short Time Expiry (Yalnız timeframe TTL çatanda)
                     else if (isMaxTimeReached && !sig.OutcomeAlertSent)
                     {
-                        if (sig.Tp1Notified) return;
                         sig.OutcomeAlertSent = true;
                         sig.IsClosed = true;
                         sig.ClosePrice = exitPrice;
@@ -665,7 +663,7 @@ namespace CryptoSense.Worker
                             }
                         }
                     }
-                    else if (sig.CloseReason == "TP_B" || sig.CloseReason == "TP3")
+                    else if (sig.CloseReason == "TP_A" || sig.CloseReason == "TP_B" || sig.CloseReason == "TP3")
                     {
                         lock (_lossLock)
                         {

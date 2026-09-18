@@ -800,7 +800,7 @@ namespace CryptoSense.Application.Services
             indicators.BtcResidualFeature = btcResidualFeature;
 
 
-            // Market Regime & Chop Filter (Minimum ADX required: 16 for 4h, 22 for 1h)
+            // Market Regime & Chop Filter (Minimum ADX required: 16 for 4h, 20 for 1h)
             decimal minAdxRequired = timeframe == "4h"
                 ? CryptoSense.Domain.Common.BotConstants.Thresholds.MinAdx4h
                 : CryptoSense.Domain.Common.BotConstants.Thresholds.MinAdx1h;
