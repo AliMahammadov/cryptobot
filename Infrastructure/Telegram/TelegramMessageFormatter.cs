@@ -553,7 +553,7 @@ namespace CryptoSense.Infrastructure.Telegram
             return sb.ToString();
         }
 
-        public static string FormatTerminalDashboard(UserSettings settings, int activePositionsCount, string lastSignalTime)
+        public static string FormatTerminalDashboard(UserSettings settings, int activePositionsCount, string lastSignalTime, PerformanceStats? today = null)
         {
             var onOff = settings.IsActive ? "ON" : "OFF";
             var tf = string.IsNullOrWhiteSpace(settings.Timeframe) || settings.Timeframe == "Təyin olunmayıb"
@@ -571,6 +571,11 @@ namespace CryptoSense.Infrastructure.Telegram
             sb.AppendLine($"TERMINAL  {TimeHelper.ClockNow}");
             sb.AppendLine($"{onOff}  |  {tf}  |  {settings.Coins.Count} koin");
             sb.AppendLine($"açıq {activePositionsCount}/20  |  son {last}");
+            if (today != null)
+            {
+                var pnlSign = today.TotalNetProfitPercent >= 0 ? "+" : "";
+                sb.AppendLine($"bugün  TP1 ×{today.PartialHitsCount}  SL ×{today.FailedSignals}  PnL {pnlSign}{today.TotalNetProfitPercent.ToString("F2", CultureInfo.InvariantCulture)}%");
+            }
             return sb.ToString().TrimEnd();
         }
 

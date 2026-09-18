@@ -19,11 +19,12 @@ namespace CryptoSense.Infrastructure.Telegram
                     },
                     new[]
                     {
-                        new { text = "🧭 Kompas", callback_data = "cb_btc" }
+                        new { text = "🧭 Kompas", callback_data = "cb_btc" },
+                        new { text = "ℹ️ Status", callback_data = "cb_status" }
                     },
                     new[]
                     {
-                        new { text = "📊 Statistika", callback_data = "cb_stats" }
+                        new { text = "📈 Statistika 🟢", callback_data = "cb_stats" }
                     },
                     new[]
                     {

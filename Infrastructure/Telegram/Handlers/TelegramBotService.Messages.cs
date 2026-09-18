@@ -871,13 +871,19 @@ namespace CryptoSense.Infrastructure.Telegram
                     ? Domain.Common.TimeHelper.FormatAz(lastDeliveredUtc.Value) 
                     : "";
 
-                var dashText = TelegramMessageFormatter.FormatTerminalDashboard(userSettings, openCount, lastTime);
+                var todayStats = (isAdmin || chatId == SuperAdminChatId)
+                    ? await unitOfWork.Signals.GetPerformanceStatsAsync(specificTimeframe: null, userCoins: null, isAllTime: false)
+                    : await signalEngine.GetUserPerformanceStatsAsync(chatId, specificTimeframe: null, userCoins: null, isAllTime: false);
+
+                var dashText = TelegramMessageFormatter.FormatTerminalDashboard(userSettings, openCount, lastTime, todayStats);
                 var inlineKb = TelegramKeyboards.BuildTerminalInlineKeyboard(userSettings, _testModeChats.ContainsKey(chatId), isAdmin);
 
                 var newMsgId = await SendMessageReturnIdAsync(dashText, chatId, inlineKb);
                 userSettings.LastTerminalMessageId = newMsgId;
                 userSettings.IsTerminalOpen = true;
                 SaveSettings();
+
+                _ = BuildAndSendPortfolioSummaryAsync(chatId, userSettings, forceRefresh: false);
                 return;
             }
 
