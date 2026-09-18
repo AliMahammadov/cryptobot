@@ -708,7 +708,12 @@ namespace CryptoSense.Infrastructure.Telegram
 
             if (text.Length > 3900)
             {
-                return false; // Telegram edit limit: caller should send new message
+                if (replyMarkup != null)
+                {
+                    var fallbackId = await SendMessageReturnIdAsync(text, chatId, replyMarkup);
+                    return fallbackId > 0;
+                }
+                return false;
             }
 
             try
@@ -741,6 +746,8 @@ namespace CryptoSense.Infrastructure.Telegram
                     var err = await response.Content.ReadAsStringAsync();
                     if (err.Contains("message is not modified")) return true;
 
+                    Console.WriteLine($"[TG_EDIT_FAIL] {response.StatusCode} {err}");
+
                     if (response.StatusCode == System.Net.HttpStatusCode.BadRequest && (err.Contains("can't parse entities") || err.Contains("Bad Request")))
                     {
                         try
@@ -750,9 +757,21 @@ namespace CryptoSense.Infrastructure.Telegram
                             payload.Remove("parse_mode");
                             var retryContent = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
                             var retryResp = await _httpClient.PostAsync(url, retryContent);
-                            return retryResp.IsSuccessStatusCode;
+                            if (retryResp.IsSuccessStatusCode)
+                            {
+                                return true;
+                            }
                         }
                         catch { }
+                    }
+
+                    if (replyMarkup != null)
+                    {
+                        var fallbackId = await SendMessageReturnIdAsync(text, chatId, replyMarkup);
+                        if (fallbackId > 0)
+                        {
+                            return true;
+                        }
                     }
                 }
                 return response.IsSuccessStatusCode;
@@ -760,6 +779,15 @@ namespace CryptoSense.Infrastructure.Telegram
             catch (Exception ex)
             {
                 Console.WriteLine($"[TelegramBotService] EditMessage error: {ex.Message}");
+                if (replyMarkup != null)
+                {
+                    try
+                    {
+                        var fallbackId = await SendMessageReturnIdAsync(text, chatId, replyMarkup);
+                        return fallbackId > 0;
+                    }
+                    catch { }
+                }
                 return false;
             }
         }
@@ -1975,6 +2003,7 @@ namespace CryptoSense.Infrastructure.Telegram
 
                                 if (!string.IsNullOrEmpty(cbChatId) && !string.IsNullOrEmpty(cbData))
                                 {
+                                    Console.WriteLine($"[TG_CB] data={cbData} msg={cbMessageId}");
                                     _ = Task.Run(async () =>
                                     {
                                         try
