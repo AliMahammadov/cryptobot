@@ -797,6 +797,8 @@ namespace CryptoSense.Infrastructure.Telegram
             // 3. ADMIN SWITCH & CRUD FLOW
             // =========================================================================
             bool isAdminToggleClick = isAdmin && (text == "👑 Admin Paneli" || 
+                                                 text == "Admin" ||
+                                                 text.Equals("Admin", StringComparison.OrdinalIgnoreCase) ||
                                                  text.Contains("Admin Paneli", StringComparison.OrdinalIgnoreCase) || 
                                                  text.Equals("/admin", StringComparison.OrdinalIgnoreCase));
 
@@ -847,7 +849,8 @@ namespace CryptoSense.Infrastructure.Telegram
             bool isExplicitTerminal = text == "🎛 Əsas Terminal" || 
                                       text.Contains("Əsas Terminal") || 
                                       text.Contains("Esas Terminal") || 
-                                      text == "Terminal";
+                                      text == "Terminal" ||
+                                      text.Equals("Terminal", StringComparison.OrdinalIgnoreCase);
 
             if (isExplicitTerminal)
             {
@@ -895,6 +898,68 @@ namespace CryptoSense.Infrastructure.Telegram
                 userSettings.IsTerminalOpen = true;
                 SaveSettings();
                 _ = BuildAndSendPortfolioSummaryAsync(chatId, userSettings, forceRefresh: false);
+                return;
+            }
+
+            // =========================================================================
+            // 3.1b AÇIQLAR (DELIVERED OPEN POSITIONS LIST)
+            // =========================================================================
+            bool isOpenPositionsClick = text == "Açıqlar" || 
+                                        text.Equals("Açıqlar", StringComparison.OrdinalIgnoreCase) || 
+                                        text.Equals("Aciqlar", StringComparison.OrdinalIgnoreCase) ||
+                                        text.Equals("/open", StringComparison.OrdinalIgnoreCase);
+
+            if (isOpenPositionsClick)
+            {
+                _userStates.TryRemove(chatId, out _);
+                var unitOfWork = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
+                var openSignals = await unitOfWork.Signals.GetUserOpenSignalsAsync(chatId);
+
+                if (openSignals.Count == 0)
+                {
+                    await SendMessageAsync("Açıq mövqe yoxdur", chatId, TelegramKeyboards.BuildUserKeyboard(userSettings, isAdmin));
+                    return;
+                }
+
+                var list = new List<(int Num, FuturesSignal Signal)>();
+                foreach (var sig in openSignals)
+                {
+                    int num = 0;
+                    if (sig.UserSignalNumbers.TryGetValue(chatId, out var n) && n > 0)
+                    {
+                        num = n;
+                    }
+                    else
+                    {
+                        num = await unitOfWork.Signals.GetUserSignalNumberAsync(sig.Id, chatId);
+                    }
+                    if (num == 0) num = sig.SignalNumber;
+                    list.Add((num, sig));
+                }
+
+                var openMsg = TelegramMessageFormatter.FormatOpenSignalsList(list);
+                await SendMessageAsync(openMsg, chatId, TelegramKeyboards.BuildUserKeyboard(userSettings, isAdmin));
+                return;
+            }
+
+            // =========================================================================
+            // 3.1c BU GÜN (TODAY PERFORMANCE STRIP)
+            // =========================================================================
+            bool isTodayStatsClick = text == "Bu gün" || 
+                                     text.Equals("Bu gün", StringComparison.OrdinalIgnoreCase) || 
+                                     text.Equals("Bugun", StringComparison.OrdinalIgnoreCase) ||
+                                     text.Equals("/today", StringComparison.OrdinalIgnoreCase);
+
+            if (isTodayStatsClick)
+            {
+                _userStates.TryRemove(chatId, out _);
+                var unitOfWork = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
+                var stats = (isAdmin || chatId == SuperAdminChatId)
+                    ? await unitOfWork.Signals.GetPerformanceStatsAsync(userSettings.Timeframe, userCoins: null, isAllTime: false)
+                    : await signalEngine.GetUserPerformanceStatsAsync(chatId, userSettings.Timeframe, userSettings.Coins, isAllTime: false);
+
+                var todayMsg = TelegramMessageFormatter.FormatTodayStatsStrip(stats);
+                await SendMessageAsync(todayMsg, chatId, TelegramKeyboards.BuildUserKeyboard(userSettings, isAdmin));
                 return;
             }
 

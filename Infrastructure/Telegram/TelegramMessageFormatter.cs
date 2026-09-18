@@ -168,67 +168,47 @@ namespace CryptoSense.Infrastructure.Telegram
         public static string FormatBtcCompass(BtcMarketCompass compass)
         {
             var sb = new StringBuilder();
-            sb.AppendLine("🧭 <b>Bitcoin Makro Bazar Kompası</b>");
-            sb.AppendLine($"🕒 <b>Canlı Vaxt:</b> <code>{compass.TimestampFormatted}</code>");
-            sb.AppendLine("-----------------------------------");
-            sb.AppendLine("💵 <b>CANLI QİYMƏT VƏ 24H STATİSTİKA:</b>");
-            sb.AppendLine($"• <b>Cari Qiymət:</b> <code>${compass.Price.ToString("N2", CultureInfo.InvariantCulture)}</code>");
-            var changeSign = compass.Change24h >= 0 ? "+" : "";
-            var changeIcon = compass.Change24h >= 0 ? "🟢" : "🔴";
-            sb.AppendLine($"• <b>24h Dəyişim:</b> <b>{changeSign}{compass.Change24h.ToString("F2", CultureInfo.InvariantCulture)}% {changeIcon}</b>");
-            if (compass.High24h > 0 && compass.Low24h > 0)
-            {
-                sb.AppendLine($"• <b>24h Maksimum:</b> <code>${compass.High24h.ToString("N2", CultureInfo.InvariantCulture)}</code>");
-                sb.AppendLine($"• <b>24h Minimum:</b> <code>${compass.Low24h.ToString("N2", CultureInfo.InvariantCulture)}</code>");
-            }
-            if (compass.VolumeQuote > 0)
-            {
-                var volBillions = compass.VolumeQuote / 1_000_000_000m;
-                sb.AppendLine($"• <b>24h Həcm:</b> <code>${volBillions.ToString("F2", CultureInfo.InvariantCulture)} Milyard USDT</code>");
-            }
-            sb.AppendLine("-----------------------------------");
-            sb.AppendLine("📊 <b>QOBAL BAZAR DOMİNANTLIĞI:</b>");
-            if (compass.BtcDominance > 0)
-            {
-                var threshold = compass.BtcDominanceThreshold > 0 ? compass.BtcDominanceThreshold : 56.5m;
-                sb.AppendLine($"• <b>Bitcoin Dominantlığı (BTC.D):</b> <b>{compass.BtcDominance.ToString("F2", CultureInfo.InvariantCulture)}%</b> (Dinamik Hədd: <b>{threshold.ToString("F2", CultureInfo.InvariantCulture)}%</b>)");
-                sb.AppendLine($"• <b>Tether Dominantlığı (USDT.D):</b> <b>{compass.UsdtDominance.ToString("F2", CultureInfo.InvariantCulture)}%</b>");
-                var altImpact = compass.BtcDominance >= threshold 
-                    ? $"⚠️ <i>BTC.D dinamik həddən ({threshold.ToString("F2", CultureInfo.InvariantCulture)}%) yüksəkdir — Altcoinlərdə ehtiyatlı olun.</i>"
-                    : $"✅ <i>BTC.D dinamik həddən ({threshold.ToString("F2", CultureInfo.InvariantCulture)}%) stabildir — Altcoinlərdə ticarət üçün əlverişlidir.</i>";
-                sb.AppendLine($"• <b>Altcoinlərə Təsiri:</b> {altImpact}");
-            }
-            else
-            {
-                sb.AppendLine("• <b>Dominantlıq:</b> <i>Canlı API-dən yenilənir...</i>");
-            }
-            sb.AppendLine("-----------------------------------");
-            sb.AppendLine("📈 <b>CANLI TEXNİKİ DƏRƏCƏLƏR:</b>");
-            if (compass.Ema20 > 0 && compass.Ema50 > 0)
-            {
-                var emaRel = compass.Ema20 > compass.Ema50 ? "EMA20 &gt; EMA50 (Yüksəliş) 🟢" : "EMA20 &lt; EMA50 (Eniş) 🔴";
-                sb.AppendLine($"• <b>EMA Strukturu:</b> {emaRel}");
-                sb.AppendLine($"  <code>EMA20: ${compass.Ema20.ToString("N2", CultureInfo.InvariantCulture)} | EMA50: ${compass.Ema50.ToString("N2", CultureInfo.InvariantCulture)}</code>");
-            }
-            if (compass.Rsi15m > 0)
-            {
-                var rsiStatus = compass.Rsi15m > 70 ? "Aşırı Alış ⚠️" : (compass.Rsi15m < 30 ? "Aşırı Satış ⚠️" : "Sağlam Balans ✅");
-                sb.AppendLine($"• <b>RSI (14):</b> <b>{compass.Rsi15m.ToString("F1", CultureInfo.InvariantCulture)}</b> ({rsiStatus})");
-            }
-            if (compass.MacdHist != 0)
-            {
-                var macdSign = compass.MacdHist > 0 ? "+" : "";
-                var macdDesc = compass.MacdHist > 0 ? "Alıcı Təzyiqi 🟢" : "Satıcı Təzyiqi 🔴";
-                sb.AppendLine($"• <b>MACD Histogram:</b> <code>{macdSign}{compass.MacdHist.ToString("F2", CultureInfo.InvariantCulture)}</code> ({macdDesc})");
-            }
-            if (compass.SupportLevel > 0 && compass.ResistanceLevel > 0)
-            {
-                sb.AppendLine($"• <b>Lokal Səviyyələr:</b> Dəstək <code>${compass.SupportLevel.ToString("N2", CultureInfo.InvariantCulture)}</code> | Müqavimət <code>${compass.ResistanceLevel.ToString("N2", CultureInfo.InvariantCulture)}</code>");
-            }
-            sb.AppendLine("-----------------------------------");
-            sb.AppendLine($"📌 <b>Ümumi Trend İstiqaməti:</b> <b>{compass.Trend}</b>");
+            var chgSign = compass.Change24h >= 0 ? "+" : "";
+            var stStr = compass.IsSuperTrendBullish ? "bull" : "bear";
+            var regimeStr = compass.Regime.ToString();
+            var priceStr = compass.Price > 0 ? $"${compass.Price.ToString("N0", CultureInfo.InvariantCulture)}" : "$0";
+            var chgStr = $"{chgSign}{compass.Change24h.ToString("F1", CultureInfo.InvariantCulture)}";
+            var trendShort = string.IsNullOrWhiteSpace(compass.Trend) ? "Neytral" : compass.Trend;
 
-            return sb.ToString();
+            sb.AppendLine($"BTC  {TimeHelper.ClockNow}");
+            sb.AppendLine($"{regimeStr}  |  {priceStr}  |  24s {chgStr}%");
+            sb.AppendLine($"ST {stStr}  |  {trendShort}");
+            return sb.ToString().TrimEnd();
+        }
+
+        public static string FormatOpenSignalsList(List<(int Num, FuturesSignal Signal)> signals)
+        {
+            if (signals.Count == 0)
+                return "Açıq mövqe yoxdur";
+
+            var sb = new StringBuilder();
+            foreach (var item in signals)
+            {
+                var sig = item.Signal;
+                var n = item.Num;
+                var isLong = sig.Direction == SignalDirection.Buy || sig.SignalType.Contains("LONG");
+                var dir = isLong ? "L" : "S";
+                var coin = sig.CleanSymbol;
+                var tf = sig.Timeframe;
+                var entry = sig.EntryPrice.ToString(CultureInfo.InvariantCulture);
+                var sl = sig.StopLoss.ToString(CultureInfo.InvariantCulture);
+                sb.AppendLine($"#{n} {coin} {dir} {tf} giriş {entry} SL {sl}");
+            }
+            return sb.ToString().TrimEnd();
+        }
+
+        public static string FormatTodayStatsStrip(PerformanceStats stats)
+        {
+            var pnlSign = stats.TotalNetProfitPercent >= 0 ? "+" : "";
+            var sb = new StringBuilder();
+            sb.AppendLine($"BUGÜN  {TimeHelper.ClockNow}");
+            sb.AppendLine($"{stats.TotalSignals} kart  |  {stats.SuccessSignals} TP  |  {stats.FailedSignals} SL  |  PnL {pnlSign}{stats.TotalNetProfitPercent.ToString("F2", CultureInfo.InvariantCulture)}%");
+            return sb.ToString().TrimEnd();
         }
 
         public static string FormatNewsSentiment(NewsSentimentSummary newsSummary)
@@ -528,45 +508,23 @@ namespace CryptoSense.Infrastructure.Telegram
 
         public static string FormatTerminalDashboard(UserSettings settings, int activePositionsCount, string lastSignalTime)
         {
-            var statusIcon = settings.IsActive ? "Aktiv 🟢" : "Dayandırılıb 🔴";
-            var tfDisplay = string.IsNullOrWhiteSpace(settings.Timeframe) || settings.Timeframe == "Təyin olunmayıb"
-                ? "Təyin olunmayıb ⚠️"
-                : (BotConstants.Timeframe.IsAll(settings.Timeframe) ? "1h, 4h" : settings.Timeframe);
+            var onOff = settings.IsActive ? "ON" : "OFF";
+            var tf = string.IsNullOrWhiteSpace(settings.Timeframe) || settings.Timeframe == "Təyin olunmayıb"
+                ? "—"
+                : (BotConstants.Timeframe.IsAll(settings.Timeframe) ? "1h+4h" : settings.Timeframe);
 
-            string portModeName;
-            string coinCount;
-            if (settings.PortfolioMode == "Combined")
+            var last = string.IsNullOrWhiteSpace(lastSignalTime) || lastSignalTime == "Hələ yoxdur" ? "—" : lastSignalTime.Trim();
+            if (last.Contains("|"))
             {
-                portModeName = "40 Koin + Fərdi";
-                coinCount = $"{settings.Coins.Count} ədəd";
-            }
-            else if (settings.PortfolioMode == "Custom")
-            {
-                portModeName = "Seçilmiş Koinlərim";
-                coinCount = settings.CustomCoins.Count > 0 ? $"{settings.CustomCoins.Count} ədəd" : "0 ədəd (Boşdur)";
-            }
-            else if (settings.PortfolioMode == "Standard40")
-            {
-                portModeName = "Standart 40 Koin";
-                coinCount = $"{settings.Coins.Count} ədəd";
-            }
-            else
-            {
-                portModeName = "Təyin olunmayıb ⚠️";
-                coinCount = "0 ədəd";
+                var parts = last.Split('|');
+                if (parts.Length > 1) last = parts[1].Trim().Split(' ')[0];
             }
 
             var sb = new StringBuilder();
-            sb.AppendLine("🤖 <b>CryptoSense | Terminal</b>");
-            sb.AppendLine("━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-            sb.AppendLine($"💼 <b>Portfel:</b> <b>{portModeName}</b>");
-            sb.AppendLine($"⏱ <b>Zaman:</b> <code>{tfDisplay}</code>");
-            sb.AppendLine($"🪙 <b>İzlənən Koinlər:</b> <code>{coinCount}</code>");
-            sb.AppendLine($"⚡ <b>Açıq Mövqelər:</b> <code>{activePositionsCount} / 20</code>");
-            sb.AppendLine($"🔔 <b>Bildirişlər:</b> <b>{statusIcon}</b>");
-            sb.AppendLine($"🕒 <b>Son Siqnal:</b> <code>{(string.IsNullOrEmpty(lastSignalTime) ? "Hələ yoxdur" : lastSignalTime)}</code>");
-            sb.AppendLine("━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-            return sb.ToString();
+            sb.AppendLine($"TERMINAL  {TimeHelper.ClockNow}");
+            sb.AppendLine($"{onOff}  |  {tf}  |  {settings.Coins.Count} koin");
+            sb.AppendLine($"açıq {activePositionsCount}/20  |  son {last}");
+            return sb.ToString().TrimEnd();
         }
 
         public static string FormatStopConfirmPrompt()

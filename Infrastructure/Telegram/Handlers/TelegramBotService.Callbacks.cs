@@ -230,6 +230,18 @@ namespace CryptoSense.Infrastructure.Telegram
                           "<i>Rejimi və ya koinləri tənzimləyin:</i>";
                 await EditMessageTextAsync(chatId, messageId, msg, TelegramKeyboards.BuildCustomCoinsKeyboard(userSettings));
             }
+            else if (data == "cb_timeframe" || data == "cb_zaman")
+            {
+                var msg = "⏱ <b>Zaman Aralığını Seçin:</b>\n\nSiqnalları almaq istədiyiniz timeframe:";
+                if (userSettings.PortfolioMode == "Combined")
+                {
+                    await EditMessageTextAsync(chatId, messageId, msg, TelegramKeyboards.BuildCombinedTimeframeKeyboard());
+                }
+                else
+                {
+                    await EditMessageTextAsync(chatId, messageId, msg, TelegramKeyboards.BuildStandard40TimeframeKeyboard());
+                }
+            }
             else if (data == "cb_cust_mode_only")
             {
                 userSettings.PortfolioMode = "Custom";

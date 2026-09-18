@@ -6,60 +6,30 @@ namespace CryptoSense.Infrastructure.Telegram
     {
         public static object BuildTerminalInlineKeyboard(UserSettings settings, bool isTestMode = false, bool isAdmin = false)
         {
-            var toggleText = settings.IsActive ? "🛑 Bildirişləri Dayandır" : "▶️ Bildirişləri Başlat";
-            var stdLabel = settings.PortfolioMode == "Standard40" ? "🪙 Standart 40 Koin 🟢" : "🪙 Standart 40 Koin";
-            var custLabel = settings.PortfolioMode == "Custom" ? "⭐ Seçilmiş Koinlərim 🟢" : 
-                           (settings.PortfolioMode == "Combined" ? "🔥 40 + Fərdi Koin 🟢" : "⭐ Seçilmiş Koinlərim");
-
-            var rows = new System.Collections.Generic.List<object[]>
-            {
-                new object[]
-                {
-                    new { text = stdLabel, callback_data = "cb_portfolio_std40" },
-                    new { text = custLabel, callback_data = "cb_portfolio_custom" }
-                },
-                new object[]
-                {
-                    new { text = "🧭 Bitcoin Kompası", callback_data = "cb_btc" },
-                    new { text = "📊 Statistika", callback_data = "cb_stats" }
-                },
-                new object[]
-                {
-                    new { text = "📰 Xəbərlər", callback_data = "cb_news" },
-                    new { text = "🔄 Yenilə", callback_data = "cb_refresh" }
-                }
-            };
-
-            // "🧹 Siqnalları Sıfırla" is strictly reserved for Admin
-            if (isAdmin)
-            {
-                rows.Add(new object[]
-                {
-                    new { text = "ℹ️ Sistem Statusu", callback_data = "cb_status" },
-                    new { text = "🧹 Siqnalları Sıfırla", callback_data = "cb_reset" }
-                });
-            }
-            else
-            {
-                rows.Add(new object[]
-                {
-                    new { text = "ℹ️ Sistem Statusu", callback_data = "cb_status" }
-                });
-            }
-
-            rows.Add(new object[]
-            {
-                new { text = toggleText, callback_data = "cb_toggle" }
-            });
-
-            rows.Add(new object[]
-            {
-                new { text = "🔽 Menyunı Bağla", callback_data = "cb_close_terminal" }
-            });
+            var toggleText = settings.IsActive ? "🛑 Dayandır" : "▶️ Başlat";
 
             return new
             {
-                inline_keyboard = rows.ToArray()
+                inline_keyboard = new[]
+                {
+                    new[]
+                    {
+                        new { text = "🪙 Koinlər", callback_data = "cb_portfolio_custom" },
+                        new { text = "⏱ Zaman", callback_data = "cb_timeframe" }
+                    },
+                    new[]
+                    {
+                        new { text = "🧭 Kompas", callback_data = "cb_btc" }
+                    },
+                    new[]
+                    {
+                        new { text = toggleText, callback_data = "cb_toggle" }
+                    },
+                    new[]
+                    {
+                        new { text = "🔽 Bağla", callback_data = "cb_close_terminal" }
+                    }
+                }
             };
         }
 
@@ -312,7 +282,8 @@ namespace CryptoSense.Infrastructure.Telegram
                 {
                     keyboard = new[]
                     {
-                        new[] { new { text = "🎛 Əsas Terminal" }, new { text = "👑 Admin Paneli" } }
+                        new[] { new { text = "Terminal" }, new { text = "Açıqlar" }, new { text = "Bu gün" } },
+                        new[] { new { text = "Admin" } }
                     },
                     resize_keyboard = true,
                     one_time_keyboard = false
@@ -323,7 +294,7 @@ namespace CryptoSense.Infrastructure.Telegram
             {
                 keyboard = new[]
                 {
-                    new[] { new { text = "🎛 Əsas Terminal" } }
+                    new[] { new { text = "Terminal" }, new { text = "Açıqlar" }, new { text = "Bu gün" } }
                 },
                 resize_keyboard = true,
                 one_time_keyboard = false

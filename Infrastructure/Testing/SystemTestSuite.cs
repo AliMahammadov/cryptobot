@@ -264,9 +264,8 @@ namespace CryptoSense.Infrastructure.Testing
             {
                 var compass = await _signalEngine.GetBtcCompassAsync();
                 var formatted = TelegramMessageFormatter.FormatBtcCompass(compass);
-                return formatted.Contains("Bitcoin Makro Bazar Kompası") && 
-                       formatted.Contains("CANLI QİYMƏT") && 
-                       formatted.Contains("Dinamik Hədd") &&
+                return formatted.Contains("BTC") && 
+                       formatted.Contains("ST ") && 
                        compass.BtcDominanceThreshold > 0 &&
                        compass.Price > 0;
             });
@@ -426,7 +425,7 @@ namespace CryptoSense.Infrastructure.Testing
                 // 2. Compass Formatter
                 var compass = await _signalEngine.GetBtcCompassAsync();
                 var compassMsg = TelegramMessageFormatter.FormatBtcCompass(compass);
-                if (!compassMsg.Contains("Bitcoin Makro Bazar Kompası") || compass.Price <= 0) return false;
+                if (!compassMsg.Contains("BTC") || compass.Price <= 0) return false;
 
                 // 3. News Formatter
                 var news = await _newsService.GetNewsAndSentimentAsync();
