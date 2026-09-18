@@ -446,6 +446,11 @@ namespace CryptoSense.Application.Services
                     bool structBull = hasHhHl || bosBull;
                     bool structBear = hasLhLl || bosBear;
 
+                    if (bosBull && !bosBear)
+                        structBear = false;   // yuxarı qırılma köhnə LH/LL-i ləğv edir
+                    if (bosBear && !bosBull)
+                        structBull = false;   // aşağı qırılma köhnə HH/HL-i ləğv edir
+
                     compass.HasHigherHighsHigherLows = hasHhHl;
                     compass.HasLowerHighsLowerLows = hasLhLl;
 
