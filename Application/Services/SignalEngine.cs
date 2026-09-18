@@ -493,7 +493,7 @@ namespace CryptoSense.Application.Services
                         compass.Summary = "Bitcoin 1h strukturu yan hərəkətdədir / konsolidasiyadadır (Ranging rejim).";
                     }
 
-                    // BTC 4h SuperTrend & Momentum Strength
+                    // BTC 4h SuperTrend
                     try
                     {
                         var btc4hKlines = await _marketData.GetKlinesAsync("BTCUSDT", "4h", 80);
@@ -502,21 +502,6 @@ namespace CryptoSense.Application.Services
                             var closedBtc4h = btc4hKlines.Count >= 2 ? btc4hKlines.Take(btc4hKlines.Count - 1).ToList() : btc4hKlines;
                             var indBtc4h = _indicatorEngine.CalculateIndicators(closedBtc4h);
                             compass.IsBtc4hSuperTrendBullish = indBtc4h.SuperTrendVote == IndicatorVote.Bullish;
-
-                            bool btc4hFalling = closedBtc4h.Count >= 2 && closedBtc4h[^1].Close < closedBtc4h[^2].Close;
-                            bool btc4hRising = closedBtc4h.Count >= 2 && closedBtc4h[^1].Close > closedBtc4h[^2].Close;
-
-                            compass.Btc4hStrongShort =
-                                indBtc4h.SuperTrendVote == IndicatorVote.Bearish &&
-                                indBtc4h.Adx >= 20m &&
-                                btc4hFalling &&
-                                indBtc4h.ConfluenceScore <= 35m;
-
-                            compass.Btc4hStrongLong =
-                                indBtc4h.SuperTrendVote == IndicatorVote.Bullish &&
-                                indBtc4h.Adx >= 20m &&
-                                btc4hRising &&
-                                indBtc4h.ConfluenceScore >= 65m;
                         }
                     }
                     catch (Exception _ex) { Console.WriteLine($"[SignalEngine] BTC 4h compass calculation error: {_ex.Message}"); }
@@ -814,9 +799,6 @@ namespace CryptoSense.Application.Services
 
             indicators.BtcResidualFeature = btcResidualFeature;
 
-            // BTC QAPI: BTC özü kompas tərəfindən bloklanmır (öz SuperTrend/confluence saxlanılır).
-            bool btc4hStrongLong = btcCompass.Btc4hStrongLong;
-            bool btc4hStrongShort = btcCompass.Btc4hStrongShort;
 
             // Market Regime & Chop Filter (Minimum ADX required: 16 for 4h, 22 for 1h)
             decimal minAdxRequired = timeframe == "4h"
@@ -1024,10 +1006,6 @@ namespace CryptoSense.Application.Services
 
             int durationMinutes = timeframe switch
             {
-                "1m" => 15,
-                "3m" => 60,
-                "5m" => 60,
-                "15m" => 90,
                 "4h" => CryptoSense.Domain.Common.BotConstants.Thresholds.MaxHoldingHours4h * 60,
                 _ => CryptoSense.Domain.Common.BotConstants.Thresholds.MaxHoldingHours1h * 60
             };

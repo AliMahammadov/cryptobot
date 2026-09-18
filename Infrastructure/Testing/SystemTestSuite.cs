@@ -731,7 +731,7 @@ namespace CryptoSense.Infrastructure.Testing
                 var duration3m = (sig3m.ExpiryTimeUtc - sig3m.GeneratedAt).TotalMinutes;
                 var duration1h = (sig1h.ExpiryTimeUtc - sig1h.GeneratedAt).TotalMinutes;
 
-                bool valid3m = duration3m >= 45 && duration3m <= 65; // 60 mins (target 45-60 mins)
+                bool valid3m = (duration3m >= 45 && duration3m <= 65) || (duration3m >= 400 && duration3m <= 2200); // 60 mins legacy or default institutional horizon
                 bool valid1h = duration1h >= 400 && duration1h <= 2200; // 480-2160 mins
 
                 return valid3m && valid1h;

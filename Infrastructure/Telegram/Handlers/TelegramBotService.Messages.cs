@@ -1537,7 +1537,7 @@ namespace CryptoSense.Infrastructure.Telegram
                          text.Contains("15 Dəqiqə", StringComparison.OrdinalIgnoreCase) || 
                          text.Contains("15 deqiqe", StringComparison.OrdinalIgnoreCase))
                 {
-                    targetTf = "15m";
+                    targetTf = "1h";
                 }
                 else if (text.Contains("1h", StringComparison.OrdinalIgnoreCase) || 
                          text.Contains("1 Saat", StringComparison.OrdinalIgnoreCase))
@@ -1559,7 +1559,7 @@ namespace CryptoSense.Infrastructure.Telegram
                 userSettings.LastResumeTime = DateTime.UtcNow;
                 SaveSettings();
 
-                var tfDisplay = (targetTf == "Hamısı" || targetTf == "Hamisi") ? "15m, 1h, 4h" : targetTf;
+                var tfDisplay = (targetTf == "Hamısı" || targetTf == "Hamisi") ? "1h, 4h" : (targetTf == "15m" ? "1h" : targetTf);
                 var cleanList = string.Join(", ", userSettings.Coins.Select(c => c.Replace("USDT", "")));
 
                 var sb = new StringBuilder();
@@ -1768,7 +1768,7 @@ namespace CryptoSense.Infrastructure.Telegram
                 userSettings.LastResumeTime = DateTime.UtcNow;
                 SaveSettings();
 
-                var tfDisplay = (userSettings.Timeframe == "Hamısı" || userSettings.Timeframe == "Hamisi") ? "1h, 4h" : userSettings.Timeframe;
+                var tfDisplay = (userSettings.Timeframe == "Hamısı" || userSettings.Timeframe == "Hamisi") ? "1h, 4h" : (userSettings.Timeframe == "15m" ? "1h" : userSettings.Timeframe);
                 var cleanList = string.Join(", ", userSettings.Coins.Select(c => c.Replace("USDT", "")));
 
                 var startMsg = $"✅ <b>Ticarət başladı</b>\n" +

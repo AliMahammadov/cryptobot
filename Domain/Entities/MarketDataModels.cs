@@ -47,8 +47,6 @@ namespace CryptoSense.Domain.Entities
         public string Trend { get; set; } = "Neytral";
         public BtcMarketRegime Regime { get; set; } = BtcMarketRegime.Ranging;
         public bool IsSuperTrendBullish { get; set; }
-        public bool Btc4hStrongLong { get; set; }
-        public bool Btc4hStrongShort { get; set; }
         public bool IsBtc4hSuperTrendBullish { get; set; }
         public bool HasHigherHighsHigherLows { get; set; }
         public bool HasLowerHighsLowerLows { get; set; }
