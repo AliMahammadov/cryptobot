@@ -204,6 +204,10 @@ namespace CryptoSense.Infrastructure.Telegram
                 {
                     new[]
                     {
+                        new { text = "📡 Canlı", callback_data = "cb_admin_live" }
+                    },
+                    new[]
+                    {
                         new { text = "➕ İstifadəçi Yarat", callback_data = "cb_admin_create_user" },
                         new { text = "👥 İstifadəçilər", callback_data = "cb_admin_list_users" }
                     },

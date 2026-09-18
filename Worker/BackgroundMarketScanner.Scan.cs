@@ -292,7 +292,7 @@ namespace CryptoSense.Worker
                                 bool hasStaleTrend = signal.AnalysisReasons != null && signal.AnalysisReasons.Any(r => r.Contains("SKIP_STALE_TREND"));
                                 bool hasBtcBounce = signal.AnalysisReasons != null && signal.AnalysisReasons.Any(r => r.Contains("SKIP_BTC_BOUNCE"));
                                 bool hasDirLock = signal.AnalysisReasons != null && signal.AnalysisReasons.Any(r => r.Contains("SKIP_DIR_LOCK"));
-                                bool hasBtcRange = signal.AnalysisReasons != null && signal.AnalysisReasons.Any(r => r.Contains("SKIP_BTC_RANGE"));
+                                bool hasBtcRange = signal.AnalysisReasons != null && signal.AnalysisReasons.Any(r => r.Contains("SKIP_BTC_RANGE") || r.Contains("SKIP_BTC_REGIME"));
                                 bool hasConfluence = signal.AnalysisReasons != null && signal.AnalysisReasons.Any(r => r.Contains("Confluence Filtri") || r.Contains("< 75.0%"));
                                 bool hasVolume = signal.AnalysisReasons != null && signal.AnalysisReasons.Any(r => r.Contains("SKIP_VOLUME"));
                                 bool hasResidual = signal.AnalysisReasons != null && signal.AnalysisReasons.Any(r => r.Contains("SKIP_BTC_RESIDUAL"));

@@ -10,6 +10,7 @@ using CryptoSense.Domain.Common;
 using CryptoSense.Domain.Entities;
 using CryptoSense.Domain.Enums;
 using CryptoSense.Domain.Interfaces;
+using CryptoSense.Worker;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace CryptoSense.Infrastructure.Telegram
@@ -403,17 +404,32 @@ namespace CryptoSense.Infrastructure.Telegram
                                "<i>Yenidən başlamaq üçün aşağıdakı düymə ilə Terminala qayıdın və portfel/zaman seçin.</i>";
                 await EditMessageTextAsync(chatId, messageId, resetMsg, TelegramKeyboards.BuildBackToTerminalKeyboard());
             }
-            else if (data == "cb_admin_menu")
+            else if (data == "cb_admin_menu" || data == "cb_admin_live")
             {
-                var userManager = scope.ServiceProvider.GetRequiredService<IUserManagerService>();
-                var allUsers = await userManager.GetAllUsersAsync();
-                var totalCount = allUsers.Count;
-                var activeCount = allUsers.Count(u => u.IsActive);
-                var adminDash = TelegramMessageFormatter.FormatAdminDashboard(totalCount, activeCount);
-                bool edited = await EditMessageTextAsync(chatId, messageId, adminDash, TelegramKeyboards.BuildAdminTerminalInlineKeyboard());
+                var compass = await signalEngine.GetBtcCompassAsync();
+                var tel = BackgroundMarketScanner.LatestTelemetrySnapshot ?? new();
+                var bakuDayStartUtc = DateTime.UtcNow.AddHours(4).Date.AddHours(-4);
+                var todayPnl = await unitOfWork.Signals.GetClosedPnlSinceAsync(bakuDayStartUtc);
+                var cbUntil = BackgroundMarketScanner.CircuitBreakerUntil;
+                var blocked = BackgroundMarketScanner.BlockedDirection;
+                var openLocks = BackgroundMarketScanner.OpenLockCount;
+                var lastScan = BackgroundMarketScanner.LastScanUtc != default ? BackgroundMarketScanner.LastScanUtc : DateTime.UtcNow;
+                var head = TelegramMessageFormatter.GetShortGitCommitHash();
+
+                var adminLive = TelegramMessageFormatter.FormatAdminLive(
+                    compass,
+                    tel,
+                    cbUntil,
+                    blocked,
+                    openLocks,
+                    todayPnl,
+                    head,
+                    lastScan);
+
+                bool edited = await EditMessageTextAsync(chatId, messageId, adminLive, TelegramKeyboards.BuildAdminTerminalInlineKeyboard());
                 if (!edited)
                 {
-                    var newMsgId = await SendMessageReturnIdAsync(adminDash, chatId, TelegramKeyboards.BuildAdminTerminalInlineKeyboard());
+                    var newMsgId = await SendMessageReturnIdAsync(adminLive, chatId, TelegramKeyboards.BuildAdminTerminalInlineKeyboard());
                     userSettings.LastAdminMessageId = newMsgId;
                     userSettings.IsAdminOpen = true;
                     SaveSettings();

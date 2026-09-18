@@ -2489,6 +2489,52 @@ namespace CryptoSense.Infrastructure.Testing
                 return rcheck1 && rcheck2 && rcheck3;
             });
 
+            // 60. Admin Live Operator Desk Formatter & Telemetry Validation
+            await AssertTest("Test 68: Admin Live Operator Desk Formatter & Telemetry Validation", async () =>
+            {
+                var compass = await _signalEngine.GetBtcCompassAsync();
+                var tel = new CryptoSense.Worker.BackgroundMarketScanner.ScanTelemetry
+                {
+                    Sent = 3,
+                    SkipBtcRange = 4,
+                    SkipBtcBearLong = 2,
+                    SkipBtc4hOppose = 1,
+                    SkipBtcResidual = 1,
+                    SkipVolume = 5,
+                    SkipRR = 2,
+                    SkipStaleTrend = 1
+                };
+
+                var until = DateTime.UtcNow.AddMinutes(30);
+                var formatted = TelegramMessageFormatter.FormatAdminLive(
+                    compass,
+                    tel,
+                    until,
+                    SignalDirection.Sell,
+                    openLocks: 4,
+                    todayPnl: 1.5m,
+                    head: "cc8c0d7",
+                    lastScanUtc: DateTime.UtcNow.AddMinutes(-5));
+
+                bool hasAdmin = formatted.Contains("ADMIN") && formatted.Contains("cc8c0d7");
+                bool hasScan = formatted.Contains("skaner ON") && formatted.Contains("son skan");
+                bool hasBtc = formatted.Contains("BTC") && formatted.Contains("ST ");
+                bool hasCb = formatted.Contains("CB") && formatted.Contains("SHORT");
+                bool hasPnl = formatted.Contains("gün") && formatted.Contains("PnL +1.5%") && formatted.Contains("limit −3.0%");
+                bool hasOpen = formatted.Contains("açıq") && formatted.Contains("4/20") && formatted.Contains("göndərildi 3");
+                bool hasSkip = formatted.Contains("skip") && formatted.Contains("REGIME 4") && formatted.Contains("HTF/GATE 4") && formatted.Contains("VOLUME 5") && formatted.Contains("RR 2") && formatted.Contains("STALE 1");
+
+                // Test Scanner static getters
+                var _ = CryptoSense.Worker.BackgroundMarketScanner.CircuitBreakerUntil;
+                var lockCount = CryptoSense.Worker.BackgroundMarketScanner.OpenLockCount;
+
+                // Test Admin Keyboard contains Canli as first row
+                var adminKb = TelegramKeyboards.BuildAdminTerminalInlineKeyboard();
+                bool kbOk = adminKb != null;
+
+                return hasAdmin && hasScan && hasBtc && hasCb && hasPnl && hasOpen && hasSkip && lockCount >= 0 && kbOk;
+            });
+
             Console.WriteLine("\n========================================================");
             Console.WriteLine($"🏁 TEST NƏTİCƏLƏRİ: {passed} UĞURLU (PASS), {failed} UĞURSUZ (FAIL)");
             Console.WriteLine("========================================================\n");

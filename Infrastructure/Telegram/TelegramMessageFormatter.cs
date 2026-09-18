@@ -7,6 +7,8 @@ using CryptoSense.Application.DTOs;
 using CryptoSense.Domain.Common;
 using CryptoSense.Domain.Entities;
 using CryptoSense.Domain.Enums;
+using CryptoSense.Worker;
+using ScanTelemetry = CryptoSense.Worker.BackgroundMarketScanner.ScanTelemetry;
 
 namespace CryptoSense.Infrastructure.Telegram
 {
@@ -564,6 +566,61 @@ namespace CryptoSense.Infrastructure.Telegram
             sb.AppendLine("━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
             sb.AppendLine("<i>Aşağıdakı düymələrlə inzibati əməliyyatları icra edin:</i>");
             return sb.ToString();
+        }
+
+        public static string FormatAdminLive(
+            BtcMarketCompass compass,
+            ScanTelemetry tel,
+            DateTime cbUntil,
+            SignalDirection? blocked,
+            int openLocks,
+            decimal todayPnl,
+            string head,
+            DateTime lastScanUtc)
+        {
+            var sb = new StringBuilder();
+
+            var commitHead = string.IsNullOrWhiteSpace(head) || head == "—" ? GetShortGitCommitHash() : head;
+            if (string.IsNullOrWhiteSpace(commitHead)) commitHead = "—";
+            sb.AppendLine($"ADMIN  {TimeHelper.ClockNow}  |  {commitHead}");
+
+            var scanTime = (lastScanUtc != default && lastScanUtc != DateTime.MinValue) ? TimeHelper.ClockAz(lastScanUtc) : "—";
+            sb.AppendLine($"skaner ON   son skan {scanTime}");
+
+            var regime = compass?.Regime.ToString() ?? "—";
+            var st = (compass != null && compass.IsSuperTrendBullish) ? "bull" : "bear";
+            var bos = (compass != null && compass.HasHigherHighsHigherLows)
+                ? "up"
+                : ((compass != null && compass.HasLowerHighsLowerLows) ? "down" : "—");
+            sb.AppendLine($"BTC   {regime}  |  ST {st}  |  BOS {bos}");
+
+            string cbText;
+            if (cbUntil > DateTime.UtcNow)
+            {
+                var remainingMin = (int)Math.Max(1, Math.Ceiling((cbUntil - DateTime.UtcNow).TotalMinutes));
+                var dirStr = blocked.HasValue ? (blocked.Value == SignalDirection.Buy ? "LONG" : "SHORT") : "";
+                cbText = string.IsNullOrEmpty(dirStr) ? $"{remainingMin} dəq" : $"{dirStr} {remainingMin} dəq";
+            }
+            else
+            {
+                cbText = "yox";
+            }
+            sb.AppendLine($"CB    {cbText}");
+
+            var pnlStr = todayPnl.ToString("+0.0;-0.0;+0.0", CultureInfo.InvariantCulture);
+            sb.AppendLine($"gün   PnL {pnlStr}%   limit −3.0%");
+
+            var sentCount = tel?.Sent ?? 0;
+            sb.AppendLine($"açıq  {openLocks}/20     göndərildi {sentCount}");
+
+            var skipRange = tel?.SkipBtcRange ?? 0;
+            var skipGate = tel?.SkipBtcGate ?? 0;
+            var skipVol = tel?.SkipVolume ?? 0;
+            var skipRr = tel?.SkipRR ?? 0;
+            var skipStale = tel?.SkipStaleTrend ?? 0;
+            sb.AppendLine($"skip  REGIME {skipRange}  HTF/GATE {skipGate}  VOLUME {skipVol}  RR {skipRr}  STALE {skipStale}");
+
+            return sb.ToString().TrimEnd();
         }
 
         public static string FormatLiveHeartbeat(

@@ -38,6 +38,8 @@ namespace CryptoSense.Worker
         private static DateTime _lastCircuitBreakerAlertSent = DateTime.MinValue;
         private static SignalDirection? _blockedDirection = null;
         public static SignalDirection? BlockedDirection => _blockedDirection;
+        public static DateTime CircuitBreakerUntil => _circuitBreakerUntil;
+        public static int OpenLockCount => _coinActiveLocks.Count;
 
         private static int _nextSignalNumber = 0;
         private static readonly object _sendLock = new();
