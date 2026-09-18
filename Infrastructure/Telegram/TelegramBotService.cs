@@ -1485,10 +1485,9 @@ namespace CryptoSense.Infrastructure.Telegram
         {
             if (string.IsNullOrEmpty(SuperAdminChatId)) return;
 
-            var msg = $"🔔 <b>YENİ GİRİŞ BİLDİRİŞİ:</b>\n\n" +
-                      $"👤 <b>İstifadəçi:</b> <code>{username}</code>\n" +
-                      $"🕒 <b>Tarix:</b> <code>{CryptoSense.Domain.Common.TimeHelper.NowFormatted}</code>\n" +
-                      $"🌐 <b>Platforma / Mənbə:</b> {platform}";
+            var msg = $"LOGIN  {username}\n" +
+                      $"{CryptoSense.Domain.Common.TimeHelper.ClockNow}\n" +
+                      $"{platform}";
             await SendMessageAsync(msg, SuperAdminChatId);
         }
 

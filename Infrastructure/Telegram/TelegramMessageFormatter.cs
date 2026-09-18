@@ -16,18 +16,16 @@ namespace CryptoSense.Infrastructure.Telegram
         {
             var isLong = signal.Direction == SignalDirection.Buy || signal.SignalType.Contains("LONG");
             var cleanSymbol = signal.Symbol.Replace("USDT", "");
-            var directionLabel = isLong ? "🟢 LONG" : "🔴 SHORT";
+            var directionLabel = isLong ? "LONG" : "SHORT";
 
             decimal tp1Dist = Math.Abs(signal.TakeProfit1 - signal.EntryPrice);
             decimal slDist = Math.Abs(signal.StopLoss - signal.EntryPrice);
             decimal tp1Pct = signal.EntryPrice > 0 ? (tp1Dist / signal.EntryPrice) * 100m : 0m;
             decimal slPct = signal.EntryPrice > 0 ? (slDist / signal.EntryPrice) * 100m : 0m;
 
-            decimal tpBDist = signal.TakeProfit2 > 0 ? Math.Abs(signal.TakeProfit2 - signal.EntryPrice) : 0m;
-            decimal tpBPct = (signal.EntryPrice > 0 && tpBDist > 0) ? (tpBDist / signal.EntryPrice) * 100m : 0m;
-            decimal effectiveRr = (slDist > 0 && signal.TakeProfit2 > 0)
-                ? (((BotConstants.Thresholds.Tp1Weight * tp1Dist) + (BotConstants.Thresholds.Tp2Weight * tpBDist)) / slDist)
-                : 0m;
+            decimal tp2Dist = signal.TakeProfit2 > 0 ? Math.Abs(signal.TakeProfit2 - signal.EntryPrice) : 0m;
+            decimal tp2Pct = (signal.EntryPrice > 0 && tp2Dist > 0) ? (tp2Dist / signal.EntryPrice) * 100m : 0m;
+            decimal rr = slDist > 0 ? (tp1Dist / slDist) : 0m;
 
             var candleDuration = signal.Timeframe switch
             {
@@ -41,35 +39,20 @@ namespace CryptoSense.Infrastructure.Telegram
                 ? signal.CandleCloseTimeUtc
                 : (signal.SourceCandleOpenTimeUtc != default ? signal.SourceCandleOpenTimeUtc + candleDuration : signal.GeneratedAt);
 
-            var nextSignalUtc = candleCloseUtc + candleDuration;
-
-            var signalTimeStr = !string.IsNullOrWhiteSpace(signal.TimestampFormatted) && signal.TimestampFormatted != "Hələ yoxdur"
-                ? signal.TimestampFormatted
-                : TimeHelper.FormatAz(signal.GeneratedAt);
-            var candleCloseStr = TimeHelper.FormatAz(candleCloseUtc);
-            var nextSignalStr = TimeHelper.FormatAz(nextSignalUtc);
+            var genTime = signal.GeneratedAt != default ? signal.GeneratedAt : DateTime.UtcNow;
 
             var sb = new StringBuilder();
-            sb.AppendLine($"#{userSigNum} {directionLabel} SİQNAL | {cleanSymbol} ({signal.Timeframe})");
+            sb.AppendLine($"#{userSigNum}  {directionLabel}  {cleanSymbol}  {signal.Timeframe}");
+            sb.AppendLine($"{TimeHelper.ClockAz(genTime)}  |  şam {TimeHelper.ClockAz(candleCloseUtc)}");
             sb.AppendLine();
-            sb.AppendLine($"🕒 <b>Siqnalın Verilmə Vaxtı:</b> {signalTimeStr}");
-            sb.AppendLine($"🕯️ <b>Şamın Bağlanma Vaxtı:</b> {candleCloseStr}");
-            sb.AppendLine($"⏳ <b>Növbəti Siqnalın Gəlmə Vaxtı:</b> {nextSignalStr}");
-            sb.AppendLine();
-            sb.AppendLine($"🎯 <b>Siqnalın Gücü:</b> <b>{signal.ConfluenceScore.ToString("F1", CultureInfo.InvariantCulture)}%</b> (Güclü Təsdiq)");
-            sb.AppendLine($"⚖️ <b>Risk / Mükafat (R:R):</b> <b>{effectiveRr.ToString("F2", CultureInfo.InvariantCulture)}</b>");
-            sb.AppendLine();
-            sb.AppendLine($"💵 <b>Giriş Qiyməti:</b> ${signal.EntryPrice.ToString(CultureInfo.InvariantCulture)}");
-            sb.AppendLine($"📍 <b>Giriş Zonası:</b> ${signal.EntryLow.ToString(CultureInfo.InvariantCulture)} - ${signal.EntryHigh.ToString(CultureInfo.InvariantCulture)}");
-            sb.AppendLine();
-            sb.AppendLine($"🎯 <b>Hədəf A (1.5R):</b> ${signal.TakeProfit1.ToString(CultureInfo.InvariantCulture)} (+{tp1Pct.ToString("F1", CultureInfo.InvariantCulture)}%) ➔ [Mövqenin 40%-ni bağla]");
+            sb.AppendLine($"Giriş  {signal.EntryPrice.ToString(CultureInfo.InvariantCulture)}");
+            sb.AppendLine($"SL     {signal.StopLoss.ToString(CultureInfo.InvariantCulture)}  (-{slPct.ToString("F1", CultureInfo.InvariantCulture)}%)");
+            sb.AppendLine($"TP1    {signal.TakeProfit1.ToString(CultureInfo.InvariantCulture)}  (+{tp1Pct.ToString("F1", CultureInfo.InvariantCulture)}%)  40%");
             if (signal.TakeProfit2 > 0 && signal.TakeProfit2 != signal.TakeProfit1)
             {
-                sb.AppendLine($"🎯 <b>Hədəf B (Struktur):</b> ${signal.TakeProfit2.ToString(CultureInfo.InvariantCulture)} (+{tpBPct.ToString("F1", CultureInfo.InvariantCulture)}%) ➔ [Mövqenin 30%-ni bağla, 30% saxla]");
+                sb.AppendLine($"TP2    {signal.TakeProfit2.ToString(CultureInfo.InvariantCulture)}  (+{tp2Pct.ToString("F1", CultureInfo.InvariantCulture)}%)  30%");
             }
-            sb.AppendLine($"⛔ <b>Stop Loss (SL):</b> ${signal.StopLoss.ToString(CultureInfo.InvariantCulture)} (-{slPct.ToString("F1", CultureInfo.InvariantCulture)}%)");
-            sb.AppendLine("-----------------------------------");
-            sb.AppendLine("ℹ️ <b>Qeyd:</b> Hədəf A-ya çatdıqda Stop-u girişə (Breakeven) çəkin!");
+            sb.AppendLine($"R:R    {rr.ToString("F2", CultureInfo.InvariantCulture)}     güc {signal.ConfluenceScore.ToString("F0", CultureInfo.InvariantCulture)}");
             return sb.ToString();
         }
 
@@ -92,88 +75,62 @@ namespace CryptoSense.Infrastructure.Telegram
                 ? signal.CandleCloseTimeUtc
                 : (signal.SourceCandleOpenTimeUtc != default ? signal.SourceCandleOpenTimeUtc + candleDuration : signal.GeneratedAt);
 
-            var nextSignalUtc = candleCloseUtc + candleDuration;
+            var genTime = signal.GeneratedAt != default ? signal.GeneratedAt : DateTime.UtcNow;
+            var candleCloseStr = TimeHelper.ClockAz(candleCloseUtc);
 
-            var signalTimeStr = !string.IsNullOrWhiteSpace(signal.TimestampFormatted) && signal.TimestampFormatted != "Hələ yoxdur"
-                ? signal.TimestampFormatted
-                : TimeHelper.FormatAz(signal.GeneratedAt);
-            var candleCloseStr = TimeHelper.FormatAz(candleCloseUtc);
-            var nextSignalStr = TimeHelper.FormatAz(nextSignalUtc);
-            var outcomeTimeStr = TimeHelper.NowFormatted;
+            var timeLine = !string.IsNullOrEmpty(candleCloseStr)
+                ? $"{TimeHelper.ClockNow}  |  siqnal {TimeHelper.ClockAz(genTime)}  |  şam {candleCloseStr}"
+                : $"{TimeHelper.ClockNow}  |  siqnal {TimeHelper.ClockAz(genTime)}";
 
             var sb = new StringBuilder();
             if (outcomeType.Contains("TP1") || outcomeType.Contains("TP_A") || outcomeType.Contains("Hədəf 1") || outcomeType.Contains("Hədəf A"))
             {
-                sb.AppendLine($"🎯 <b>#{userSigNum} NƏTİCƏ | {cleanSymbol} ({directionStr}) ✅</b>");
-                sb.AppendLine("📌 <b>Hədəf A (TP_A) Vuruldu (UĞURLU OLDU) ✅</b>");
-                sb.AppendLine();
-                sb.AppendLine($"🕒 <b>Siqnalın Verilmə Vaxtı:</b> {signalTimeStr}");
-                sb.AppendLine($"🕯️ <b>Şamın Bağlanma Vaxtı:</b> {candleCloseStr}");
-                sb.AppendLine($"⚡ <b>İcra Vaxtı:</b> {outcomeTimeStr}");
-                sb.AppendLine($"⏳ <b>Növbəti Siqnalın Gəlmə Vaxtı:</b> {nextSignalStr}");
-                sb.AppendLine();
-                sb.AppendLine($"💵 <b>Cari Qiymət:</b> ${hitPrice.ToString(CultureInfo.InvariantCulture)}");
-                sb.AppendLine($"💰 <b>Xalis Qazanc:</b> +{Math.Abs(netPnl).ToString("F2", CultureInfo.InvariantCulture)}% (komissiya çıxılıb)");
-                sb.AppendLine();
-                sb.AppendLine("🛡️ <b>İCRA TƏLƏBİ:</b>");
-                sb.AppendLine("• Mövqenin 40%-ni mənfəətlə bağlayın.");
-                sb.AppendLine($"• Stop Loss-u giriş qiymətinə (${signal.EntryPrice.ToString(CultureInfo.InvariantCulture)}) çəkin (Artıq risksizdir).");
-                if (signal.TakeProfit2 > 0)
-                {
-                    sb.AppendLine($"• Qalan 60% ilə Hədəf B (${signal.TakeProfit2.ToString(CultureInfo.InvariantCulture)}) gözlənilir.");
-                }
+                sb.AppendLine($"#{userSigNum}  TP1  {cleanSymbol}  {directionStr}");
+                sb.AppendLine(timeLine);
+                sb.AppendLine($"Qiymət  {hitPrice.ToString(CultureInfo.InvariantCulture)}");
+                sb.AppendLine($"PnL     +{Math.Abs(netPnl).ToString("F2", CultureInfo.InvariantCulture)}%   (40% bağlandı)");
+                sb.AppendLine("SL → giriş");
             }
             else if (outcomeType.Contains("TP2") || outcomeType.Contains("TP_B") || outcomeType.Contains("Hədəf 2") || outcomeType.Contains("Hədəf B"))
             {
-                sb.AppendLine($"🎯 <b>#{userSigNum} NƏTİCƏ | {cleanSymbol} ({directionStr}) ✅</b>");
-                sb.AppendLine("📌 <b>Hədəf B (TP_B) Vuruldu (UĞURLU OLDU) ✅</b>");
-                sb.AppendLine();
-                sb.AppendLine($"🕒 <b>Siqnalın Verilmə Vaxtı:</b> {signalTimeStr}");
-                sb.AppendLine($"🕯️ <b>Şamın Bağlanma Vaxtı:</b> {candleCloseStr}");
-                sb.AppendLine($"⚡ <b>İcra Vaxtı:</b> {outcomeTimeStr}");
-                sb.AppendLine($"⏳ <b>Növbəti Siqnalın Gəlmə Vaxtı:</b> {nextSignalStr}");
-                sb.AppendLine();
-                sb.AppendLine($"💵 <b>Cari Qiymət:</b> ${hitPrice.ToString(CultureInfo.InvariantCulture)}");
-                sb.AppendLine($"💰 <b>Xalis Qazanc:</b> +{Math.Abs(netPnl).ToString("F2", CultureInfo.InvariantCulture)}% (komissiya çıxılıb)");
-                sb.AppendLine();
-                sb.AppendLine("🏆 <b>İCRA TƏLƏBİ:</b>");
-                sb.AppendLine("• Mövqenin daha 30%-ni bağlayın.");
-                sb.AppendLine("• Qalan 30% payı Trailing Stop ilə trend bitənə qədər saxlayın.");
+                sb.AppendLine($"#{userSigNum}  TP2  {cleanSymbol}  {directionStr}");
+                sb.AppendLine(timeLine);
+                sb.AppendLine($"Qiymət  {hitPrice.ToString(CultureInfo.InvariantCulture)}");
+                sb.AppendLine($"PnL     +{Math.Abs(netPnl).ToString("F2", CultureInfo.InvariantCulture)}%   (30% bağlandı)");
+                sb.AppendLine("qalan 30% trail");
             }
             else if (isSl)
             {
-                sb.AppendLine($"⛔ <b>#{userSigNum} NƏTİCƏ | {cleanSymbol} ({directionStr}) ❌</b>");
-                sb.AppendLine("📌 <b>Stop-Loss Vuruldu (UĞURSUZ OLDU) ❌</b>");
-                sb.AppendLine();
-                sb.AppendLine($"🕒 <b>Siqnalın Verilmə Vaxtı:</b> {signalTimeStr}");
-                sb.AppendLine($"🕯️ <b>Şamın Bağlanma Vaxtı:</b> {candleCloseStr}");
-                sb.AppendLine($"⚡ <b>İcra Vaxtı:</b> {outcomeTimeStr}");
-                sb.AppendLine($"⏳ <b>Növbəti Siqnalın Gəlmə Vaxtı:</b> {nextSignalStr}");
-                sb.AppendLine();
-                sb.AppendLine($"💵 <b>Bağlanış Qiyməti:</b> ${hitPrice.ToString(CultureInfo.InvariantCulture)}");
-                sb.AppendLine($"📉 <b>Xalis İtki:</b> -{Math.Abs(netPnl).ToString("F2", CultureInfo.InvariantCulture)}% (komissiya daxil)");
-                sb.AppendLine($"🏷️ <b>Səbəb:</b> SL səviyyəsi keçildi");
-                sb.AppendLine();
-                sb.AppendLine("⚠️ Mövqeni dərhal bağlayın və yeni siqnalı gözləyin.");
+                sb.AppendLine($"#{userSigNum}  SL  {cleanSymbol}  {directionStr}");
+                sb.AppendLine(timeLine);
+                sb.AppendLine($"Qiymət  {hitPrice.ToString(CultureInfo.InvariantCulture)}");
+                sb.AppendLine($"PnL     -{Math.Abs(netPnl).ToString("F2", CultureInfo.InvariantCulture)}%   mövqe bağlı");
             }
             else
             {
-                // Trailing, BE, or Time Expiry
-                var statusIcon = netPnl >= 0 ? "✅" : "⚪";
-                var pnlSign = netPnl >= 0 ? "+" : "";
-                sb.AppendLine($"🎯 <b>#{userSigNum} NƏTİCƏ | {cleanSymbol} ({directionStr}) {statusIcon}</b>");
-                sb.AppendLine("📌 <b>Mövqe Tam Bağlandı (Qorundu)</b>");
-                sb.AppendLine();
-                sb.AppendLine($"🕒 <b>Siqnalın Verilmə Vaxtı:</b> {signalTimeStr}");
-                sb.AppendLine($"🕯️ <b>Şamın Bağlanma Vaxtı:</b> {candleCloseStr}");
-                sb.AppendLine($"⚡ <b>İcra Vaxtı:</b> {outcomeTimeStr}");
-                sb.AppendLine($"⏳ <b>Növbəti Siqnalın Gəlmə Vaxtı:</b> {nextSignalStr}");
-                sb.AppendLine();
-                sb.AppendLine($"💵 <b>Bağlanış Qiyməti:</b> ${hitPrice.ToString(CultureInfo.InvariantCulture)}");
-                sb.AppendLine($"💰 <b>Ümumi Realizə Olunan Xalis Qazanc:</b> <b>{pnlSign}{netPnl.ToString("F2", CultureInfo.InvariantCulture)}%</b>");
-                sb.AppendLine($"🏷️ <b>Səbəb:</b> {signal.CloseReason ?? outcomeType}");
-                sb.AppendLine();
-                sb.AppendLine("✅ Mövqe mənfəətlə tam qapadıldı, risk sıfırdır.");
+                string reasonTag;
+                if (!string.IsNullOrEmpty(signal.CloseReason))
+                {
+                    reasonTag = signal.CloseReason switch
+                    {
+                        "TIME" => "TIME",
+                        "TRAIL" => "TRAIL",
+                        "BE" => "BE",
+                        "INVALIDATION" => "INV",
+                        _ => signal.CloseReason
+                    };
+                }
+                else if (outcomeType.Contains("TIME") || outcomeType.Contains("Müddəti Bitdi")) reasonTag = "TIME";
+                else if (outcomeType.Contains("TRAIL") || outcomeType.Contains("Trailing")) reasonTag = "TRAIL";
+                else if (outcomeType.Contains("BE") || outcomeType.Contains("Breakeven")) reasonTag = "BE";
+                else if (outcomeType.Contains("INVALIDATION") || outcomeType.Contains("Struktur")) reasonTag = "INV";
+                else reasonTag = outcomeType;
+
+                var pnlSign = netPnl >= 0 ? "+" : "-";
+                sb.AppendLine($"#{userSigNum}  {reasonTag}  {cleanSymbol}  {directionStr}");
+                sb.AppendLine(timeLine);
+                sb.AppendLine($"Qiymət  {hitPrice.ToString(CultureInfo.InvariantCulture)}");
+                sb.AppendLine($"PnL     {pnlSign}{Math.Abs(netPnl).ToString("F2", CultureInfo.InvariantCulture)}%   mövqe bağlı");
             }
 
             return sb.ToString();
@@ -182,43 +139,28 @@ namespace CryptoSense.Infrastructure.Telegram
         public static string FormatVolatilityRiskAlert(string symbol, decimal currentPrice, decimal priceChange24h, decimal volatilityRatio, string reason)
         {
             var cleanSymbol = symbol.Replace("USDT", "");
-            var sb = new StringBuilder();
-            sb.AppendLine("⚠️ <b>YÜKSƏK VOLATİLLİK / RİSK BİLDİRİŞİ</b> ⚡");
-            sb.AppendLine();
-            sb.AppendLine($"🪙 <b>Coin:</b> <code>{cleanSymbol} Futures</code>");
-            sb.AppendLine($"💵 <b>Cari Qiymət:</b> <code>${currentPrice.ToString(CultureInfo.InvariantCulture)}</code>");
             var sign = priceChange24h >= 0 ? "+" : "";
-            sb.AppendLine($"📊 <b>24s Dəyişim:</b> <b>{sign}{priceChange24h.ToString("F2", CultureInfo.InvariantCulture)}%</b>");
-            sb.AppendLine($"🔥 <b>Dalğalanma Nisbəti:</b> <b>{volatilityRatio.ToString("F1", CultureInfo.InvariantCulture)}x Normal Həcm</b>");
-            sb.AppendLine($"📌 <b>Səbəb:</b> <i>{reason}</i>");
-            sb.AppendLine();
-            sb.AppendLine("🛡️ <b>RİSK MENECMENT QEYDİ:</b>");
-            sb.AppendLine("• Coində kəskin qeyri-sabit dalğalanma aşkarlandığı üçün sistem riskli girişləri məhdudlaşdırır.");
-            sb.AppendLine("• <b>Depozitin qorunması məqsədilə bu coində tələsik əməliyyat açılmır.</b>");
+            var sb = new StringBuilder();
+            sb.AppendLine($"⚠️ YÜKSƏK VOLATİLLİK / RİSK BİLDİRİŞİ  |  {TimeHelper.ClockNow}");
+            sb.AppendLine($"{cleanSymbol}  ${currentPrice.ToString(CultureInfo.InvariantCulture)}  ({sign}{priceChange24h.ToString("F2", CultureInfo.InvariantCulture)}%)  {volatilityRatio.ToString("F1", CultureInfo.InvariantCulture)}x həcm");
+            sb.AppendLine($"Səbəb: {reason}");
+            sb.AppendLine("bu coində tələsik giriş yox");
             return sb.ToString();
         }
 
         public static string FormatUrgentNewsAlert(CryptoNewsItem newsItem, bool isListing = false)
         {
-            var sb = new StringBuilder();
-            if (isListing || newsItem.Title.Contains("List", StringComparison.OrdinalIgnoreCase) || newsItem.Title.Contains("Token", StringComparison.OrdinalIgnoreCase) || newsItem.OriginalTitle.Contains("List", StringComparison.OrdinalIgnoreCase) || newsItem.OriginalTitle.Contains("Token", StringComparison.OrdinalIgnoreCase))
-            {
-                sb.AppendLine("🪙 <b>YENİ COİN LİSTİNQİ / BURAXILIŞ BİLDİRİŞİ!</b> 🚀");
-            }
-            else
-            {
-                sb.AppendLine("🚨 <b>TƏCİLİ BAZAR XƏBƏRİ / VACİB HADİSƏ!</b> 📢");
-            }
-            sb.AppendLine();
+            bool isList = isListing || newsItem.Title.Contains("List", StringComparison.OrdinalIgnoreCase) || newsItem.Title.Contains("Token", StringComparison.OrdinalIgnoreCase) || newsItem.OriginalTitle.Contains("List", StringComparison.OrdinalIgnoreCase) || newsItem.OriginalTitle.Contains("Token", StringComparison.OrdinalIgnoreCase);
+            var header = isList ? "LIST" : "NEWS";
             var safeTitle = System.Net.WebUtility.HtmlEncode(newsItem.Title);
-            sb.AppendLine($"📰 <b>Məlumat:</b> <b>{safeTitle}</b>");
-            sb.AppendLine($"🌐 <b>Mənbə:</b> <code>{newsItem.Source}</code>");
-            sb.AppendLine($"🎯 <b>Bazar Əhvalı / Təsiri:</b> <b>{newsItem.Sentiment}</b>");
-            sb.AppendLine($"🕒 <b>Paylaşılma Vaxtı (Bakı):</b> <code>{CryptoSense.Domain.Common.TimeHelper.FormatAz(newsItem.PublishedAt)}</code>");
+
+            var sb = new StringBuilder();
+            sb.AppendLine($"{header}  |  {TimeHelper.ClockAz(newsItem.PublishedAt)}");
+            sb.AppendLine(safeTitle);
+            sb.AppendLine($"Mənbə: {newsItem.Source}  |  {newsItem.Sentiment}");
             if (!string.IsNullOrWhiteSpace(newsItem.Url))
             {
-                sb.AppendLine();
-                sb.AppendLine($"🔗 <a href=\"{newsItem.Url}\">Ətraflı oxumaq üçün mənbəyə keçin</a>");
+                sb.AppendLine(newsItem.Url);
             }
             return sb.ToString();
         }
@@ -691,67 +633,58 @@ namespace CryptoSense.Infrastructure.Telegram
             int skipDirLock = 0)
         {
             var sb = new StringBuilder();
-            sb.AppendLine("ℹ️ <b>Bazar Nəzarəti (Heartbeat)</b>");
-            sb.AppendLine($"A+ yoxdur | Chase:{chase} Corr:{corr} SL:{slWide} RR:{lowRr} Lag:{skipLag} Stale:{skipStale} Conf:{skipConfluence} Göndərildi:{sent} | Gözləmə:{skipGozleme} BtcGate:{skipBtcGate} Range:{skipBtcRange} StaleST:{skipStaleTrend} BtcBounce:{skipBtcBounce} DirLock:{skipDirLock}");
+            sb.AppendLine($"HEARTBEAT  {TimeHelper.ClockNow}");
+            sb.AppendLine($"göndərildi {sent}  |  chase {chase}  range {skipBtcRange}  staleST {skipStaleTrend}  RR {lowRr}  vol/gate {skipBtcGate}");
 
             if (sent == 0)
             {
                 if (skipCircuitBreaker > 0)
                 {
-                    sb.AppendLine("📌 <b>Səbəb:</b> CircuitBreaker aktivdir (Risk qorunması)");
+                    sb.AppendLine("səbəb: CircuitBreaker aktiv");
                 }
                 else if (skipDirLock > 0)
                 {
-                    sb.AppendLine("📌 <b>Səbəb:</b> İstiqamət kilidi aktivdir (DirLock — ardıcıl SL qorunması)");
+                    sb.AppendLine("səbəb: DirLock aktiv");
                 }
                 else if (skipDailyLoss > 0)
                 {
-                    sb.AppendLine("📌 <b>Səbəb:</b> Günlük itki limiti keçib (≤ -3.0%)");
+                    sb.AppendLine("səbəb: Günlük itki limiti keçib (≤ -3.0%)");
                 }
                 else if (skipMaxOpen > 0)
                 {
-                    sb.AppendLine($"📌 <b>Səbəb:</b> Maksimum açıq mövqe limitinə çatılıb ({activeLocks}/20)");
+                    sb.AppendLine($"səbəb: Maksimum açıq mövqe ({activeLocks}/20)");
                 }
                 else
                 {
                     var reasonsList = new List<(string Name, int Count, string Description)>
                     {
-                        ("BtcGate", skipBtcGate, "BTC Ayı (Bearish) rejimindədir — Alt LONG-lar bloklandı"),
-                        ("Range", skipBtcRange, "BTC 1h Kompası Ranging (qeyri-müəyyən) rejimindədir"),
-                        ("StaleST", skipStaleTrend, "SuperTrend köhnəlib/gecikir (əks istiqamətdə 3 şam hərəkəti)"),
-                        ("BtcBounce", skipBtcBounce, "BTC 1h əks istiqamətdə impulsiv hərəkət edir (BTC Bounce/Dump)"),
-                        ("Gözləmə", skipGozleme, "Bazar zəif konsolidasiyadadır (Gözləmə rejimi / ADX zəif)"),
-                        ("Conf", skipConfluence, "Confluence balı 75%-dən aşağıdır"),
-                        ("SL", slWide, "Stop-Loss məsafəsi çox genişdir (> 2.8%)"),
-                        ("RR", lowRr, "Risk/Reward nisbəti qeyri-qənaətbəxşdir (< 1.30)"),
-                        ("Chase", chase, "Qiymət giriş zonasından uzaqlaşıb (Chase filtri)"),
-                        ("Lock", activeLocks, "Aktiv mövqe limitinə çatılıb"),
-                        ("Lag", skipLag, "Şam bağlanış gecikməsi (Lag filtri)"),
-                        ("Stale", skipStale, "Qiymət məlumatı köhnədir (Stale WebSocket)")
+                        ("vol/gate", skipBtcGate, "BTC bear/gate"),
+                        ("range", skipBtcRange, "BTC ranging"),
+                        ("staleST", skipStaleTrend, "SuperTrend köhnəlib"),
+                        ("btcBounce", skipBtcBounce, "BTC bounce"),
+                        ("gözləmə", skipGozleme, "zəif konsolidasiya"),
+                        ("conf", skipConfluence, "Confluence < 75%"),
+                        ("SL", slWide, "SL çox geniş"),
+                        ("RR", lowRr, "R:R < 1.50"),
+                        ("chase", chase, "chase"),
+                        ("lock", activeLocks, "mövqe limiti"),
+                        ("lag", skipLag, "şam gecikməsi"),
+                        ("stale", skipStale, "stale qiymət")
                     };
                     var dominant = reasonsList.OrderByDescending(r => r.Count).FirstOrDefault(r => r.Count > 0);
                     string reasonText = dominant.Count > 0 
-                        ? $"{dominant.Description} ({dominant.Name} skip: {dominant.Count} dəfə — bu faiz deyil)"
-                        : "Bazar konyukturası A+ siqnal meyarlarına uyğun gəlmir";
+                        ? $"səbəb: {dominant.Name} ({dominant.Count})"
+                        : "səbəb: A+ meyar yoxdur";
 
-                    sb.AppendLine($"📌 <b>Səbəb:</b> {reasonText}");
+                    sb.AppendLine(reasonText);
                 }
             }
 
             if (maxConfluenceSeen >= 0)
             {
-                sb.AppendLine($"📊 Bu saat ən yüksək istiqamətli confluence: {maxConfluenceSeen.ToString("F1", CultureInfo.InvariantCulture)}%");
+                sb.AppendLine($"maxConf {maxConfluenceSeen.ToString("F1", CultureInfo.InvariantCulture)}%");
             }
 
-            if (telegramFail > 0)
-                sb.AppendLine($"⚠️ <b>TELEGRAM_FAIL={telegramFail}</b> — siqnal hazırlandı, lakin göndərilmədi!");
-            if (dataAgeMsBtc < 0)
-                sb.AppendLine("🟡 BTC DataAge: <code>ölçülməyib (snap yoxdur)</code>");
-            else if (dataAgeMsBtc > BotConstants.Thresholds.MaxDataAgeMs)
-                sb.AppendLine($"🔴 <b>WS GECİKİR DataAge:{dataAgeMsBtc}ms > 3500ms</b>");
-            else
-                sb.AppendLine($"🟢 BTC DataAge: <code>{dataAgeMsBtc}ms</code> (WS sağlam)");
-            sb.AppendLine($"⏱ <b>Növbəti yoxlama:</b> {nextCheckMinutes} dəq");
             return sb.ToString();
         }
 

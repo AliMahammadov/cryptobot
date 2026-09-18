@@ -229,9 +229,10 @@ namespace CryptoSense.Infrastructure.Testing
                 };
 
                 var formatted = TelegramMessageFormatter.FormatSignalAlert(sampleSignal, 1);
-                return Task.FromResult((formatted.Contains("#1 🟢 <b>SİQNAL</b>") || formatted.Contains("#1 🟢 LONG SİQNAL")) && 
-                       formatted.Contains("SOL") && 
-                       (formatted.Contains("Confluence Razılaşma Balı") || formatted.Contains("Siqnalın Gücü")));
+                return Task.FromResult(formatted.Contains("#1  LONG  SOL") && 
+                       formatted.Contains("Giriş  145.5") && 
+                       formatted.Contains("R:R") &&
+                       formatted.Contains("güc 89"));
             });
 
             await AssertTest("Test 12: Telegram Message Formatter - Outcome Report Validation", () =>
@@ -246,7 +247,7 @@ namespace CryptoSense.Infrastructure.Testing
                 };
 
                 var formatted = TelegramMessageFormatter.FormatOutcomeAlert(sampleSignal, 1, "Hədəf 1 (TP1)", 147.20m, 1.17m);
-                return Task.FromResult(formatted.Contains("#1 NƏTİCƏ") && formatted.Contains("+1.17%") && formatted.Contains("UĞURLU"));
+                return Task.FromResult(formatted.Contains("#1  TP1  SOL  LONG") && formatted.Contains("+1.17%") && formatted.Contains("40% bağlandı"));
             });
 
             // 6. Retest & Pullback Signal Logic Test
@@ -545,7 +546,7 @@ namespace CryptoSense.Infrastructure.Testing
 
                 // SAND #7 scenario: +2.17% profit when 5m duration ended after TP1 was hit
                 var alert = TelegramMessageFormatter.FormatOutcomeAlert(tp1WonSignal, 7, "5m Müddəti Tamamlandı (Qazancla Qorundu)", 0.03837m, 2.17m);
-                bool sandWinValid = alert.Contains("+2.17%") && !alert.Contains("-2.17%") && !alert.Contains("UĞURSUZ") && alert.Contains("🎯");
+                bool sandWinValid = alert.Contains("+2.17%") && !alert.Contains("-2.17%") && alert.Contains("#7");
 
                 // Genuine Stop Loss test: must reflect loss
                 var stopLossSignal = new FuturesSignal
@@ -559,7 +560,7 @@ namespace CryptoSense.Infrastructure.Testing
                     Status = SignalStatus.Failed
                 };
                 var lossAlert = TelegramMessageFormatter.FormatOutcomeAlert(stopLossSignal, 8, "Stop Loss (SL)", 0.0980m, -2.00m);
-                bool lossValid = lossAlert.Contains("-2.00%") && lossAlert.Contains("UĞURSUZ") && lossAlert.Contains("⛔");
+                bool lossValid = lossAlert.Contains("-2.00%") && lossAlert.Contains("#8") && lossAlert.Contains("SL");
 
                 return Task.FromResult(sandWinValid && lossValid);
             });
@@ -613,7 +614,7 @@ namespace CryptoSense.Infrastructure.Testing
                 };
 
                 var alert = TelegramMessageFormatter.FormatUrgentNewsAlert(newsItem, isListing: true);
-                bool valid = alert.Contains("YENİ COİN LİSTİNQİ") &&
+                bool valid = (alert.Contains("LIST") || alert.Contains("YENİ COİN LİSTİNQİ")) &&
                              alert.Contains("Binance Announcements") &&
                              alert.Contains("PEPE");
                 return Task.FromResult(valid);
@@ -631,7 +632,7 @@ namespace CryptoSense.Infrastructure.Testing
                     EntryPrice = 140.0m
                 };
                 var wonReport = TelegramMessageFormatter.FormatOutcomeAlert(wonSig, 101, "Hədəf 1 (TP1)", 142.5m, 1.78m);
-                bool wonValid = wonReport.Contains("UĞURLU") && wonReport.Contains("+1.78%") && !wonReport.Contains("NEYTRAL");
+                bool wonValid = wonReport.Contains("#101  TP1  SOL") && wonReport.Contains("+1.78%") && !wonReport.Contains("NEYTRAL");
 
                 var lostSig = new FuturesSignal
                 {
@@ -642,7 +643,7 @@ namespace CryptoSense.Infrastructure.Testing
                     EntryPrice = 25.0m
                 };
                 var lostReport = TelegramMessageFormatter.FormatOutcomeAlert(lostSig, 102, "Stop Loss (SL)", 25.5m, -2.00m);
-                bool lostValid = lostReport.Contains("UĞURSUZ") && lostReport.Contains("-2.00%") && !lostReport.Contains("NEYTRAL");
+                bool lostValid = lostReport.Contains("#102  SL  AVAX") && lostReport.Contains("-2.00%") && !lostReport.Contains("NEYTRAL");
 
                 return Task.FromResult(wonValid && lostValid);
             });
@@ -1024,7 +1025,7 @@ namespace CryptoSense.Infrastructure.Testing
                 var alertText = TelegramMessageFormatter.FormatSignalAlert(goodSig, 1);
                 bool hasTp1Pct = alertText.Contains("(+") && alertText.Contains("%)");
                 bool hasSlPct = alertText.Contains("(-1.01%)") || alertText.Contains("(-1.0%)");
-                bool hasRr = alertText.Contains(goodRr.ToString("F2", CultureInfo.InvariantCulture)) && alertText.Contains("(R:R)");
+                bool hasRr = alertText.Contains(goodRr.ToString("F2", CultureInfo.InvariantCulture)) && (alertText.Contains("R:R") || alertText.Contains("(R:R)"));
 
                 if (!hasTp1Pct || !hasSlPct || !hasRr)
                 {
@@ -1281,12 +1282,11 @@ namespace CryptoSense.Infrastructure.Testing
 
                 // 1. Verify Entry Card format
                 var entryCard = TelegramMessageFormatter.FormatSignalAlert(testSig, 1);
-                bool validEntry = (entryCard.Contains("#1 🟢 <b>SİQNAL</b>") || entryCard.Contains("#1 🟢 LONG SİQNAL")) &&
-                                  (entryCard.Contains("BTC Futures (1h)") || entryCard.Contains("BTC (1h)")) &&
-                                  entryCard.Contains("88.5%") &&
-                                  entryCard.Contains("$64500") &&
-                                  (entryCard.Contains("Hədəf A (TP_A 1.0R - 50%)") || entryCard.Contains("Hədəf A (1.5R)")) &&
-                                  entryCard.Contains("Stop Loss (SL)");
+                bool validEntry = entryCard.Contains("#1  LONG  BTC  1h") &&
+                                  entryCard.Contains("Giriş  64500") &&
+                                  entryCard.Contains("SL") &&
+                                  entryCard.Contains("TP1") &&
+                                  entryCard.Contains("R:R");
 
                 if (!validEntry)
                 {
@@ -1296,9 +1296,9 @@ namespace CryptoSense.Infrastructure.Testing
 
                 // 2. Verify SL Outcome Card format
                 var slCard = TelegramMessageFormatter.FormatOutcomeAlert(testSig, 1, "Stop Loss (SL)", 63532.50m, -1.50m);
-                bool validSl = slCard.Contains("#1 NƏTİCƏ") &&
-                               (slCard.Contains("Stop-Loss vurdu") || slCard.Contains("Stop-Loss Vuruldu")) &&
-                               slCard.Contains("UĞURSUZ OLDU");
+                bool validSl = slCard.Contains("#1  SL  BTC  LONG") &&
+                               slCard.Contains("-1.50%") &&
+                               slCard.Contains("mövqe bağlı");
 
                 if (!validSl)
                 {
@@ -1308,8 +1308,8 @@ namespace CryptoSense.Infrastructure.Testing
 
                 // 3. Verify TP1 Outcome Card format
                 var tp1Card = TelegramMessageFormatter.FormatOutcomeAlert(testSig, 1, "Hədəf 1 (TP1)", 65467.50m, 1.50m);
-                bool validTp1 = tp1Card.Contains("#1 NƏTİCƏ") &&
-                                (tp1Card.Contains("UĞURLU OLDU") || tp1Card.Contains("Vuruldu")) &&
+                bool validTp1 = tp1Card.Contains("#1  TP1  BTC  LONG") &&
+                                tp1Card.Contains("40% bağlandı") &&
                                 tp1Card.Contains("1.50%");
 
                 if (!validTp1)
@@ -1393,17 +1393,15 @@ namespace CryptoSense.Infrastructure.Testing
                     skipBtcRange: telem.SkipBtcRange,
                     maxConfluenceSeen: -1m);
 
-                bool hasConf = hbMsg.Contains("Conf:15");
-                bool hasSentZero = hbMsg.Contains("Göndərildi:0") || hbMsg.Contains("G&#246;nd&#601;rildi:0");
-                bool hasGozleme = hbMsg.Contains("Gözləmə:10") || hbMsg.Contains("G&#246;zl&#601;m&#601;:10");
-                bool hasBtcGate = hbMsg.Contains("BtcGate:5");
-                bool hasBtcRange = hbMsg.Contains("Range:2");
-                bool hasReason = hbMsg.Contains("Səbəb:") || hbMsg.Contains("S&#601;b&#601;b:");
-                bool has60Min = hbMsg.Contains("60 dəq") || hbMsg.Contains("60 d&#601;q");
-                bool hasBuFaizDeyil = hbMsg.Contains("bu faiz deyil") || hbMsg.Contains("bu faiz DEYİL");
-                bool lineSuppressed = !hbMsg.Contains("ən yüksək istiqamətli confluence");
+                bool hasHeartbeat = hbMsg.Contains("HEARTBEAT");
+                bool hasSentZero = hbMsg.Contains("göndərildi 0");
+                bool hasChase = hbMsg.Contains("chase 2");
+                bool hasRange = hbMsg.Contains("range 2");
+                bool hasVolGate = hbMsg.Contains("vol/gate 5");
+                bool hasReason = hbMsg.ToLower().Contains("səbəb");
+                bool lineSuppressed = !hbMsg.Contains("maxConf");
 
-                if (!hasConf || !hasSentZero || !hasGozleme || !hasBtcGate || !hasBtcRange || !hasReason || !has60Min || !hasBuFaizDeyil || !lineSuppressed)
+                if (!hasHeartbeat || !hasSentZero || !hasChase || !hasRange || !hasVolGate || !hasReason || !lineSuppressed)
                 {
                     Console.WriteLine($"[Test 48 Fail] HB message format mismatch:\n{hbMsg}");
                     return Task.FromResult(false);
@@ -1428,7 +1426,7 @@ namespace CryptoSense.Infrastructure.Testing
                     skipBtcRange: telem.SkipBtcRange,
                     maxConfluenceSeen: 61.2m);
 
-                bool has61 = hbMsg61.Contains("61.2") && (hbMsg61.Contains("ən yüksək") || hbMsg61.Contains("yüksək") || hbMsg61.Contains("y\u00fcks\u0259k"));
+                bool has61 = hbMsg61.Contains("61.2") && hbMsg61.Contains("maxConf");
                 if (!has61)
                 {
                     Console.WriteLine($"[Test 48 Fail] HB 61.2m message format mismatch:\n{hbMsg61}");
@@ -2289,7 +2287,7 @@ namespace CryptoSense.Infrastructure.Testing
                     }
                 }
 
-                bool hasExpectedCb = content.Contains("RISK CIRCUIT BREAKER AKTİVLƏŞDİ") && content.Contains("Ardıcıl 2 uğursuz əməliyyat (Stop Loss) qeydə alındı.");
+                bool hasExpectedCb = content.Contains("CB  ") && content.Contains("bağlı 4s");
                 if (!hasExpectedCb)
                 {
                     Console.WriteLine("[Test 60 Fail] Expected Azerbaijani circuit breaker text not found in Outcome.cs");

@@ -46,6 +46,16 @@ namespace CryptoSense.Domain.Common
             return azTime.ToString("dd.MM.yyyy | HH:mm:ss (+4)");
         }
 
+        public static string ClockAz(DateTime dt)
+        {
+            if (dt == default) return "";
+            var utc = dt.Kind == DateTimeKind.Utc ? dt : DateTime.SpecifyKind(dt, DateTimeKind.Utc);
+            var azTime = TimeZoneInfo.ConvertTimeFromUtc(utc, AzerbaijanTz);
+            return azTime.ToString("HH:mm:ss");
+        }
+
+        public static string ClockNow => ClockAz(DateTime.UtcNow);
+
         public static string NowFormatted => NowAz.ToString("dd.MM.yyyy | HH:mm:ss (+4)");
     }
 }

@@ -654,8 +654,10 @@ namespace CryptoSense.Worker
                                 {
                                     try
                                     {
-                                        const string cbAlertMsg = "⚠️ <b>RISK CIRCUIT BREAKER AKTİVLƏŞDİ:</b>\n\n" +
-                                            "Ardıcıl 2 uğursuz əməliyyat (Stop Loss) qeydə alındı. Bazar skaneri kapitalı qorumaq üçün <b>4 saatlıq</b> müşahidə rejiminə keçdi.";
+                                        var dirStr = sig.Direction == SignalDirection.Buy ? "LONG" : "SHORT";
+                                        var cbAlertMsg = $"CB  {CryptoSense.Domain.Common.TimeHelper.ClockNow}\n" +
+                                            $"2 SL  |  {dirStr} bağlı 4s\n" +
+                                            "əks tərəf açıq";
                                         await _telegramService.SendCircuitBreakerAlertAsync(cbAlertMsg, lossIdsSnapshot);
                                     }
                                     catch (Exception _ex) { Console.WriteLine($"[BackgroundMarketScanner] Swallowed exception: {_ex.Message}"); }
