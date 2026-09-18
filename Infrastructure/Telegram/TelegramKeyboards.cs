@@ -191,11 +191,11 @@ namespace CryptoSense.Infrastructure.Telegram
                 {
                     new[]
                     {
-                        new { text = "🛑 Bəli, Sistemi Sıfırla", callback_data = "cb_reset_confirm" }
+                        new { text = "🛑 Bəli, Siqnalları Sıfırla", callback_data = "cb_reset_confirm" }
                     },
                     new[]
                     {
-                        new { text = "❌ İmtina Et", callback_data = "cb_menu" }
+                        new { text = "❌ İmtina", callback_data = "cb_admin_menu" }
                     }
                 }
             };
@@ -239,6 +239,10 @@ namespace CryptoSense.Infrastructure.Telegram
                     {
                         new { text = "🧹 Test Hesabları Sil", callback_data = "cb_admin_purge_test_users" },
                         new { text = "🧪 Bütün Bildirişləri Test Et", callback_data = "cb_admin_test_all" }
+                    },
+                    new[]
+                    {
+                        new { text = "🧹 Siqnalları Sıfırla", callback_data = "cb_reset" }
                     },
                     new[]
                     {

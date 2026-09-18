@@ -592,14 +592,14 @@ namespace CryptoSense.Infrastructure.Telegram
         public static string FormatResetConfirmationPrompt()
         {
             var sb = new StringBuilder();
-            sb.AppendLine("⚠️ <b>DİQQƏT: Bütün Bazar Sistemlərini Sıfırlamaq</b>");
+            sb.AppendLine("⚠️ <b>DİQQƏT: Siqnalları Sıfırlamaq</b>");
             sb.AppendLine("━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
             sb.AppendLine("Bu əməliyyatı təsdiq etdikdə:");
-            sb.AppendLine("• Bütün aktiv bazar skaneri və bildirişlər <b>dayandırılacaq</b> (Dayandırılıb 🔴).");
-            sb.AppendLine("• Bütün təyin edilmiş zaman aralıqları (1h / 4h) <b>sıfırlanacaq</b> və yenidən təyin olunma tələb edəcək.");
-            sb.AppendLine("• Şəxsi siqnal sayğacınız sıfırlanacaq.");
-            sb.AppendLine();
-            sb.AppendLine("ℹ️ <b>QEYD:</b> <i>Sizin seçilmiş standart 40 coin və ya əlavə etdiyiniz fərdi coinləriniz SİLİNMİR, toxunulmaz saxlanılır!</i>");
+            sb.AppendLine("• Bütün statistika silinir.");
+            sb.AppendLine("• Bütün açıq VƏ bağlı siqnallar silinir.");
+            sb.AppendLine("• Keçmiş/açıq mövqe üçün TP/SL/TIME bildirişi BİR DAHA GƏLMƏZ.");
+            sb.AppendLine("• Zaman rejimi (1h/4h) sıfırlanır, skaner dayandırılır.");
+            sb.AppendLine("• Coin siyahısı QALIR.");
             sb.AppendLine("━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
             sb.AppendLine("Davam etmək istədiyinizə əminsiniz?");
             return sb.ToString();

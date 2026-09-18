@@ -184,6 +184,7 @@ namespace CryptoSense.Infrastructure.Persistence.Repositories
         public async Task ClearAllSignalsAsync()
         {
             _context.SignalIndicatorSnapshots.RemoveRange(_context.SignalIndicatorSnapshots);
+            _context.UserSignalDeliveries.RemoveRange(_context.UserSignalDeliveries);
             _context.Signals.RemoveRange(_context.Signals);
             await _context.SaveChangesAsync();
         }

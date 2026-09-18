@@ -408,26 +408,30 @@ namespace CryptoSense.Infrastructure.Telegram
             }
             else if (data == "cb_reset_confirm")
             {
-                // BƏND 6: 🧹 Sıfırla (SuperAdmin): statistika + BAĞLI = 0. Açıq mövqeyə toxunma.
-                await unitOfWork.Signals.ResetClosedSignalsAsync();
-                await unitOfWork.SaveChangesAsync();
+                await unitOfWork.Signals.ClearAllSignalsAsync();
 
-                userSettings.IsActive = false;
-                userSettings.Timeframe = "Təyin olunmayıb";
-                userSettings.AlertCounter = 0;
-                userSettings.LastResumeTime = DateTime.UtcNow;
+                foreach (var pref in UserPreferences.Values)
+                {
+                    pref.IsActive = false;
+                    pref.Timeframe = "Təyin olunmayıb";
+                    pref.AlertCounter = 0;
+                    pref.LastResumeTime = DateTime.UtcNow;
+                }
                 SaveSettings();
 
-                var resetMsg = "🛑 <b>Bütün Bağlı Əməliyyatlar və Statistika Sıfırlandı!</b>\n\n" +
-                               "• Skaner və bildirişlər <b>dayandırıldı (Dayandırılıb 🔴)</b>.\n" +
-                               "• Bağlı əməliyyat tarixçəsi və statistika sıfırlandı (#0).\n" +
-                               "• <b>Açıq mövqelər toxunulmaz saxlanıldı.</b>\n" +
-                               $"• <b>Qorunan Portfeliniz:</b> {userSettings.Coins.Count} ədəd coin qorunub saxlanıldı.\n\n" +
-                               "<i>Yenidən başlamaq üçün aşağıdakı düymə ilə Terminala qayıdın və portfel/zaman seçin.</i>";
-                bool edited = await EditMessageTextAsync(chatId, messageId, resetMsg, TelegramKeyboards.BuildBackToTerminalKeyboard());
+                var resetMsg = "🛑 <b>Bütün Siqnallar və Statistika Sıfırlandı!</b>\n\n" +
+                               "• <b>Statistika:</b> 0\n" +
+                               "• <b>Açıq mövqelər:</b> 0 (bütün açıq və bağlı siqnallar silindi)\n" +
+                               "• <b>Bildirişlər:</b> OFF (Dayandırılıb 🔴)\n" +
+                               "• <b>Zaman rejimi:</b> Təyin olunmayıb\n" +
+                               "• Keçmiş/açıq siqnallar üzrə heç bir nəticə və ya TP/SL/TIME bildirişi gəlməyəcək.\n" +
+                               $"• <b>Coin Portfeli:</b> Qorunub saxlanıldı ({userSettings.Coins.Count} ədəd).\n\n" +
+                               "<i>Yenidən başlamaq üçün Admin Panelindən çıxıb Terminalda portfel və zaman seçin.</i>";
+
+                bool edited = await EditMessageTextAsync(chatId, messageId, resetMsg, TelegramKeyboards.BuildBackToAdminKeyboard());
                 if (!edited)
                 {
-                    await SendMessageReturnIdAsync(resetMsg, chatId, TelegramKeyboards.BuildBackToTerminalKeyboard());
+                    await SendMessageReturnIdAsync(resetMsg, chatId, TelegramKeyboards.BuildBackToAdminKeyboard());
                 }
             }
             else if (data == "cb_open")
