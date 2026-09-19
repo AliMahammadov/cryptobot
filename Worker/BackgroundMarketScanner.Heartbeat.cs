@@ -97,29 +97,46 @@ namespace CryptoSense.Worker
                     }
                 }
 
+                string[] targetTfs;
+                if (s.Timeframe == "4h")
+                {
+                    targetTfs = new[] { "4h" };
+                }
+                else if (s.Timeframe == "1h")
+                {
+                    targetTfs = new[] { "1h" };
+                }
+                else
+                {
+                    targetTfs = new[] { "1h", "4h" };
+                }
+
                 var coinSkipList = new List<CoinSkipDetail>();
-                string userTf = s.Timeframe == "4h" ? "4h" : "1h";
                 foreach (var sym in monitoredCoins)
                 {
-                    if (_latestCoinEvaluations.TryGetValue(sym, out var eval))
+                    foreach (var tf in targetTfs)
                     {
-                        coinSkipList.Add(eval);
-                    }
-                    else
-                    {
-                        coinSkipList.Add(new CoinSkipDetail
+                        var evalKey = $"{sym}|{tf}";
+                        if (_latestCoinEvaluations.TryGetValue(evalKey, out var eval))
                         {
-                            Symbol = sym,
-                            Timeframe = userTf,
-                            Bias = "neytral",
-                            ConfluenceScore = 50,
-                            GroupReason = "gözləmə",
-                            ReasonDescription = "Aydın trend və giriş təsdiqi yoxdur"
-                        });
+                            coinSkipList.Add(eval);
+                        }
+                        else
+                        {
+                            coinSkipList.Add(new CoinSkipDetail
+                            {
+                                Symbol = sym,
+                                Timeframe = tf,
+                                Bias = "neytral",
+                                ConfluenceScore = 0,
+                                GroupReason = "scan yox",
+                                ReasonDescription = "bu saat baxılmayıb"
+                            });
+                        }
                     }
                 }
 
-                var tfDisplay = (s.Timeframe == "4h") ? "4h" : ((nowUtc.Hour % 4 == 0) ? "1h, 4h" : "1h");
+                var tfDisplay = (s.Timeframe == "4h") ? "4h" : (s.Timeframe == "1h" ? "1h" : "1h, 4h");
 
                 BtcMarketCompass? compass = null;
                 try
@@ -133,8 +150,8 @@ namespace CryptoSense.Worker
                 var reportMsgs = TelegramMessageFormatter.FormatHourSkipReport(
                     candleCloseUtc: nowUtc,
                     timeframe: tfDisplay,
-                    baseCoinsCount: TelegramBotService.Default40Coins.Count,
-                    userExtraCoinsCount: extraUserCoinsCount,
+                    baseCoinsCount: TelegramBotService.Default40Coins.Count * targetTfs.Length,
+                    userExtraCoinsCount: extraUserCoinsCount * targetTfs.Length,
                     compass: compass,
                     coins: coinSkipList,
                     telemetry: snapTelemetry,

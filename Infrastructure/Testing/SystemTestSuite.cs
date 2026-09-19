@@ -2742,6 +2742,121 @@ namespace CryptoSense.Infrastructure.Testing
                 var outAlert = TelegramMessageFormatter.FormatOutcomeAlert(sampleSignal, userSigNum: 999, outcomeType: "TP1", hitPrice: 61000, profitPct: 1.67m);
                 if (string.IsNullOrEmpty(outAlert) || !outAlert.Contains("TP1")) return false;
 
+                // A. eyni symbol 1h+4h yazılırsa raportda 2 sətir, biri digərini əzmir
+                var dualTfCoins = new List<CoinSkipDetail>
+                {
+                    new CoinSkipDetail
+                    {
+                        Symbol = "BTCUSDT",
+                        Timeframe = "1h",
+                        Bias = "long meyl",
+                        ConfluenceScore = 70,
+                        GroupReason = "güc/şərt",
+                        ReasonDescription = "1h Confluence 70% < 75%"
+                    },
+                    new CoinSkipDetail
+                    {
+                        Symbol = "BTCUSDT",
+                        Timeframe = "4h",
+                        Bias = "short meyl",
+                        ConfluenceScore = 65,
+                        GroupReason = "qapı",
+                        ReasonDescription = "4h BTC qapısı əks istiqamətdədir"
+                    }
+                };
+                var dualReport = TelegramMessageFormatter.FormatHourSkipReport(
+                    candleCloseUtc: DateTime.UtcNow,
+                    timeframe: "1h, 4h",
+                    baseCoinsCount: 2,
+                    userExtraCoinsCount: 0,
+                    compass: compass,
+                    coins: dualTfCoins,
+                    telemetry: tel,
+                    newSignalsCount: 0);
+
+                var dualText = string.Join("\n", dualReport);
+                bool has1hLine = dualText.Contains("BTCUSDT  1h");
+                bool has4hLine = dualText.Contains("BTCUSDT  4h");
+                if (!has1hLine || !has4hLine)
+                {
+                    Console.WriteLine("[Test 69 Fail - A] Dual timeframe coins must both be present without overwriting");
+                    return false;
+                }
+
+                // B. eval-siz koin -> mətndə "bu saat baxılmayıb", "Aydın trend" YOX, şərt 50 YOX
+                var noEvalCoins = new List<CoinSkipDetail>
+                {
+                    new CoinSkipDetail
+                    {
+                        Symbol = "SOLUSDT",
+                        Timeframe = "1h",
+                        Bias = "neytral",
+                        ConfluenceScore = 0,
+                        GroupReason = "scan yox",
+                        ReasonDescription = "bu saat baxılmayıb"
+                    }
+                };
+                var noEvalReport = TelegramMessageFormatter.FormatHourSkipReport(
+                    candleCloseUtc: DateTime.UtcNow,
+                    timeframe: "1h",
+                    baseCoinsCount: 1,
+                    userExtraCoinsCount: 0,
+                    compass: compass,
+                    coins: noEvalCoins,
+                    telemetry: tel,
+                    newSignalsCount: 0);
+
+                var noEvalText = string.Join("\n", noEvalReport);
+                bool hasNoEvalDesc = noEvalText.Contains("bu saat baxılmayıb");
+                bool hasNoFakeTrend = !noEvalText.Contains("Aydın trend");
+                bool hasNoFake50 = !noEvalText.Contains("şərt 50");
+                if (!hasNoEvalDesc || !hasNoFakeTrend || !hasNoFake50)
+                {
+                    Console.WriteLine($"[Test 69 Fail - B] Unevaluated coin must have 'bu saat baxılmayıb', no 'Aydın trend', no 'şərt 50'. Text:\n{noEvalText}");
+                    return false;
+                }
+
+                // C. lag qrupu "gecikmə", stale qrupu "köhnə data"
+                var lagStaleCoins = new List<CoinSkipDetail>
+                {
+                    new CoinSkipDetail
+                    {
+                        Symbol = "AVAXUSDT",
+                        Timeframe = "1h",
+                        Bias = "long meyl",
+                        ConfluenceScore = 80,
+                        GroupReason = "gecikmə",
+                        ReasonDescription = "Şam gecikməsi (cycle lag) aşkarlandı"
+                    },
+                    new CoinSkipDetail
+                    {
+                        Symbol = "DOTUSDT",
+                        Timeframe = "1h",
+                        Bias = "short meyl",
+                        ConfluenceScore = 80,
+                        GroupReason = "köhnə data",
+                        ReasonDescription = "WebSocket qiymət məlumatı köhnədir (stale data)"
+                    }
+                };
+                var lagStaleReport = TelegramMessageFormatter.FormatHourSkipReport(
+                    candleCloseUtc: DateTime.UtcNow,
+                    timeframe: "1h",
+                    baseCoinsCount: 2,
+                    userExtraCoinsCount: 0,
+                    compass: compass,
+                    coins: lagStaleCoins,
+                    telemetry: tel,
+                    newSignalsCount: 0);
+
+                var lagStaleText = string.Join("\n", lagStaleReport);
+                bool hasGecikme = lagStaleText.Contains("gecikmə");
+                bool hasKohneData = lagStaleText.Contains("köhnə data");
+                if (!hasGecikme || !hasKohneData)
+                {
+                    Console.WriteLine($"[Test 69 Fail - C] Report must show 'gecikmə' and 'köhnə data' group reasons. Text:\n{lagStaleText}");
+                    return false;
+                }
+
                 return true;
             });
 

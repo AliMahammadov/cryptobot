@@ -37,7 +37,8 @@ namespace CryptoSense.Worker
                 Console.WriteLine($"[SCAN_CYCLE_SKIP] reason=CIRCUIT_BREAKER cbUntil={_circuitBreakerUntil:HH:mm:ss}UTC");
                 foreach (var c in TelegramBotService.Default40Coins)
                 {
-                    _latestCoinEvaluations[c] = new CoinSkipDetail { Symbol = c, Timeframe = "1h", Bias = "neytral", ConfluenceScore = 50, GroupReason = "circuit breaker", ReasonDescription = "Circuit Breaker aktivdir" };
+                    _latestCoinEvaluations[$"{c}|1h"] = new CoinSkipDetail { Symbol = c, Timeframe = "1h", Bias = "neytral", ConfluenceScore = 0, GroupReason = "circuit breaker", ReasonDescription = "Circuit Breaker aktivdir" };
+                    _latestCoinEvaluations[$"{c}|4h"] = new CoinSkipDetail { Symbol = c, Timeframe = "4h", Bias = "neytral", ConfluenceScore = 0, GroupReason = "circuit breaker", ReasonDescription = "Circuit Breaker aktivdir" };
                 }
                 LatestTelemetrySnapshot = _hourlyTelemetry.Clone();
                 await MaybeSendHourlyHeartbeatAsync(stoppingToken);
@@ -93,7 +94,8 @@ namespace CryptoSense.Worker
                 Console.WriteLine($"[SCAN_CYCLE_SKIP] reason=MAX_OPEN count={openTradesCount} activeLocks={_coinActiveLocks.Count} max={MaxGlobalOpenPositions}");
                 foreach (var c in TelegramBotService.Default40Coins)
                 {
-                    _latestCoinEvaluations[c] = new CoinSkipDetail { Symbol = c, Timeframe = "1h", Bias = "neytral", ConfluenceScore = 50, GroupReason = "açıq mövqe", ReasonDescription = $"Maksimum açıq mövqe ({openTradesCount}/20) dolub" };
+                    _latestCoinEvaluations[$"{c}|1h"] = new CoinSkipDetail { Symbol = c, Timeframe = "1h", Bias = "neytral", ConfluenceScore = 0, GroupReason = "açıq mövqe", ReasonDescription = $"Maksimum açıq mövqe ({openTradesCount}/{MaxGlobalOpenPositions}) dolub" };
+                    _latestCoinEvaluations[$"{c}|4h"] = new CoinSkipDetail { Symbol = c, Timeframe = "4h", Bias = "neytral", ConfluenceScore = 0, GroupReason = "açıq mövqe", ReasonDescription = $"Maksimum açıq mövqe ({openTradesCount}/{MaxGlobalOpenPositions}) dolub" };
                 }
                 LatestTelemetrySnapshot = _hourlyTelemetry.Clone();
                 await MaybeSendHourlyHeartbeatAsync(stoppingToken);
@@ -114,7 +116,8 @@ namespace CryptoSense.Worker
                     Console.WriteLine($"[SCAN_CYCLE_SKIP] reason=DAILY_LOSS pnl={todayClosedPnL:F2}% threshold={BotConstants.Thresholds.DailyLossThreshold:F1}%");
                     foreach (var c in TelegramBotService.Default40Coins)
                     {
-                        _latestCoinEvaluations[c] = new CoinSkipDetail { Symbol = c, Timeframe = "1h", Bias = "neytral", ConfluenceScore = 50, GroupReason = "itki limiti", ReasonDescription = $"Günlük itki limiti ({todayClosedPnL:F2}% ≤ -3.0%) keçib" };
+                        _latestCoinEvaluations[$"{c}|1h"] = new CoinSkipDetail { Symbol = c, Timeframe = "1h", Bias = "neytral", ConfluenceScore = 0, GroupReason = "itki limiti", ReasonDescription = $"Günlük itki limiti ({todayClosedPnL:F2}% ≤ {BotConstants.Thresholds.DailyLossThreshold:F1}%) keçib" };
+                        _latestCoinEvaluations[$"{c}|4h"] = new CoinSkipDetail { Symbol = c, Timeframe = "4h", Bias = "neytral", ConfluenceScore = 0, GroupReason = "itki limiti", ReasonDescription = $"Günlük itki limiti ({todayClosedPnL:F2}% ≤ {BotConstants.Thresholds.DailyLossThreshold:F1}%) keçib" };
                     }
                     LatestTelemetrySnapshot = _hourlyTelemetry.Clone();
                     await MaybeSendHourlyHeartbeatAsync(stoppingToken);
@@ -193,7 +196,8 @@ namespace CryptoSense.Worker
                 if (_coinCooldowns.TryGetValue(sym, out var cooldownUntil) && scanNowUtc < cooldownUntil)
                 {
                     Interlocked.Increment(ref _hourlyTelemetry.SkipLock);
-                    _latestCoinEvaluations[sym] = new CoinSkipDetail { Symbol = sym, Timeframe = "1h", Bias = "neytral", ConfluenceScore = 50, GroupReason = "açıq mövqe", ReasonDescription = "Bağlanış sonrası soyuma dövrü (cooldown) aktivdir" };
+                    _latestCoinEvaluations[$"{sym}|1h"] = new CoinSkipDetail { Symbol = sym, Timeframe = "1h", Bias = "neytral", ConfluenceScore = 0, GroupReason = "açıq mövqe", ReasonDescription = "Bağlanış sonrası soyuma dövrü (cooldown) aktivdir" };
+                    _latestCoinEvaluations[$"{sym}|4h"] = new CoinSkipDetail { Symbol = sym, Timeframe = "4h", Bias = "neytral", ConfluenceScore = 0, GroupReason = "açıq mövqe", ReasonDescription = "Bağlanış sonrası soyuma dövrü (cooldown) aktivdir" };
                     continue;
                 }
 
@@ -201,7 +205,8 @@ namespace CryptoSense.Worker
                 if (_coinActiveLocks.ContainsKey(sym) || _scanningCoins.ContainsKey(sym))
                 {
                     Interlocked.Increment(ref _hourlyTelemetry.SkipLock);
-                    _latestCoinEvaluations[sym] = new CoinSkipDetail { Symbol = sym, Timeframe = "1h", Bias = "neytral", ConfluenceScore = 50, GroupReason = "açıq mövqe", ReasonDescription = "Aktiv açıq mövqe mövcuddur" };
+                    _latestCoinEvaluations[$"{sym}|1h"] = new CoinSkipDetail { Symbol = sym, Timeframe = "1h", Bias = "neytral", ConfluenceScore = 0, GroupReason = "açıq mövqe", ReasonDescription = "Aktiv açıq mövqe mövcuddur" };
+                    _latestCoinEvaluations[$"{sym}|4h"] = new CoinSkipDetail { Symbol = sym, Timeframe = "4h", Bias = "neytral", ConfluenceScore = 0, GroupReason = "açıq mövqe", ReasonDescription = "Aktiv açıq mövqe mövcuddur" };
                     continue;
                 }
 
@@ -209,7 +214,8 @@ namespace CryptoSense.Worker
                 {
                     _coinActiveLocks.TryAdd(sym, 1);
                     Interlocked.Increment(ref _hourlyTelemetry.SkipLock);
-                    _latestCoinEvaluations[sym] = new CoinSkipDetail { Symbol = sym, Timeframe = "1h", Bias = "neytral", ConfluenceScore = 50, GroupReason = "açıq mövqe", ReasonDescription = "Aktiv açıq mövqe mövcuddur" };
+                    _latestCoinEvaluations[$"{sym}|1h"] = new CoinSkipDetail { Symbol = sym, Timeframe = "1h", Bias = "neytral", ConfluenceScore = 0, GroupReason = "açıq mövqe", ReasonDescription = "Aktiv açıq mövqe mövcuddur" };
+                    _latestCoinEvaluations[$"{sym}|4h"] = new CoinSkipDetail { Symbol = sym, Timeframe = "4h", Bias = "neytral", ConfluenceScore = 0, GroupReason = "açıq mövqe", ReasonDescription = "Aktiv açıq mövqe mövcuddur" };
                     continue;
                 }
 
@@ -244,7 +250,8 @@ namespace CryptoSense.Worker
                         {
                             _coinActiveLocks.TryAdd(sym, 1);
                             Interlocked.Increment(ref _hourlyTelemetry.SkipLock);
-                            _latestCoinEvaluations[sym] = new CoinSkipDetail { Symbol = sym, Timeframe = "1h", Bias = "neytral", ConfluenceScore = 50, GroupReason = "açıq mövqe", ReasonDescription = "Aktiv açıq mövqe mövcuddur" };
+                            _latestCoinEvaluations[$"{sym}|1h"] = new CoinSkipDetail { Symbol = sym, Timeframe = "1h", Bias = "neytral", ConfluenceScore = 0, GroupReason = "açıq mövqe", ReasonDescription = "Aktiv açıq mövqe mövcuddur" };
+                            _latestCoinEvaluations[$"{sym}|4h"] = new CoinSkipDetail { Symbol = sym, Timeframe = "4h", Bias = "neytral", ConfluenceScore = 0, GroupReason = "açıq mövqe", ReasonDescription = "Aktiv açıq mövqe mövcuddur" };
                             return;
                         }
 
@@ -255,7 +262,8 @@ namespace CryptoSense.Worker
                             if (DateTime.UtcNow - lastClosed.ClosedAt.Value < cooldownRequired)
                             {
                                 Interlocked.Increment(ref _hourlyTelemetry.SkipLock);
-                                _latestCoinEvaluations[sym] = new CoinSkipDetail { Symbol = sym, Timeframe = "1h", Bias = "neytral", ConfluenceScore = 50, GroupReason = "açıq mövqe", ReasonDescription = "Bağlanış sonrası soyuma dövrü aktivdir" };
+                                _latestCoinEvaluations[$"{sym}|1h"] = new CoinSkipDetail { Symbol = sym, Timeframe = "1h", Bias = "neytral", ConfluenceScore = 0, GroupReason = "açıq mövqe", ReasonDescription = "Bağlanış sonrası soyuma dövrü aktivdir" };
+                                _latestCoinEvaluations[$"{sym}|4h"] = new CoinSkipDetail { Symbol = sym, Timeframe = "4h", Bias = "neytral", ConfluenceScore = 0, GroupReason = "açıq mövqe", ReasonDescription = "Bağlanış sonrası soyuma dövrü aktivdir" };
                                 return;
                             }
                         }
@@ -421,7 +429,7 @@ namespace CryptoSense.Worker
                                 else if (hasConfluence)
                                 {
                                     coinGroup = "güc/şərt";
-                                    coinDetail = $"Confluence {signal.ConfluenceScore:F1}% < 75% minimum tələb";
+                                    coinDetail = $"Confluence {signal.ConfluenceScore:F1}% < {BotConstants.Thresholds.MinConfluence1h4h:F0}% minimum tələb";
                                 }
                                 else if (hasVolume)
                                 {
@@ -436,7 +444,7 @@ namespace CryptoSense.Worker
                                 else if (hasRR)
                                 {
                                     coinGroup = "R:R";
-                                    coinDetail = "R:R < 1.50 minimum risk:mükafat nisbəti ödənmir";
+                                    coinDetail = $"R:R < {BotConstants.Thresholds.MinRiskReward.ToString("F2", System.Globalization.CultureInfo.InvariantCulture)} minimum risk:mükafat nisbəti ödənmir";
                                 }
                                 else if (hasChase)
                                 {
@@ -451,7 +459,7 @@ namespace CryptoSense.Worker
                                         : "Aydın trend və giriş təsdiqi yoxdur";
                                 }
 
-                                _latestCoinEvaluations[sym] = new CoinSkipDetail
+                                _latestCoinEvaluations[$"{sym}|{tf}"] = new CoinSkipDetail
                                 {
                                     Symbol = sym,
                                     Timeframe = tf,
@@ -503,7 +511,7 @@ namespace CryptoSense.Worker
                                 {
                                     Interlocked.Increment(ref _hourlyTelemetry.SkipDirLock);
                                     Console.WriteLine($"[MarketScanner] SKIP_DIR_LOCK: {signal.Symbol} {signal.Direction} blocked by circuit breaker direction lock");
-                                    _latestCoinEvaluations[signal.Symbol] = new CoinSkipDetail { Symbol = signal.Symbol, Timeframe = signal.Timeframe, Bias = signal.Direction == SignalDirection.Buy ? "long meyl" : "short meyl", ConfluenceScore = (int)Math.Clamp(Math.Round(signal.ConfluenceScore), 0, 100), GroupReason = "circuit breaker", ReasonDescription = "İstiqamət kilidi (direction lock) aktivdir" };
+                                    _latestCoinEvaluations[$"{signal.Symbol}|{signal.Timeframe}"] = new CoinSkipDetail { Symbol = signal.Symbol, Timeframe = signal.Timeframe, Bias = signal.Direction == SignalDirection.Buy ? "long meyl" : "short meyl", ConfluenceScore = (int)Math.Clamp(Math.Round(signal.ConfluenceScore), 0, 100), GroupReason = "circuit breaker", ReasonDescription = "İstiqamət kilidi (direction lock) aktivdir" };
                                     continue;
                                 }
                                 var candleDuration = signal.Timeframe switch
@@ -521,7 +529,7 @@ namespace CryptoSense.Worker
                                     SignalEngine.InvalidateCandleCache(signal.Symbol, signal.Timeframe, signal.SourceCandleOpenTimeUtc);
                                     Console.WriteLine($"[MarketScanner] SKIP_CYCLE_LAG: {signal.Symbol} lag={emitLagMs:F0}ms > {maxAllowedLagMs}ms");
                                     Console.WriteLine($"[EMIT_RETRY_ARMED] {signal.Symbol} {signal.Timeframe} candle={signal.SourceCandleOpenTimeUtc:yyyy-MM-dd HH:mm} reason=CYCLE_LAG");
-                                    _latestCoinEvaluations[signal.Symbol] = new CoinSkipDetail { Symbol = signal.Symbol, Timeframe = signal.Timeframe, Bias = signal.Direction == SignalDirection.Buy ? "long meyl" : "short meyl", ConfluenceScore = (int)Math.Clamp(Math.Round(signal.ConfluenceScore), 0, 100), GroupReason = "spread", ReasonDescription = "Şam gecikməsi (cycle lag) aşkarlandı" };
+                                    _latestCoinEvaluations[$"{signal.Symbol}|{signal.Timeframe}"] = new CoinSkipDetail { Symbol = signal.Symbol, Timeframe = signal.Timeframe, Bias = signal.Direction == SignalDirection.Buy ? "long meyl" : "short meyl", ConfluenceScore = (int)Math.Clamp(Math.Round(signal.ConfluenceScore), 0, 100), GroupReason = "gecikmə", ReasonDescription = "Şam gecikməsi (cycle lag) aşkarlandı" };
                                     continue;
                                 }
 
@@ -549,7 +557,7 @@ namespace CryptoSense.Worker
                                     SignalEngine.InvalidateCandleCache(signal.Symbol, signal.Timeframe, signal.SourceCandleOpenTimeUtc);
                                     Console.WriteLine($"[MarketScanner] SKIP_STALE: {signal.Symbol} dataAgeMs={(snap?.DataAgeMs ?? -1)} source={snap?.Source}");
                                     Console.WriteLine($"[EMIT_RETRY_ARMED] {signal.Symbol} {signal.Timeframe} candle={signal.SourceCandleOpenTimeUtc:yyyy-MM-dd HH:mm} reason=STALE");
-                                    _latestCoinEvaluations[signal.Symbol] = new CoinSkipDetail { Symbol = signal.Symbol, Timeframe = signal.Timeframe, Bias = signal.Direction == SignalDirection.Buy ? "long meyl" : "short meyl", ConfluenceScore = (int)Math.Clamp(Math.Round(signal.ConfluenceScore), 0, 100), GroupReason = "spread", ReasonDescription = "WebSocket qiymət məlumatı köhnədir (stale data)" };
+                                    _latestCoinEvaluations[$"{signal.Symbol}|{signal.Timeframe}"] = new CoinSkipDetail { Symbol = signal.Symbol, Timeframe = signal.Timeframe, Bias = signal.Direction == SignalDirection.Buy ? "long meyl" : "short meyl", ConfluenceScore = (int)Math.Clamp(Math.Round(signal.ConfluenceScore), 0, 100), GroupReason = "köhnə data", ReasonDescription = "WebSocket qiymət məlumatı köhnədir (stale data)" };
                                     continue;
                                 }
 

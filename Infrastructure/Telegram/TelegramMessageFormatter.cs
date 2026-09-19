@@ -951,7 +951,7 @@ namespace CryptoSense.Infrastructure.Telegram
             var groupDict = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
             foreach (var c in coinList)
             {
-                var grp = string.IsNullOrWhiteSpace(c.GroupReason) ? "gözləmə" : c.GroupReason.Trim();
+                var grp = string.IsNullOrWhiteSpace(c.GroupReason) ? "scan yox" : c.GroupReason.Trim();
                 if (groupDict.TryGetValue(grp, out var cnt))
                 {
                     groupDict[grp] = cnt + 1;
@@ -976,8 +976,9 @@ namespace CryptoSense.Infrastructure.Telegram
             {
                 var cTf = string.IsNullOrWhiteSpace(c.Timeframe) ? tfDisplay : c.Timeframe;
                 var bias = string.IsNullOrWhiteSpace(c.Bias) ? "neytral" : c.Bias;
-                var reason = string.IsNullOrWhiteSpace(c.ReasonDescription) ? "Giriş şərtləri ödənmədi" : c.ReasonDescription;
-                coinsSb.AppendLine($"{c.Symbol}  {cTf}  {bias}  şərt {c.ConfluenceScore}");
+                var reason = string.IsNullOrWhiteSpace(c.ReasonDescription) ? "bu saat baxılmayıb" : c.ReasonDescription;
+                var scoreStr = c.ConfluenceScore > 0 ? c.ConfluenceScore.ToString() : "-";
+                coinsSb.AppendLine($"{c.Symbol}  {cTf}  {bias}  şərt {scoreStr}");
                 coinsSb.AppendLine($"      {reason}");
             }
 
@@ -1088,8 +1089,8 @@ namespace CryptoSense.Infrastructure.Telegram
         public string Symbol { get; set; } = "";
         public string Timeframe { get; set; } = "1h";
         public string Bias { get; set; } = "neytral"; // "long meyl", "short meyl", "neytral", "chop"
-        public int ConfluenceScore { get; set; } = 50;
-        public string GroupReason { get; set; } = "güc/şərt";
-        public string ReasonDescription { get; set; } = "";
+        public int ConfluenceScore { get; set; } = 0;
+        public string GroupReason { get; set; } = "scan yox";
+        public string ReasonDescription { get; set; } = "bu saat baxılmayıb";
     }
 }

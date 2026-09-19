@@ -603,7 +603,7 @@ namespace CryptoSense.Infrastructure.Persistence.Repositories
                 {
                     deliveredSignalIds = matching.Select(s => s.Id).ToList();
                 }
-                else
+                else if (TelegramBotService.UserPreferences.ContainsKey(chatId))
                 {
                     // Fallback to all sent signals for the user if deliveredSignalIds is still empty
                     // to prevent returning 0 when signals were sent
