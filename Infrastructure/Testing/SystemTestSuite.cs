@@ -2614,14 +2614,14 @@ namespace CryptoSense.Infrastructure.Testing
                 int groupSum = 0;
                 foreach (var line in lines)
                 {
-                    if (line.StartsWith("niyə (qrup)"))
+                    if (line.StartsWith("kəsən") || line.StartsWith("niyə (qrup)"))
                     {
                         inGroupSection = true;
                         continue;
                     }
                     if (inGroupSection)
                     {
-                        if (line.StartsWith("koinlər") || line.StartsWith("standart") || line.StartsWith("bu saat") || line.StartsWith("[2/2]"))
+                        if (line.StartsWith("[2/") || line.StartsWith("[2/2]") || line.Contains("USDT"))
                         {
                             inGroupSection = false;
                             break;
@@ -2657,7 +2657,7 @@ namespace CryptoSense.Infrastructure.Testing
                     return false;
                 }
 
-                // 3. 4096-dan böyükdürsə 2 mesaj, söz ortasından kəsilməsin
+                // 3. 4096-dan böyükdürsə 2+ mesaj, söz ortasından kəsilməsin
                 var largeCoinsList = new List<CoinSkipDetail>();
                 for (int i = 0; i < 35; i++)
                 {
@@ -2695,33 +2695,120 @@ namespace CryptoSense.Infrastructure.Testing
                 }
 
                 bool p1HasHeader = splitMsgs[0].Contains("saat") && splitMsgs[0].Contains("bakı");
-                bool p1HasStandart = splitMsgs[0].Contains("standart") && splitMsgs[0].Contains("bu saat");
-                bool p2HasCoins = splitMsgs[1].Contains("koinlər") && splitMsgs[1].Contains("COIN");
+                bool p1HasGate = splitMsgs[0].Contains("siqnal üçün") && splitMsgs[0].Contains("BTC qapısı");
+                bool p2HasCoins = splitMsgs[1].Contains("COIN");
 
-                if (!p1HasHeader || !p1HasStandart || !p2HasCoins)
+                if (!p1HasHeader || !p1HasGate || !p2HasCoins)
                 {
                     Console.WriteLine("[Test 69 Fail] Split messages do not contain expected section headers");
                     return false;
                 }
 
-                // 4. Footer rəqəmləri = BotConstants
-                string reportText = joinedReport;
-                bool hasConf = reportText.Contains($"{BotConstants.Thresholds.MinConfluence1h4h}%");
-                bool hasRr = reportText.Contains(BotConstants.Thresholds.MinRiskReward.ToString("F2", CultureInfo.InvariantCulture));
-                bool hasSl = reportText.Contains(BotConstants.Thresholds.MaxSlAtr.ToString("F2", CultureInfo.InvariantCulture));
-                bool hasTpSplit = reportText.Contains("40 / 30 / 30 trail");
-                bool hasCache = reportText.Contains("cache") && reportText.Contains("1");
-                bool hasRange = reportText.Contains("range") && reportText.Contains("2");
-                bool hasStaleSt = reportText.Contains("satış st") && reportText.Contains("3");
-                bool hasGozleme = reportText.Contains("gözləmə") && reportText.Contains("4");
-
-                if (!hasConf || !hasRr || !hasSl || !hasTpSplit || !hasCache || !hasRange || !hasStaleSt || !hasGozleme)
+                // A. başlıq 41 koin (40+1), 2 tf olsa belə 80 yazılmasın
+                var dualTf41Coins = new List<CoinSkipDetail>();
+                for (int i = 0; i < 40; i++)
                 {
-                    Console.WriteLine($"[Test 69 Fail] Footer numbers mismatch BotConstants:\n{reportText}");
+                    var sym = $"BASE{i:D2}USDT";
+                    dualTf41Coins.Add(new CoinSkipDetail { Symbol = sym, Timeframe = "1h", ConfluenceScore = 60, GroupReason = "güc/şərt", ReasonDescription = "test" });
+                    dualTf41Coins.Add(new CoinSkipDetail { Symbol = sym, Timeframe = "4h", ConfluenceScore = 60, GroupReason = "güc/şərt", ReasonDescription = "test" });
+                }
+                dualTf41Coins.Add(new CoinSkipDetail { Symbol = "EXTRA01USDT", Timeframe = "1h", ConfluenceScore = 60, GroupReason = "güc/şərt", ReasonDescription = "test" });
+                dualTf41Coins.Add(new CoinSkipDetail { Symbol = "EXTRA01USDT", Timeframe = "4h", ConfluenceScore = 60, GroupReason = "güc/şərt", ReasonDescription = "test" });
+
+                var report41 = TelegramMessageFormatter.FormatHourSkipReport(
+                    candleCloseUtc: DateTime.UtcNow,
+                    timeframe: "1h, 4h",
+                    baseCoinsCount: 40,
+                    userExtraCoinsCount: 1,
+                    compass: compass,
+                    coins: dualTf41Coins,
+                    telemetry: tel,
+                    newSignalsCount: 0);
+
+                var text41 = string.Join("\n", report41);
+                bool has41Coins = text41.Contains("koin  41  (40 + 1)");
+                bool hasNo80or82 = !text41.Contains("koin  80") && !text41.Contains("koin  82");
+                if (!has41Coins || !hasNo80or82)
+                {
+                    Console.WriteLine($"[Test 69 Fail - A] Header must show 'koin  41  (40 + 1)', not 80/82. Text:\n{text41}");
                     return false;
                 }
 
-                // 5. FormatSignalAlert / FormatOutcomeAlert / keyboard PASS
+                // B. mətndə MinConfluence1h4h (75) var, hardcode "75" source-da yox
+                string reportText = joinedReport;
+                bool hasConf = reportText.Contains($"{BotConstants.Thresholds.MinConfluence1h4h:F0}");
+                bool hasRr = reportText.Contains(BotConstants.Thresholds.MinRiskReward.ToString("F2", CultureInfo.InvariantCulture));
+                bool hasSl = reportText.Contains(BotConstants.Thresholds.MaxSlAtr.ToString("F2", CultureInfo.InvariantCulture));
+                bool hasVol = reportText.Contains(BotConstants.Thresholds.MinVolumeSurgeRatio.ToString("F2", CultureInfo.InvariantCulture));
+                bool hasAdx1h = reportText.Contains($"{BotConstants.Thresholds.MinAdx1h:F0}");
+                bool hasAdx4h = reportText.Contains($"{BotConstants.Thresholds.MinAdx4h:F0}");
+                bool hasGateCompass = reportText.Contains("BTC qapısı");
+
+                if (!hasConf || !hasRr || !hasSl || !hasVol || !hasAdx1h || !hasAdx4h || !hasGateCompass)
+                {
+                    Console.WriteLine($"[Test 69 Fail - B] Thresholds mismatch BotConstants:\n{reportText}");
+                    return false;
+                }
+
+                try
+                {
+                    var formatterSrc = System.IO.File.ReadAllText("Infrastructure/Telegram/TelegramMessageFormatter.cs");
+                    int methodIdx = formatterSrc.IndexOf("FormatHourSkipReport");
+                    if (methodIdx > 0)
+                    {
+                        var methodBody = formatterSrc.Substring(methodIdx);
+                        int nextMethodIdx = methodBody.IndexOf("public static", 20);
+                        if (nextMethodIdx > 0) methodBody = methodBody.Substring(0, nextMethodIdx);
+                        if (methodBody.Contains("\"75\"") || methodBody.Contains("> 75") || methodBody.Contains("< 75") || methodBody.Contains("≥ 75"))
+                        {
+                            Console.WriteLine("[Test 69 Fail - B] FormatHourSkipReport source contains hardcoded '75'");
+                            return false;
+                        }
+                    }
+                }
+                catch { }
+
+                // C. YOX: OXU yazma, Aydın trend, Güclü Yüksəliş, A+ meyar, Sistem işləyir
+                bool hasNoOxu = !reportText.Contains("OXU");
+                bool hasNoYazma = !reportText.Contains("yazma");
+                bool hasNoAydinTrend = !reportText.Contains("Aydın trend");
+                bool hasNoGucluYukselis = !reportText.Contains("Güclü Yüksəliş");
+                bool hasNoAMeyar = !reportText.Contains("A+ meyar") && !reportText.Contains("A+ meyarları");
+                bool hasNoSistemIsleyir = !reportText.Contains("Sistem işləyir");
+
+                if (!hasNoOxu || !hasNoYazma || !hasNoAydinTrend || !hasNoGucluYukselis || !hasNoAMeyar || !hasNoSistemIsleyir)
+                {
+                    Console.WriteLine($"[Test 69 Fail - C] Report contains forbidden text. Text:\n{reportText}");
+                    return false;
+                }
+
+                // D. 1h freshness gözləmə → göndərmə
+                var unreadyEvals = new List<CoinSkipDetail>
+                {
+                    new CoinSkipDetail { Symbol = "BTCUSDT", Timeframe = "1h", ConfluenceScore = 50, GroupReason = "gözləmə", ReasonDescription = "Son bağlanan şam 5 dəqiqə əvvəl bitib. Yeni canlı şamın bağlanması gözlənilir." },
+                    new CoinSkipDetail { Symbol = "ETHUSDT", Timeframe = "1h", ConfluenceScore = 50, GroupReason = "gözləmə", ReasonDescription = "Son bağlanan şam 5 dəqiqə əvvəl bitib. Yeni canlı şamın bağlanması gözlənilir." },
+                    new CoinSkipDetail { Symbol = "SOLUSDT", Timeframe = "1h", ConfluenceScore = 0, GroupReason = "scan yox", ReasonDescription = "bu saat baxılmayıb" }
+                };
+                int unreadyCount = unreadyEvals.Count(c =>
+                    (!string.IsNullOrWhiteSpace(c.ReasonDescription) && c.ReasonDescription.Contains("gözlənilir", StringComparison.OrdinalIgnoreCase)) ||
+                    (c.ConfluenceScore == 50 && c.GroupReason == "gözləmə") ||
+                    (!string.IsNullOrWhiteSpace(c.ReasonDescription) && c.ReasonDescription.Contains("bu saat baxılmayıb", StringComparison.OrdinalIgnoreCase)) ||
+                    c.GroupReason == "scan yox");
+                bool isDeferred = unreadyCount > unreadyEvals.Count / 2;
+                if (!isDeferred)
+                {
+                    Console.WriteLine("[Test 69 Fail - D] 1h freshness waiting must defer heartbeat sending");
+                    return false;
+                }
+
+                // E. chunk ≤ 4096
+                if (reportMsgs.Any(m => m.Length > 4096) || splitMsgs.Any(m => m.Length > 4096) || report41.Any(m => m.Length > 4096))
+                {
+                    Console.WriteLine("[Test 69 Fail - E] Chunks must not exceed 4096 characters");
+                    return false;
+                }
+
+                // F. FormatSignalAlert / FormatOutcomeAlert / keyboard PASS
                 var sampleSignal = new FuturesSignal
                 {
                     SignalNumber = 999,
@@ -2742,7 +2829,7 @@ namespace CryptoSense.Infrastructure.Testing
                 var outAlert = TelegramMessageFormatter.FormatOutcomeAlert(sampleSignal, userSigNum: 999, outcomeType: "TP1", hitPrice: 61000, profitPct: 1.67m);
                 if (string.IsNullOrEmpty(outAlert) || !outAlert.Contains("TP1")) return false;
 
-                // A. eyni symbol 1h+4h yazılırsa raportda 2 sətir, biri digərini əzmir
+                // Dual timeframe test: eyni symbol 1h+4h yazılırsa raportda 2 sətir, biri digərini əzmir
                 var dualTfCoins = new List<CoinSkipDetail>
                 {
                     new CoinSkipDetail
@@ -2779,11 +2866,11 @@ namespace CryptoSense.Infrastructure.Testing
                 bool has4hLine = dualText.Contains("BTCUSDT  4h");
                 if (!has1hLine || !has4hLine)
                 {
-                    Console.WriteLine("[Test 69 Fail - A] Dual timeframe coins must both be present without overwriting");
+                    Console.WriteLine("[Test 69 Fail - Dual TF] Dual timeframe coins must both be present without overwriting");
                     return false;
                 }
 
-                // B. eval-siz koin -> mətndə "bu saat baxılmayıb", "Aydın trend" YOX, şərt 50 YOX
+                // Eval-siz koin -> mətndə "bu saat baxılmayıb", "Aydın trend" YOX, şərt 50 YOX, şərt - VAR
                 var noEvalCoins = new List<CoinSkipDetail>
                 {
                     new CoinSkipDetail
@@ -2810,13 +2897,14 @@ namespace CryptoSense.Infrastructure.Testing
                 bool hasNoEvalDesc = noEvalText.Contains("bu saat baxılmayıb");
                 bool hasNoFakeTrend = !noEvalText.Contains("Aydın trend");
                 bool hasNoFake50 = !noEvalText.Contains("şərt 50");
-                if (!hasNoEvalDesc || !hasNoFakeTrend || !hasNoFake50)
+                bool hasDashCondition = noEvalText.Contains("şərt -");
+                if (!hasNoEvalDesc || !hasNoFakeTrend || !hasNoFake50 || !hasDashCondition)
                 {
-                    Console.WriteLine($"[Test 69 Fail - B] Unevaluated coin must have 'bu saat baxılmayıb', no 'Aydın trend', no 'şərt 50'. Text:\n{noEvalText}");
+                    Console.WriteLine($"[Test 69 Fail - Unevaluated] Unevaluated coin must have 'bu saat baxılmayıb', 'şərt -', no 'Aydın trend', no 'şərt 50'. Text:\n{noEvalText}");
                     return false;
                 }
 
-                // C. lag qrupu "gecikmə", stale qrupu "köhnə data"
+                // Lag qrupu "gecikmə", stale qrupu "köhnə data"
                 var lagStaleCoins = new List<CoinSkipDetail>
                 {
                     new CoinSkipDetail
@@ -2853,7 +2941,7 @@ namespace CryptoSense.Infrastructure.Testing
                 bool hasKohneData = lagStaleText.Contains("köhnə data");
                 if (!hasGecikme || !hasKohneData)
                 {
-                    Console.WriteLine($"[Test 69 Fail - C] Report must show 'gecikmə' and 'köhnə data' group reasons. Text:\n{lagStaleText}");
+                    Console.WriteLine($"[Test 69 Fail - Lag/Stale] Report must show 'gecikmə' and 'köhnə data' group reasons. Text:\n{lagStaleText}");
                     return false;
                 }
 

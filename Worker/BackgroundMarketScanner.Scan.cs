@@ -318,7 +318,7 @@ namespace CryptoSense.Worker
                                 bool hasBtcBounce = signal.AnalysisReasons != null && signal.AnalysisReasons.Any(r => r.Contains("SKIP_BTC_BOUNCE"));
                                 bool hasDirLock = signal.AnalysisReasons != null && signal.AnalysisReasons.Any(r => r.Contains("SKIP_DIR_LOCK"));
                                 bool hasBtcRange = signal.AnalysisReasons != null && signal.AnalysisReasons.Any(r => r.Contains("SKIP_BTC_RANGE") || r.Contains("SKIP_BTC_REGIME"));
-                                bool hasConfluence = signal.AnalysisReasons != null && signal.AnalysisReasons.Any(r => r.Contains("Confluence Filtri") || r.Contains("< 75.0%"));
+                                bool hasConfluence = signal.ConfluenceScore < BotConstants.Thresholds.MinConfluence1h4h || (signal.AnalysisReasons != null && signal.AnalysisReasons.Any(r => r.Contains("Confluence Filtri", StringComparison.OrdinalIgnoreCase)));
                                 bool hasVolume = signal.AnalysisReasons != null && signal.AnalysisReasons.Any(r => r.Contains("SKIP_VOLUME"));
                                 bool hasResidual = signal.AnalysisReasons != null && signal.AnalysisReasons.Any(r => r.Contains("SKIP_BTC_RESIDUAL"));
                                 bool hasEth = signal.AnalysisReasons != null && signal.AnalysisReasons.Any(r => r.Contains("ETH SuperTrend") || r.Contains("ETH 1h"));
@@ -398,65 +398,93 @@ namespace CryptoSense.Worker
                                     coinBias = "short meyl";
                                 }
 
+                                string realReason = "";
+                                if (signal.AnalysisReasons != null && signal.AnalysisReasons.Count > 0)
+                                {
+                                    realReason = signal.AnalysisReasons.FirstOrDefault(r =>
+                                        r.Contains("SKIP_") ||
+                                        r.Contains("Confluence Filtri") ||
+                                        r.Contains("gözlənilir") ||
+                                        r.Contains("Rejim Filtri") ||
+                                        r.Contains("SuperTrend") ||
+                                        r.Contains("S/R Filter")) ?? "";
+
+                                    if (string.IsNullOrWhiteSpace(realReason))
+                                    {
+                                        realReason = signal.AnalysisReasons.FirstOrDefault(r => 
+                                            !r.Contains("Güclü Yüksəliş", StringComparison.OrdinalIgnoreCase) && 
+                                            !r.Contains("Aydın trend", StringComparison.OrdinalIgnoreCase)) ?? "";
+                                    }
+                                }
+
+                                if (string.IsNullOrWhiteSpace(realReason))
+                                {
+                                    if (hasConfluence)
+                                    {
+                                        realReason = $"şərt {signal.ConfluenceScore:F0} < {BotConstants.Thresholds.MinConfluence1h4h:F0}";
+                                    }
+                                    else if (hasVolume)
+                                    {
+                                        realReason = $"həcm < {BotConstants.Thresholds.MinVolumeSurgeRatio.ToString("F2", System.Globalization.CultureInfo.InvariantCulture)}";
+                                    }
+                                    else
+                                    {
+                                        realReason = "bu saat baxılmayıb";
+                                    }
+                                }
+
+                                if (realReason.Contains("Aydın trend", StringComparison.OrdinalIgnoreCase) || 
+                                    realReason.Contains("Güclü Yüksəliş", StringComparison.OrdinalIgnoreCase))
+                                {
+                                    realReason = "bu saat baxılmayıb";
+                                }
+
                                 string coinGroup = "gözləmə";
-                                string coinDetail = skipReason;
+                                string coinDetail = realReason;
 
                                 if (hasBtcGate)
                                 {
                                     coinGroup = "qapı";
-                                    coinDetail = "BTC 1h/4h qapısı əks istiqamətdədir";
                                 }
                                 else if (hasStaleTrend)
                                 {
                                     coinGroup = "satış st";
-                                    coinDetail = "SuperTrend trendi köhnəlib (stale trend)";
                                 }
                                 else if (hasBtcBounce)
                                 {
                                     coinGroup = "qapı";
-                                    coinDetail = "BTC kəskin əks dalğalanma (bounce) verir";
                                 }
                                 else if (hasDirLock)
                                 {
                                     coinGroup = "circuit breaker";
-                                    coinDetail = "İstiqamət kilidi (direction lock) aktivdir";
                                 }
                                 else if (hasBtcRange)
                                 {
                                     coinGroup = "range";
-                                    coinDetail = "BTC yan hərəkətdədir (range rejimi)";
                                 }
                                 else if (hasConfluence)
                                 {
                                     coinGroup = "güc/şərt";
-                                    coinDetail = $"Confluence {signal.ConfluenceScore:F1}% < {BotConstants.Thresholds.MinConfluence1h4h:F0}% minimum tələb";
                                 }
                                 else if (hasVolume)
                                 {
                                     coinGroup = "həcm";
-                                    coinDetail = $"Həcm yetərsizdir (Vol < {BotConstants.Thresholds.MinVolumeSurgeRatio:F2})";
                                 }
                                 else if (hasSL)
                                 {
                                     coinGroup = "SL";
-                                    coinDetail = "Stop Loss çox genişdir və ya swing tapılmadı";
                                 }
                                 else if (hasRR)
                                 {
                                     coinGroup = "R:R";
-                                    coinDetail = $"R:R < {BotConstants.Thresholds.MinRiskReward.ToString("F2", System.Globalization.CultureInfo.InvariantCulture)} minimum risk:mükafat nisbəti ödənmir";
                                 }
                                 else if (hasChase)
                                 {
                                     coinGroup = "chase";
-                                    coinDetail = "Qiymət artıq çox uzaqlaşıb (chase qadağası)";
                                 }
                                 else
                                 {
                                     coinGroup = "gözləmə";
-                                    coinDetail = (signal.AnalysisReasons != null && signal.AnalysisReasons.Count > 0)
-                                        ? signal.AnalysisReasons[0]
-                                        : "Aydın trend və giriş təsdiqi yoxdur";
                                 }
 
                                 _latestCoinEvaluations[$"{sym}|{tf}"] = new CoinSkipDetail

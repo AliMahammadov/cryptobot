@@ -136,6 +136,22 @@ namespace CryptoSense.Worker
                     }
                 }
 
+                var oneHourEvals = coinSkipList.Where(c => c.Timeframe == "1h").ToList();
+                if (oneHourEvals.Count > 0)
+                {
+                    int unreadyCount = oneHourEvals.Count(c =>
+                        (!string.IsNullOrWhiteSpace(c.ReasonDescription) && c.ReasonDescription.Contains("gözlənilir", StringComparison.OrdinalIgnoreCase)) ||
+                        (c.ConfluenceScore == 50 && c.GroupReason == "gözləmə") ||
+                        (!string.IsNullOrWhiteSpace(c.ReasonDescription) && c.ReasonDescription.Contains("bu saat baxılmayıb", StringComparison.OrdinalIgnoreCase)) ||
+                        c.GroupReason == "scan yox");
+
+                    if (unreadyCount > oneHourEvals.Count / 2)
+                    {
+                        Console.WriteLine($"[MarketScanner] Hourly heartbeat deferred: {unreadyCount}/{oneHourEvals.Count} 1h evals unready ('şam gözlənilir' or dummy 50)");
+                        continue;
+                    }
+                }
+
                 var tfDisplay = (s.Timeframe == "4h") ? "4h" : (s.Timeframe == "1h" ? "1h" : "1h, 4h");
 
                 BtcMarketCompass? compass = null;
@@ -150,8 +166,8 @@ namespace CryptoSense.Worker
                 var reportMsgs = TelegramMessageFormatter.FormatHourSkipReport(
                     candleCloseUtc: nowUtc,
                     timeframe: tfDisplay,
-                    baseCoinsCount: TelegramBotService.Default40Coins.Count * targetTfs.Length,
-                    userExtraCoinsCount: extraUserCoinsCount * targetTfs.Length,
+                    baseCoinsCount: TelegramBotService.Default40Coins.Count,
+                    userExtraCoinsCount: extraUserCoinsCount,
                     compass: compass,
                     coins: coinSkipList,
                     telemetry: snapTelemetry,
