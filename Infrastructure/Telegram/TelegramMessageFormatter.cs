@@ -942,22 +942,6 @@ namespace CryptoSense.Infrastructure.Telegram
             var timeStr = bakuTime.ToString("HH:mm");
             var tfDisplay = string.IsNullOrWhiteSpace(timeframe) ? "1h" : timeframe;
 
-            // Live BTC Compass & Gate status
-            string regime = compass != null ? (compass.Regime switch
-            {
-                BtcMarketRegime.Bullish => "bull",
-                BtcMarketRegime.Bearish => "bear",
-                BtcMarketRegime.Ranging => "range",
-                _ => "neytral"
-            }) : "neytral";
-
-            string stStr = (compass != null && compass.IsSuperTrendBullish) ? "bull" : "bear";
-
-            bool isGateOpen = compass != null && compass.Regime != BtcMarketRegime.Ranging &&
-                ((compass.Regime == BtcMarketRegime.Bullish && compass.IsSuperTrendBullish) ||
-                 (compass.Regime == BtcMarketRegime.Bearish && !compass.IsSuperTrendBullish));
-            string gateStr = isGateOpen ? "açıq" : "bağlı";
-
             // Thresholds interpolated strictly from BotConstants.Thresholds (ZERO hardcoded numbers)
             var minConfStr = BotConstants.Thresholds.MinConfluence1h4h.ToString("F0", CultureInfo.InvariantCulture);
             var minRrStr = BotConstants.Thresholds.MinRiskReward.ToString("F2", CultureInfo.InvariantCulture);
@@ -966,79 +950,82 @@ namespace CryptoSense.Infrastructure.Telegram
             var minAdx1hStr = BotConstants.Thresholds.MinAdx1h.ToString("F0", CultureInfo.InvariantCulture);
             var minAdx4hStr = BotConstants.Thresholds.MinAdx4h.ToString("F0", CultureInfo.InvariantCulture);
 
-            // BTC 1h and 4h coin skip evaluations if present
-            var btc1h = coinList.FirstOrDefault(c => c.Symbol.Equals("BTCUSDT", StringComparison.OrdinalIgnoreCase) && c.Timeframe == "1h");
-            var btc4h = coinList.FirstOrDefault(c => c.Symbol.Equals("BTCUSDT", StringComparison.OrdinalIgnoreCase) && c.Timeframe == "4h");
+            // Live BTC Compass & Gate status
+            string btc1hSt = (compass != null && compass.IsSuperTrendBullish) ? "long" : "short";
+            string btc4hSt = (compass != null && compass.IsBtc4hSuperTrendBullish) ? "long" : "short";
 
-            string btc1hScore = (btc1h != null && btc1h.ConfluenceScore > 0) ? btc1h.ConfluenceScore.ToString() : "-";
-            string btc1hBias = !string.IsNullOrWhiteSpace(btc1h?.Bias)
-                ? btc1h.Bias
-                : (compass != null ? (compass.IsSuperTrendBullish ? "long meyl" : "short meyl") : "neytral");
+            string regime = compass != null ? (compass.Regime switch
+            {
+                BtcMarketRegime.Bullish => "bull",
+                BtcMarketRegime.Bearish => "bear",
+                BtcMarketRegime.Ranging => "range",
+                _ => "range"
+            }) : "range";
 
-            string btc4hScore = (btc4h != null && btc4h.ConfluenceScore > 0) ? btc4h.ConfluenceScore.ToString() : "-";
-            string btc4hBias = !string.IsNullOrWhiteSpace(btc4h?.Bias)
-                ? btc4h.Bias
-                : (compass != null ? (compass.IsBtc4hSuperTrendBullish ? "long meyl" : "short meyl") : "neytral");
+            bool isGateOpen = compass != null && compass.Regime != BtcMarketRegime.Ranging &&
+                ((compass.Regime == BtcMarketRegime.Bullish && compass.IsSuperTrendBullish) ||
+                 (compass.Regime == BtcMarketRegime.Bearish && !compass.IsSuperTrendBullish));
+            string gateStr = isGateOpen ? "açıq" : "bağlı";
 
-            // Groups: count unique coins per group
-            var groupDict = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
+            string domPart = (compass != null && compass.BtcDominance > 0m)
+                ? $"  |  D {compass.BtcDominance.ToString("F1", CultureInfo.InvariantCulture)}"
+                : "";
+
+            string btcLine = $"BTC  1h {btc1hSt}  |  4h {btc4hSt}  |  {regime}{domPart}  |  qapı {gateStr}";
+
+            // Groups: count unique coins per cut kind
+            var cutDict = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
             foreach (var c in coinList)
             {
-                var grp = string.IsNullOrWhiteSpace(c.GroupReason) ? "scan yox" : c.GroupReason.Trim();
-                if (!groupDict.TryGetValue(grp, out var set))
+                var kind = c.ResolveEffectiveKind();
+                if (string.IsNullOrWhiteSpace(kind) || kind == "-" || kind == "scan" || kind == "gözləmə")
+                    continue;
+
+                if (!cutDict.TryGetValue(kind, out var set))
                 {
                     set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                    groupDict[grp] = set;
+                    cutDict[kind] = set;
                 }
                 set.Add(c.Symbol);
             }
 
-            var groupSb = new StringBuilder();
-            foreach (var kvp in groupDict.OrderByDescending(k => k.Value.Count).ThenBy(k => k.Key))
-            {
-                groupSb.AppendLine($"{kvp.Key,-16} {kvp.Value.Count}");
-            }
+            var cutParts = cutDict
+                .OrderByDescending(k => k.Value.Count)
+                .ThenBy(k => k.Key)
+                .Select(k => $"{k.Key} {k.Value.Count}");
+            string cutSummary = string.Join("  ", cutParts);
+            string kesenLine = string.IsNullOrEmpty(cutSummary) ? "kəsən  -" : $"kəsən  {cutSummary}";
 
             // Message 1 (Header / Macro card)
             var p1Body = new StringBuilder();
-            p1Body.AppendLine($"saat  {timeStr}  bakı  |  {tfDisplay} bağlandı");
-            p1Body.AppendLine("siqnal üçün");
-            p1Body.AppendLine($"şərt ≥ {minConfStr}     R:R ≥ {minRrStr}     SL ≤ {maxSlStr} ATR");
-            p1Body.AppendLine($"həcm ≥ {minVolStr}   ADX ≥ {minAdx1hStr} (1h) / {minAdx4hStr} (4h)");
-            p1Body.AppendLine($"BTC qapısı {gateStr}  ({regime}, ST {stStr})");
-            p1Body.AppendLine();
-            p1Body.AppendLine($"yeni  {newSignalsCount}");
-            p1Body.AppendLine($"koin  {totalUnique}  ({baseCount} + {extraCount})");
-            p1Body.AppendLine($"BTC   1h {btc1hScore} {btc1hBias}  |  4h {btc4hScore} {btc4hBias}  |  {regime}");
-            p1Body.AppendLine();
-            p1Body.AppendLine("kəsən");
-            p1Body.Append(groupSb);
+            p1Body.AppendLine($"saat  {timeStr}  bakı  |  {tfDisplay}");
+            p1Body.AppendLine($"şərt≥{minConfStr}  R:R≥{minRrStr}  SL≤{maxSlStr}  həcm≥{minVolStr}  ADX≥{minAdx1hStr}/{minAdx4hStr}");
+            p1Body.AppendLine(btcLine);
+            p1Body.AppendLine($"yeni {newSignalsCount}   koin {totalUnique} ({baseCount}+{extraCount})");
+            p1Body.AppendLine(kesenLine);
 
-            // Message 2..n (Coin lines)
+            // Message 2..n (Coin cuts)
             var coinLines = new List<string>();
             foreach (var c in coinList)
             {
-                var cTf = string.IsNullOrWhiteSpace(c.Timeframe) ? tfDisplay : c.Timeframe;
-                var bias = string.IsNullOrWhiteSpace(c.Bias) ? "neytral" : c.Bias;
-                string scoreStr = c.ConfluenceScore > 0 ? $"şərt {c.ConfluenceScore}" : "şərt -";
-                string reason = string.IsNullOrWhiteSpace(c.ReasonDescription) ? "bu saat baxılmayıb" : c.ReasonDescription;
-
-                if (c.GroupReason == "scan yox" || c.ConfluenceScore <= 0)
+                string cutDisplay = c.GetCutDisplay();
+                if (cutDisplay == "gözləmə")
                 {
-                    if (reason.Contains("Aydın trend") || reason.Contains("Güclü Yüksəliş"))
-                    {
-                        reason = "bu saat baxılmayıb";
-                    }
+                    continue; // Gözləmə (freshness) → bu tf-i LİSTƏ SALMA
                 }
 
-                // Sanitize any forbidden phrases
-                reason = reason.Replace("Aydın trend və giriş təsdiqi yoxdur", "bu saat baxılmayıb")
-                               .Replace("Güclü Yüksəliş", "bu saat baxılmayıb")
-                               .Replace("BotConstants OXU, yazma", "")
-                               .Replace("Sistem işləyir", "")
-                               .Replace("A+ meyarları", "");
+                var cTf = string.IsNullOrWhiteSpace(c.Timeframe) ? tfDisplay : c.Timeframe;
+                string sym = c.Symbol ?? "";
+                if (sym.EndsWith("USDT", StringComparison.OrdinalIgnoreCase))
+                {
+                    sym = sym.Substring(0, sym.Length - 4);
+                }
+                else if (sym.EndsWith("BUSD", StringComparison.OrdinalIgnoreCase))
+                {
+                    sym = sym.Substring(0, sym.Length - 4);
+                }
 
-                coinLines.Add($"{c.Symbol}  {cTf}  {bias}  {scoreStr}   {reason}");
+                coinLines.Add($"{sym,-4}  {cTf}  {cutDisplay}");
             }
 
             if (coinLines.Count == 0)
@@ -1094,5 +1081,95 @@ namespace CryptoSense.Infrastructure.Telegram
         public int ConfluenceScore { get; set; } = 0;
         public string GroupReason { get; set; } = "scan yox";
         public string ReasonDescription { get; set; } = "bu saat baxılmayıb";
+
+        public string CutKind { get; set; } = "-"; // "şərt" | "həcm" | "adx" | "rr" | "sl" | "range" | "qapı" | "cb" | "scan" | "gözləmə"
+        public decimal? CutLeft { get; set; }
+        public decimal? CutRight { get; set; }
+        public string? CutOp { get; set; }
+
+        public string GetCutDisplay()
+        {
+            string kind = ResolveEffectiveKind();
+
+            if (kind == "gözləmə")
+                return "gözləmə";
+
+            if (CutLeft.HasValue && CutRight.HasValue && !string.IsNullOrEmpty(CutOp))
+            {
+                string lStr;
+                string rStr;
+                if (kind == "şərt")
+                {
+                    lStr = CutLeft.Value.ToString("F0", CultureInfo.InvariantCulture);
+                    rStr = CutRight.Value.ToString("F0", CultureInfo.InvariantCulture);
+                }
+                else if (kind == "adx")
+                {
+                    lStr = CutLeft.Value.ToString("0.#", CultureInfo.InvariantCulture);
+                    rStr = CutRight.Value.ToString("F0", CultureInfo.InvariantCulture);
+                }
+                else if (kind == "sl")
+                {
+                    lStr = CutLeft.Value.ToString("0.##", CultureInfo.InvariantCulture);
+                    rStr = CutRight.Value.ToString("F2", CultureInfo.InvariantCulture);
+                }
+                else if (kind == "rr")
+                {
+                    lStr = CutLeft.Value.ToString("0.##", CultureInfo.InvariantCulture);
+                    rStr = CutRight.Value.ToString("F2", CultureInfo.InvariantCulture);
+                }
+                else if (kind == "həcm")
+                {
+                    lStr = CutLeft.Value.ToString("0.##", CultureInfo.InvariantCulture);
+                    rStr = CutRight.Value.ToString("F2", CultureInfo.InvariantCulture);
+                }
+                else
+                {
+                    lStr = CutLeft.Value.ToString("0.##", CultureInfo.InvariantCulture);
+                    rStr = CutRight.Value.ToString("0.##", CultureInfo.InvariantCulture);
+                }
+                return $"{lStr}{CutOp}{rStr}";
+            }
+
+            if (kind == "scan" || kind == "-" || string.IsNullOrWhiteSpace(kind))
+                return "-";
+
+            return kind;
+        }
+
+        public string ResolveEffectiveKind()
+        {
+            if (!string.IsNullOrWhiteSpace(CutKind) && CutKind != "-")
+                return CutKind;
+
+            if (GroupReason == "gözləmə" || (!string.IsNullOrWhiteSpace(ReasonDescription) && ReasonDescription.Contains("gözlənilir")))
+                return "gözləmə";
+
+            if (GroupReason == "range")
+                return "range";
+
+            if (GroupReason == "qapı" || GroupReason == "satış st")
+                return "qapı";
+
+            if (GroupReason == "circuit breaker" || GroupReason == "açıq mövqe" || GroupReason == "itki limiti")
+                return "cb";
+
+            if (GroupReason == "həcm")
+                return "həcm";
+
+            if (GroupReason == "adx")
+                return "adx";
+
+            if (GroupReason == "SL")
+                return "sl";
+
+            if (GroupReason == "R:R")
+                return "rr";
+
+            if (GroupReason == "güc/şərt" || ConfluenceScore > 0)
+                return "şərt";
+
+            return "-";
+        }
     }
 }
