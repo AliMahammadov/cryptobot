@@ -63,6 +63,8 @@ namespace CryptoSense.Worker
         private static readonly ConcurrentDictionary<string, DateTime> _lastPriceUpdateHandled = new();
         // Overfilter diaqnostika: coin+tf → (confluence%, skipReason)
         private static readonly ConcurrentDictionary<string, (double Confluence, string SkipReason)> _overfilterDiag = new();
+        private static readonly ConcurrentDictionary<string, CoinSkipDetail> _latestCoinEvaluations = new();
+        public static IReadOnlyDictionary<string, CoinSkipDetail> LatestCoinEvaluations => _latestCoinEvaluations;
 
         private static readonly ScanTelemetry _hourlyTelemetry = new();
         public static ScanTelemetry LatestTelemetrySnapshot { get; private set; } = new();
@@ -79,6 +81,7 @@ namespace CryptoSense.Worker
             _signalOutcomeSemaphores.Clear();
             _sentOutcomeDeduplication.Clear();
             _lastPriceUpdateHandled.Clear();
+            _latestCoinEvaluations.Clear();
         }
 
         public static void ResetSignalCounter()

@@ -1,7 +1,11 @@
 using System;
+using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
+using CryptoSense.Application.Interfaces;
+using CryptoSense.Domain.Entities;
 using CryptoSense.Infrastructure.Telegram;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace CryptoSense.Worker
 {
@@ -48,31 +52,95 @@ namespace CryptoSense.Worker
                 }
 
                 var snapTelemetry = LatestTelemetrySnapshot ?? new ScanTelemetry();
-                int activeLocksCount = _coinActiveLocks.Count;
-                var btcSnapHb = _livePriceCache.GetSnapshot("BTCUSDT");
-                var heartbeatMsg = TelegramMessageFormatter.FormatLiveHeartbeat(
-                    chase: snapTelemetry.SkipChase,
-                    corr: snapTelemetry.SkipCorr,
-                    slWide: snapTelemetry.SkipSL,
-                    lowRr: snapTelemetry.SkipRR,
-                    activeLocks: activeLocksCount,
-                    sent: snapTelemetry.Sent,
-                    nextCheckMinutes: 60,
-                    dataAgeMsBtc: btcSnapHb?.DataAgeMs ?? -1,
-                    skipStale: snapTelemetry.SkipStale,
-                    skipLag: snapTelemetry.SkipLag,
-                    skipConfluence: snapTelemetry.SkipConfluence,
-                    telegramFail: snapTelemetry.TelegramFail,
-                    skipGozleme: snapTelemetry.SkipGozleme,
-                    skipBtcGate: snapTelemetry.SkipBtcGate,
-                    skipBtcRange: snapTelemetry.SkipBtcRange,
-                    skipCircuitBreaker: snapTelemetry.SkipCircuitBreaker,
-                    skipMaxOpen: snapTelemetry.SkipMaxOpen,
-                    skipDailyLoss: snapTelemetry.SkipDailyLoss,
-                    maxConfluenceSeen: snapTelemetry.MaxConfluenceSeen,
-                    skipStaleTrend: snapTelemetry.SkipStaleTrend,
-                    skipBtcBounce: snapTelemetry.SkipBtcBounce,
-                    skipDirLock: snapTelemetry.SkipDirLock);
+
+                // Bu saatda ən azı 1 yeni siqnal gedibsə bu raport GÖNDƏRİLMƏSİN (siqnal kartı kifayətdir)
+                if (snapTelemetry.Sent > 0)
+                {
+                    lock (_heartbeatLock)
+                    {
+                        s.LastHeartbeatSentUtc = DateTime.UtcNow;
+                        TelegramBotService.SaveSettings();
+                    }
+                    continue;
+                }
+
+                // Koin dəsti = o istifadəçinin/kanalın aktiv siyahısı (40 baza + əlavə seçilənlər). Hamısı. Heç birini atma.
+                var monitoredCoins = new List<string>();
+                foreach (var c in TelegramBotService.Default40Coins)
+                {
+                    monitoredCoins.Add(c);
+                }
+
+                int extraUserCoinsCount = 0;
+                if (s.CustomCoins != null)
+                {
+                    foreach (var c in s.CustomCoins)
+                    {
+                        var norm = c.EndsWith("USDT", StringComparison.OrdinalIgnoreCase) ? c.ToUpperInvariant() : c.ToUpperInvariant() + "USDT";
+                        if (!monitoredCoins.Contains(norm))
+                        {
+                            monitoredCoins.Add(norm);
+                            extraUserCoinsCount++;
+                        }
+                    }
+                }
+                if (s.Coins != null)
+                {
+                    foreach (var c in s.Coins)
+                    {
+                        var norm = c.EndsWith("USDT", StringComparison.OrdinalIgnoreCase) ? c.ToUpperInvariant() : c.ToUpperInvariant() + "USDT";
+                        if (!monitoredCoins.Contains(norm))
+                        {
+                            monitoredCoins.Add(norm);
+                            extraUserCoinsCount++;
+                        }
+                    }
+                }
+
+                var coinSkipList = new List<CoinSkipDetail>();
+                string userTf = s.Timeframe == "4h" ? "4h" : "1h";
+                foreach (var sym in monitoredCoins)
+                {
+                    if (_latestCoinEvaluations.TryGetValue(sym, out var eval))
+                    {
+                        coinSkipList.Add(eval);
+                    }
+                    else
+                    {
+                        coinSkipList.Add(new CoinSkipDetail
+                        {
+                            Symbol = sym,
+                            Timeframe = userTf,
+                            Bias = "neytral",
+                            ConfluenceScore = 50,
+                            GroupReason = "gözləmə",
+                            ReasonDescription = "Aydın trend və giriş təsdiqi yoxdur"
+                        });
+                    }
+                }
+
+                var tfDisplay = (s.Timeframe == "4h") ? "4h" : ((nowUtc.Hour % 4 == 0) ? "1h, 4h" : "1h");
+
+                BtcMarketCompass? compass = null;
+                try
+                {
+                    using var scope = _serviceProvider.CreateScope();
+                    var sigEngine = scope.ServiceProvider.GetRequiredService<ISignalEngine>();
+                    compass = await sigEngine.GetBtcCompassAsync();
+                }
+                catch { }
+
+                var reportMsgs = TelegramMessageFormatter.FormatHourSkipReport(
+                    candleCloseUtc: nowUtc,
+                    timeframe: tfDisplay,
+                    baseCoinsCount: TelegramBotService.Default40Coins.Count,
+                    userExtraCoinsCount: extraUserCoinsCount,
+                    compass: compass,
+                    coins: coinSkipList,
+                    telemetry: snapTelemetry,
+                    newSignalsCount: snapTelemetry.Sent);
+
+                if (reportMsgs.Count == 0) continue;
 
                 if (s.LastHeartbeatMessageId.HasValue)
                 {
@@ -83,18 +151,27 @@ namespace CryptoSense.Worker
                     catch { /* Köhnə mesaj silinə bilməsə belə yeni mesaj mütləq getməlidir */ }
                 }
 
-                var newMsgId = await _telegramService.SendMessageReturnIdAsync(heartbeatMsg, chatId);
-                if (newMsgId.HasValue)
+                long? lastMsgId = null;
+                foreach (var msgPart in reportMsgs)
+                {
+                    var newMsgId = await _telegramService.SendMessageReturnIdAsync(msgPart, chatId);
+                    if (newMsgId.HasValue)
+                    {
+                        lastMsgId = newMsgId;
+                    }
+
+                    var effectiveUsername = _telegramService.GetEffectiveUsername(chatId, s.Username);
+                    _ = _telegramService.MirrorToChannelIfUserbotAsync(effectiveUsername, chatId, msgPart);
+                }
+
+                if (lastMsgId.HasValue)
                 {
                     lock (_heartbeatLock)
                     {
                         s.LastHeartbeatSentUtc = DateTime.UtcNow;
-                        s.LastHeartbeatMessageId = newMsgId;
+                        s.LastHeartbeatMessageId = lastMsgId;
                         TelegramBotService.SaveSettings();
                     }
-
-                    var effectiveUsername = _telegramService.GetEffectiveUsername(chatId, s.Username);
-                    _ = _telegramService.MirrorToChannelIfUserbotAsync(effectiveUsername, chatId, heartbeatMsg);
                 }
             }
         }

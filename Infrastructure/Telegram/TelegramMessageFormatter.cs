@@ -891,5 +891,205 @@ namespace CryptoSense.Infrastructure.Telegram
             sb.AppendLine("-----------------------------------");
             return sb.ToString();
         }
+
+        public static List<string> FormatHourSkipReport(
+            DateTime candleCloseUtc,
+            string timeframe,
+            int baseCoinsCount,
+            int userExtraCoinsCount,
+            BtcMarketCompass? compass,
+            List<CoinSkipDetail> coins,
+            ScanTelemetry? telemetry,
+            int newSignalsCount = 0)
+        {
+            // Bu saatda ən azı 1 yeni siqnal gedibsə bu raport GÖNDƏRİLMƏSİN (siqnal kartı kifayətdir)
+            if (newSignalsCount > 0)
+            {
+                return new List<string>();
+            }
+
+            var coinList = coins ?? new List<CoinSkipDetail>();
+            var totalCoins = coinList.Count;
+            var baseCount = baseCoinsCount > 0 ? baseCoinsCount : (totalCoins - userExtraCoinsCount);
+            if (baseCount < 0) baseCount = 0;
+            var extraCount = userExtraCoinsCount >= 0 ? userExtraCoinsCount : Math.Max(0, totalCoins - baseCount);
+            if (baseCount + extraCount != totalCoins && totalCoins > 0)
+            {
+                baseCount = Math.Min(totalCoins, baseCount);
+                extraCount = totalCoins - baseCount;
+            }
+
+            var bakuTime = (candleCloseUtc != default && candleCloseUtc != DateTime.MinValue)
+                ? candleCloseUtc.ToAzerbaijanTime()
+                : TimeHelper.NowAz;
+            var timeStr = bakuTime.ToString("HH:mm");
+            var tfDisplay = string.IsNullOrWhiteSpace(timeframe) ? "1h" : timeframe;
+
+            // 1. Başlıq
+            var headerSb = new StringBuilder();
+            headerSb.AppendLine($"saat  {timeStr}  bakı  |  {tfDisplay} bağlandı");
+            headerSb.AppendLine("yeni siqnal  0");
+            headerSb.AppendLine($"baxılan      {totalCoins} koin  ({baseCount} baza + {extraCount} sənin)");
+
+            // 2. Ümumi
+            var regimeStr = compass != null ? compass.Regime.ToString() : "Neytral";
+            var stStr = (compass != null && compass.IsSuperTrendBullish) ? "bull" : "bear";
+            var bosStr = (compass != null && compass.HasHigherHighsHigherLows)
+                ? "up"
+                : ((compass != null && compass.HasLowerHighsLowerLows) ? "down" : "—");
+            var gateStr = (compass != null && (compass.Regime == BtcMarketRegime.Bearish || !compass.IsSuperTrendBullish))
+                ? "BTC qapısı ayı rejimindədir (Long məhdudlaşdırılıb)."
+                : "BTC 1h/4h qapısı açıqdır.";
+
+            var summarySb = new StringBuilder();
+            summarySb.AppendLine("ümumi");
+            summarySb.AppendLine($"BTC {regimeStr} (ST {stStr}, BOS {bosStr}). {gateStr}");
+            summarySb.AppendLine("Sistem işləyir — şamı oxudu, süzdü, kəsdi.");
+            summarySb.AppendLine("Baxılan koinlərin heç biri A+ siqnal meyarlarını tam ödəmədiyi üçün bu saat yeni mövqe açılmadı.");
+
+            // 3. Niyə (qrup)
+            var groupDict = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            foreach (var c in coinList)
+            {
+                var grp = string.IsNullOrWhiteSpace(c.GroupReason) ? "gözləmə" : c.GroupReason.Trim();
+                if (groupDict.TryGetValue(grp, out var cnt))
+                {
+                    groupDict[grp] = cnt + 1;
+                }
+                else
+                {
+                    groupDict[grp] = 1;
+                }
+            }
+
+            var groupSb = new StringBuilder();
+            groupSb.AppendLine("niyə (qrup)");
+            foreach (var kvp in groupDict.OrderByDescending(k => k.Value).ThenBy(k => k.Key))
+            {
+                groupSb.AppendLine($"{kvp.Key,-16} {kvp.Value}");
+            }
+
+            // 4. Koinlər
+            var coinsSb = new StringBuilder();
+            coinsSb.AppendLine("koinlər");
+            foreach (var c in coinList)
+            {
+                var cTf = string.IsNullOrWhiteSpace(c.Timeframe) ? tfDisplay : c.Timeframe;
+                var bias = string.IsNullOrWhiteSpace(c.Bias) ? "neytral" : c.Bias;
+                var reason = string.IsNullOrWhiteSpace(c.ReasonDescription) ? "Giriş şərtləri ödənmədi" : c.ReasonDescription;
+                coinsSb.AppendLine($"{c.Symbol}  {cTf}  {bias}  şərt {c.ConfluenceScore}");
+                coinsSb.AppendLine($"      {reason}");
+            }
+
+            // 5. Standart
+            var standartSb = new StringBuilder();
+            standartSb.AppendLine("standart  (siqnal üçün — BotConstants OXU, yazma)");
+            standartSb.AppendLine($"şərt / güc min     {BotConstants.Thresholds.MinConfluence1h4h}%");
+            standartSb.AppendLine($"R:R min            {BotConstants.Thresholds.MinRiskReward.ToString("F2", CultureInfo.InvariantCulture)}");
+            standartSb.AppendLine($"SL max             {BotConstants.Thresholds.MaxSlAtr.ToString("F2", CultureInfo.InvariantCulture)} * ATR");
+            standartSb.AppendLine("spread max         sistem limiti");
+            standartSb.AppendLine("BTC qapısı         1h/4h rejim təsdiqi");
+            standartSb.AppendLine("confirm            SuperTrend + Həcm + Şam");
+            standartSb.AppendLine("TP bölgü           40 / 30 / 30 trail");
+
+            // 6. Bu saat
+            var sent = telemetry?.Sent ?? 0;
+            var cache = telemetry?.SkipStale ?? 0;
+            var range = telemetry?.SkipBtcRange ?? 0;
+            var satishSt = telemetry?.SkipStaleTrend ?? 0;
+            var xeta = telemetry?.TelegramFail ?? 0;
+            var gozleme = telemetry?.SkipGozleme ?? 0;
+
+            var buSaatSb = new StringBuilder();
+            buSaatSb.AppendLine("bu saat  (mövcud nəfəs sayğacı, eyni rəqəmlər)");
+            buSaatSb.AppendLine($"göndərildi  {sent}");
+            buSaatSb.AppendLine($"cache       {cache}");
+            buSaatSb.AppendLine($"range       {range}");
+            buSaatSb.AppendLine($"satış st    {satishSt}");
+            buSaatSb.AppendLine($"xəta        {xeta}");
+            buSaatSb.AppendLine($"gözləmə     {gozleme}");
+
+            // Tək mesaj yoxlaması
+            var singleSb = new StringBuilder();
+            singleSb.Append(headerSb);
+            singleSb.AppendLine();
+            singleSb.Append(summarySb);
+            singleSb.AppendLine();
+            singleSb.Append(groupSb);
+            singleSb.AppendLine();
+            singleSb.Append(coinsSb);
+            singleSb.AppendLine();
+            singleSb.Append(standartSb);
+            singleSb.AppendLine();
+            singleSb.Append(buSaatSb);
+
+            var singleText = singleSb.ToString().TrimEnd();
+            if (singleText.Length <= 4096)
+            {
+                return new List<string> { singleText };
+            }
+
+            // 4096-dan böyükdürsə 2 mesaj:
+            // 1/2 = başlıq + ümumi + qrup + standart + bu saat
+            // 2/2 = koin sətirləri
+            var p1Sb = new StringBuilder();
+            p1Sb.AppendLine("[1/2]");
+            p1Sb.Append(headerSb);
+            p1Sb.AppendLine();
+            p1Sb.Append(summarySb);
+            p1Sb.AppendLine();
+            p1Sb.Append(groupSb);
+            p1Sb.AppendLine();
+            p1Sb.Append(standartSb);
+            p1Sb.AppendLine();
+            p1Sb.Append(buSaatSb);
+
+            var p2Sb = new StringBuilder();
+            p2Sb.AppendLine("[2/2]");
+            p2Sb.Append(coinsSb);
+
+            var part1 = p1Sb.ToString().TrimEnd();
+            var part2 = p2Sb.ToString().TrimEnd();
+
+            // Əgər koinlər siyahısı da 4096-dan böyük olarsa (çoxsaylı koinlər), söz ortasından kəsilmədən sətir-sətir böl
+            var result = new List<string> { part1 };
+            if (part2.Length <= 4096)
+            {
+                result.Add(part2);
+            }
+            else
+            {
+                var lines = part2.Split(new[] { "\r\n", "\n" }, StringSplitOptions.None);
+                var currentChunk = new StringBuilder();
+                foreach (var line in lines)
+                {
+                    if (currentChunk.Length + line.Length + 2 > 4096)
+                    {
+                        if (currentChunk.Length > 0)
+                        {
+                            result.Add(currentChunk.ToString().TrimEnd());
+                            currentChunk.Clear();
+                        }
+                    }
+                    currentChunk.AppendLine(line);
+                }
+                if (currentChunk.Length > 0)
+                {
+                    result.Add(currentChunk.ToString().TrimEnd());
+                }
+            }
+
+            return result;
+        }
+    }
+
+    public class CoinSkipDetail
+    {
+        public string Symbol { get; set; } = "";
+        public string Timeframe { get; set; } = "1h";
+        public string Bias { get; set; } = "neytral"; // "long meyl", "short meyl", "neytral", "chop"
+        public int ConfluenceScore { get; set; } = 50;
+        public string GroupReason { get; set; } = "güc/şərt";
+        public string ReasonDescription { get; set; } = "";
     }
 }

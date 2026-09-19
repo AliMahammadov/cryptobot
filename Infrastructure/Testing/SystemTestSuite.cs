@@ -2541,6 +2541,210 @@ namespace CryptoSense.Infrastructure.Testing
                 return hasAdmin && hasScan && hasBtc && hasCb && hasPnl && hasOpen && hasSkip && lockCount >= 0 && kbOk;
             });
 
+            // 61. Hour-End Skip Report Formatter & Logic Validation
+            await AssertTest("Test 69: Hour-End Skip Report Formatter & Constraints Verification", async () =>
+            {
+                var compass = await _signalEngine.GetBtcCompassAsync();
+
+                // 1. 0 siqnal + N koin skip -> raportda N sətir (qrup cəmi = N)
+                int nCoins = 40;
+                var sampleCoins = new List<CoinSkipDetail>();
+                var groupReasons = new[] { "güc/şərt", "qapı", "range", "R:R", "açıq mövqe", "SL", "satış st", "həcm" };
+                for (int i = 0; i < nCoins; i++)
+                {
+                    var grp = groupReasons[i % groupReasons.Length];
+                    sampleCoins.Add(new CoinSkipDetail
+                    {
+                        Symbol = $"COIN{i}USDT",
+                        Timeframe = "1h",
+                        Bias = (i % 4 == 0) ? "long meyl" : ((i % 4 == 1) ? "short meyl" : ((i % 4 == 2) ? "chop" : "neytral")),
+                        ConfluenceScore = 45 + (i % 30),
+                        GroupReason = grp,
+                        ReasonDescription = $"Test skip reason for coin {i}"
+                    });
+                }
+
+                var tel = new CryptoSense.Worker.BackgroundMarketScanner.ScanTelemetry
+                {
+                    Sent = 0,
+                    SkipStale = 1,
+                    SkipBtcRange = 2,
+                    SkipStaleTrend = 3,
+                    TelegramFail = 0,
+                    SkipGozleme = 4
+                };
+
+                var reportMsgs = TelegramMessageFormatter.FormatHourSkipReport(
+                    candleCloseUtc: DateTime.UtcNow,
+                    timeframe: "1h",
+                    baseCoinsCount: 40,
+                    userExtraCoinsCount: 0,
+                    compass: compass,
+                    coins: sampleCoins,
+                    telemetry: tel,
+                    newSignalsCount: 0);
+
+                if (reportMsgs.Count == 0)
+                {
+                    Console.WriteLine("[Test 69 Fail] reportMsgs is empty when sent=0");
+                    return false;
+                }
+
+                var joinedReport = string.Join("\n", reportMsgs);
+
+                // Check N lines in koinlər section
+                int coinLinesFound = 0;
+                foreach (var sc in sampleCoins)
+                {
+                    if (joinedReport.Contains(sc.Symbol))
+                    {
+                        coinLinesFound++;
+                    }
+                }
+
+                if (coinLinesFound != nCoins)
+                {
+                    Console.WriteLine($"[Test 69 Fail] Expected {nCoins} coins in report, found {coinLinesFound}");
+                    return false;
+                }
+
+                // Check group sum equals N
+                var lines = joinedReport.Split(new[] { "\r\n", "\n" }, StringSplitOptions.RemoveEmptyEntries);
+                bool inGroupSection = false;
+                int groupSum = 0;
+                foreach (var line in lines)
+                {
+                    if (line.StartsWith("niyə (qrup)"))
+                    {
+                        inGroupSection = true;
+                        continue;
+                    }
+                    if (inGroupSection)
+                    {
+                        if (line.StartsWith("koinlər") || line.StartsWith("standart") || line.StartsWith("bu saat") || line.StartsWith("[2/2]"))
+                        {
+                            inGroupSection = false;
+                            break;
+                        }
+                        var parts = line.Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries);
+                        if (parts.Length >= 2 && int.TryParse(parts[^1], out int grpCnt))
+                        {
+                            groupSum += grpCnt;
+                        }
+                    }
+                }
+
+                if (groupSum != nCoins)
+                {
+                    Console.WriteLine($"[Test 69 Fail] Group sum {groupSum} != {nCoins}");
+                    return false;
+                }
+
+                // 2. ≥1 yeni siqnal -> raport göndərilmir
+                var reportSentGtZero = TelegramMessageFormatter.FormatHourSkipReport(
+                    candleCloseUtc: DateTime.UtcNow,
+                    timeframe: "1h",
+                    baseCoinsCount: 40,
+                    userExtraCoinsCount: 0,
+                    compass: compass,
+                    coins: sampleCoins,
+                    telemetry: tel,
+                    newSignalsCount: 1);
+
+                if (reportSentGtZero.Count != 0)
+                {
+                    Console.WriteLine("[Test 69 Fail] Report must be empty when newSignalsCount >= 1");
+                    return false;
+                }
+
+                // 3. 4096-dan böyükdürsə 2 mesaj, söz ortasından kəsilməsin
+                var largeCoinsList = new List<CoinSkipDetail>();
+                for (int i = 0; i < 35; i++)
+                {
+                    largeCoinsList.Add(new CoinSkipDetail
+                    {
+                        Symbol = $"COIN{i:D2}USDT",
+                        Timeframe = "1h",
+                        Bias = "short meyl",
+                        ConfluenceScore = 60,
+                        GroupReason = "güc/şərt",
+                        ReasonDescription = "Confluence 60.0% < 75% minimum giriş şərtini təmin etmədi"
+                    });
+                }
+
+                var splitMsgs = TelegramMessageFormatter.FormatHourSkipReport(
+                    candleCloseUtc: DateTime.UtcNow,
+                    timeframe: "1h",
+                    baseCoinsCount: 40,
+                    userExtraCoinsCount: 5,
+                    compass: compass,
+                    coins: largeCoinsList,
+                    telemetry: tel,
+                    newSignalsCount: 0);
+
+                if (splitMsgs.Count != 2)
+                {
+                    Console.WriteLine($"[Test 69 Fail] Expected 2 messages when exceeding 4096 chars, got {splitMsgs.Count}");
+                    return false;
+                }
+
+                if (splitMsgs[0].Length > 4096 || splitMsgs[1].Length > 4096)
+                {
+                    Console.WriteLine($"[Test 69 Fail] Message chunk exceeds 4096: len1={splitMsgs[0].Length}, len2={splitMsgs[1].Length}");
+                    return false;
+                }
+
+                bool p1HasHeader = splitMsgs[0].Contains("saat") && splitMsgs[0].Contains("bakı");
+                bool p1HasStandart = splitMsgs[0].Contains("standart") && splitMsgs[0].Contains("bu saat");
+                bool p2HasCoins = splitMsgs[1].Contains("koinlər") && splitMsgs[1].Contains("COIN");
+
+                if (!p1HasHeader || !p1HasStandart || !p2HasCoins)
+                {
+                    Console.WriteLine("[Test 69 Fail] Split messages do not contain expected section headers");
+                    return false;
+                }
+
+                // 4. Footer rəqəmləri = BotConstants
+                string reportText = joinedReport;
+                bool hasConf = reportText.Contains($"{BotConstants.Thresholds.MinConfluence1h4h}%");
+                bool hasRr = reportText.Contains(BotConstants.Thresholds.MinRiskReward.ToString("F2", CultureInfo.InvariantCulture));
+                bool hasSl = reportText.Contains(BotConstants.Thresholds.MaxSlAtr.ToString("F2", CultureInfo.InvariantCulture));
+                bool hasTpSplit = reportText.Contains("40 / 30 / 30 trail");
+                bool hasCache = reportText.Contains("cache") && reportText.Contains("1");
+                bool hasRange = reportText.Contains("range") && reportText.Contains("2");
+                bool hasStaleSt = reportText.Contains("satış st") && reportText.Contains("3");
+                bool hasGozleme = reportText.Contains("gözləmə") && reportText.Contains("4");
+
+                if (!hasConf || !hasRr || !hasSl || !hasTpSplit || !hasCache || !hasRange || !hasStaleSt || !hasGozleme)
+                {
+                    Console.WriteLine($"[Test 69 Fail] Footer numbers mismatch BotConstants:\n{reportText}");
+                    return false;
+                }
+
+                // 5. FormatSignalAlert / FormatOutcomeAlert / keyboard PASS
+                var sampleSignal = new FuturesSignal
+                {
+                    SignalNumber = 999,
+                    Symbol = "BTCUSDT",
+                    Timeframe = "1h",
+                    Direction = SignalDirection.Buy,
+                    EntryPrice = 60000,
+                    TakeProfit1 = 61000,
+                    StopLoss = 59000,
+                    ConfluenceScore = 80,
+                    Confidence = 80,
+                    SignalAlertSent = true,
+                    GeneratedAt = DateTime.UtcNow
+                };
+                var sigAlert = TelegramMessageFormatter.FormatSignalAlert(sampleSignal, userSigNum: 999);
+                if (string.IsNullOrEmpty(sigAlert) || !sigAlert.Contains("BTC")) return false;
+
+                var outAlert = TelegramMessageFormatter.FormatOutcomeAlert(sampleSignal, userSigNum: 999, outcomeType: "TP1", hitPrice: 61000, profitPct: 1.67m);
+                if (string.IsNullOrEmpty(outAlert) || !outAlert.Contains("TP1")) return false;
+
+                return true;
+            });
+
             Console.WriteLine("\n========================================================");
             Console.WriteLine($"🏁 TEST NƏTİCƏLƏRİ: {passed} UĞURLU (PASS), {failed} UĞURSUZ (FAIL)");
             Console.WriteLine("========================================================\n");
