@@ -2907,6 +2907,89 @@ namespace CryptoSense.Infrastructure.Testing
                     return false;
                 }
 
+                // Bias (long/short) and RR zero skip assertions
+                var biasTestCoins = new List<CoinSkipDetail>
+                {
+                    new CoinSkipDetail
+                    {
+                        Symbol = "SOLUSDT",
+                        Timeframe = "1h",
+                        Bias = "long",
+                        ConfluenceScore = 65,
+                        Cuts = new List<CutMark> { new CutMark("şərt", 65, "<", BotConstants.Thresholds.MinConfluence1h4h) }
+                    },
+                    new CoinSkipDetail
+                    {
+                        Symbol = "ADAUSDT",
+                        Timeframe = "1h",
+                        Bias = "short",
+                        ConfluenceScore = 60,
+                        Cuts = new List<CutMark>
+                        {
+                            new CutMark("şərt", 60, "<", BotConstants.Thresholds.MinConfluence1h4h),
+                            new CutMark("qapı")
+                        }
+                    },
+                    new CoinSkipDetail
+                    {
+                        Symbol = "DOTUSDT",
+                        Timeframe = "1h",
+                        Bias = "long",
+                        ConfluenceScore = 60,
+                        Cuts = new List<CutMark>
+                        {
+                            new CutMark("şərt", 60, "<", BotConstants.Thresholds.MinConfluence1h4h),
+                            new CutMark("rr", 0m, "<", BotConstants.Thresholds.MinRiskReward)
+                        }
+                    },
+                    new CoinSkipDetail
+                    {
+                        Symbol = "XRPUSDT",
+                        Timeframe = "1h",
+                        Bias = "short",
+                        ConfluenceScore = 60,
+                        Cuts = new List<CutMark>
+                        {
+                            new CutMark("şərt", 60, "<", BotConstants.Thresholds.MinConfluence1h4h),
+                            new CutMark("rr", null, "<", BotConstants.Thresholds.MinRiskReward)
+                        }
+                    }
+                };
+
+                var biasReport = TelegramMessageFormatter.FormatHourSkipReport(
+                    candleCloseUtc: DateTime.UtcNow,
+                    timeframe: "1h, 4h",
+                    baseCoinsCount: 4,
+                    userExtraCoinsCount: 0,
+                    compass: compass,
+                    coins: biasTestCoins,
+                    telemetry: tel,
+                    newSignalsCount: 0);
+                var biasText = string.Join("\n", biasReport);
+
+                var solRow = biasText.Split('\n').FirstOrDefault(l => l.Contains("SOL"));
+                var adaRow = biasText.Split('\n').FirstOrDefault(l => l.Contains("ADA"));
+
+                bool biasLongOk = solRow != null && solRow.Contains(" long ");
+                bool biasShortQapiOk = adaRow != null && adaRow.Contains(" short ") && adaRow.Contains("qapı");
+                bool noRrZeroOk = !biasText.Contains("rr 0") && !cutsText.Contains("rr 0");
+
+                if (!biasLongOk)
+                {
+                    Console.WriteLine($"[Test 69 Fail] Bias='long' must show ' long ' in coin line:\n{solRow}");
+                    return false;
+                }
+                if (!biasShortQapiOk)
+                {
+                    Console.WriteLine($"[Test 69 Fail] Bias='short' + CutMark qapı must show ' short ' and 'qapı' in coin line:\n{adaRow}");
+                    return false;
+                }
+                if (!noRrZeroOk)
+                {
+                    Console.WriteLine("[Test 69 Fail] rr CutLeft=0 or null must NOT emit 'rr 0'");
+                    return false;
+                }
+
                 return true;
             });
 

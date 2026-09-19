@@ -1044,10 +1044,14 @@ namespace CryptoSense.Infrastructure.Telegram
                     }
                     else if (cut.Kind == "rr")
                     {
-                        decimal l = cut.Left ?? 0m;
-                        decimal r = cut.Right ?? BotConstants.Thresholds.MinRiskReward;
-                        string op = !string.IsNullOrEmpty(cut.Op) ? cut.Op : "<";
-                        otherParts.Add($"rr {l.ToString("0.##", CultureInfo.InvariantCulture)}{op}{r.ToString("F2", CultureInfo.InvariantCulture)}");
+                        if (!cut.Left.HasValue || cut.Left.Value <= 0m) { /* rəqəm yox → rr yazma */ }
+                        else
+                        {
+                            decimal l = cut.Left.Value;
+                            decimal r = cut.Right ?? BotConstants.Thresholds.MinRiskReward;
+                            string op = !string.IsNullOrEmpty(cut.Op) ? cut.Op : "<";
+                            otherParts.Add($"rr {l.ToString("0.##", CultureInfo.InvariantCulture)}{op}{r.ToString("F2", CultureInfo.InvariantCulture)}");
+                        }
                     }
                     else if (cut.Kind == "sl")
                     {
@@ -1079,14 +1083,20 @@ namespace CryptoSense.Infrastructure.Telegram
                 allMarks.AddRange(distinctOther);
                 string marksText = string.Join("  ", allMarks);
 
+                string dir = "";
+                var b = (c.Bias ?? "").ToLowerInvariant();
+                if (b.Contains("long")) dir = "long";
+                else if (b.Contains("short")) dir = "short";
+                string dirPart = string.IsNullOrEmpty(dir) ? "" : $"{dir,-5}  ";
+
                 if (isDualTf)
                 {
                     var cTf = string.IsNullOrWhiteSpace(c.Timeframe) ? "1h" : c.Timeframe;
-                    coinLines.Add($"{sym,-6} {cTf}  {marksText}");
+                    coinLines.Add($"{sym,-6} {cTf}  {dirPart}{marksText}");
                 }
                 else
                 {
-                    coinLines.Add($"{sym,-6}  {marksText}");
+                    coinLines.Add($"{sym,-6}  {dirPart}{marksText}");
                 }
             }
 

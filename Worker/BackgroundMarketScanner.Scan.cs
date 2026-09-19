@@ -339,19 +339,9 @@ namespace CryptoSense.Worker
                                     : $"conf={signal.ConfluenceScore:F1}%";
                                 _overfilterDiag[$"{sym}_{tf}"] = ((double)signal.ConfluenceScore, skipReason);
 
-                                string coinBias = "neytral";
-                                if (adxValLocal < minAdxReq)
-                                {
-                                    coinBias = "chop";
-                                }
-                                else if (signal.ConfluenceScore >= 55m || indResLocal?.SuperTrendVote == IndicatorVote.Bullish)
-                                {
-                                    coinBias = "long meyl";
-                                }
-                                else if (signal.ConfluenceScore <= 45m || indResLocal?.SuperTrendVote == IndicatorVote.Bearish)
-                                {
-                                    coinBias = "short meyl";
-                                }
+                                string coinBias = "";
+                                if (indResLocal?.SuperTrendVote == IndicatorVote.Bullish) coinBias = "long";
+                                else if (indResLocal?.SuperTrendVote == IndicatorVote.Bearish) coinBias = "short";
 
                                 var cutMarks = new List<CutMark>();
 
