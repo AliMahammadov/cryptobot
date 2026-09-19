@@ -940,7 +940,8 @@ namespace CryptoSense.Infrastructure.Telegram
                 ? candleCloseUtc.ToAzerbaijanTime()
                 : TimeHelper.NowAz;
             var timeStr = bakuTime.ToString("HH:mm");
-            var tfDisplay = string.IsNullOrWhiteSpace(timeframe) ? "1h" : timeframe;
+            var tfNormalized = string.IsNullOrWhiteSpace(timeframe) ? "1h" : timeframe;
+            bool isDualTf = tfNormalized.Contains("1h") && tfNormalized.Contains("4h");
 
             // Thresholds interpolated strictly from BotConstants.Thresholds (ZERO hardcoded numbers)
             var minConfStr = BotConstants.Thresholds.MinConfluence1h4h.ToString("F0", CultureInfo.InvariantCulture);
@@ -971,50 +972,15 @@ namespace CryptoSense.Infrastructure.Telegram
                 ? $"  |  D {compass.BtcDominance.ToString("F1", CultureInfo.InvariantCulture)}"
                 : "";
 
-            string btcLine = $"BTC  1h {btc1hSt}  |  4h {btc4hSt}  |  {regime}{domPart}  |  qapı {gateStr}";
+            string headerLine1 = $"{timeStr} | şərt≥{minConfStr}  R:R≥{minRrStr}  SL≤{maxSlStr}  həcm≥{minVolStr}  ADX≥{minAdx1hStr}/{minAdx4hStr}";
+            string headerLine2 = $"BTC  1h {btc1hSt}  |  4h {btc4hSt}  |  {regime}{domPart}  |  qapı {gateStr}";
+            string headerLine3 = $"yeni {newSignalsCount}   koin {totalUnique} ({baseCount}+{extraCount})";
+            string headerText = $"{headerLine1}\n{headerLine2}\n{headerLine3}";
 
-            // Groups: count unique coins per cut kind
-            var cutDict = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
-            foreach (var c in coinList)
-            {
-                var kind = c.ResolveEffectiveKind();
-                if (string.IsNullOrWhiteSpace(kind) || kind == "-" || kind == "scan" || kind == "gözləmə")
-                    continue;
-
-                if (!cutDict.TryGetValue(kind, out var set))
-                {
-                    set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                    cutDict[kind] = set;
-                }
-                set.Add(c.Symbol);
-            }
-
-            var cutParts = cutDict
-                .OrderByDescending(k => k.Value.Count)
-                .ThenBy(k => k.Key)
-                .Select(k => $"{k.Key} {k.Value.Count}");
-            string cutSummary = string.Join("  ", cutParts);
-            string kesenLine = string.IsNullOrEmpty(cutSummary) ? "kəsən  -" : $"kəsən  {cutSummary}";
-
-            // Message 1 (Header / Macro card)
-            var p1Body = new StringBuilder();
-            p1Body.AppendLine($"saat  {timeStr}  bakı  |  {tfDisplay}");
-            p1Body.AppendLine($"şərt≥{minConfStr}  R:R≥{minRrStr}  SL≤{maxSlStr}  həcm≥{minVolStr}  ADX≥{minAdx1hStr}/{minAdx4hStr}");
-            p1Body.AppendLine(btcLine);
-            p1Body.AppendLine($"yeni {newSignalsCount}   koin {totalUnique} ({baseCount}+{extraCount})");
-            p1Body.AppendLine(kesenLine);
-
-            // Message 2..n (Coin cuts)
+            // Coin cuts
             var coinLines = new List<string>();
             foreach (var c in coinList)
             {
-                string cutDisplay = c.GetCutDisplay();
-                if (cutDisplay == "gözləmə")
-                {
-                    continue; // Gözləmə (freshness) → bu tf-i LİSTƏ SALMA
-                }
-
-                var cTf = string.IsNullOrWhiteSpace(c.Timeframe) ? tfDisplay : c.Timeframe;
                 string sym = c.Symbol ?? "";
                 if (sym.EndsWith("USDT", StringComparison.OrdinalIgnoreCase))
                 {
@@ -1025,51 +991,155 @@ namespace CryptoSense.Infrastructure.Telegram
                     sym = sym.Substring(0, sym.Length - 4);
                 }
 
-                coinLines.Add($"{sym,-4}  {cTf}  {cutDisplay}");
+                var cuts = c.GetEffectiveCuts();
+                if (cuts.Any(x => x.Kind == "gözləmə") || c.CutKind == "gözləmə" || c.GroupReason == "gözləmə")
+                {
+                    continue; // Gözləmə (freshness) → bu tf-i LİSTƏ SALMA
+                }
+
+                if (cuts.Count == 0 && c.ConfluenceScore >= BotConstants.Thresholds.MinConfluence1h4h)
+                {
+                    continue; // Kəsilməyən → SƏTİR YOX
+                }
+
+                // 1) şərt {ConfluenceScore} HƏMİŞƏ. Confluence cut varsa şərt {Left}<{Right}
+                var confCut = cuts.FirstOrDefault(x => x.Kind == "şərt");
+                string confPart;
+                if (confCut != null)
+                {
+                    decimal lVal = confCut.Left ?? (decimal)c.ConfluenceScore;
+                    decimal rVal = confCut.Right ?? BotConstants.Thresholds.MinConfluence1h4h;
+                    string op = !string.IsNullOrEmpty(confCut.Op) ? confCut.Op : "<";
+                    confPart = $"şərt {lVal.ToString("F0", CultureInfo.InvariantCulture)}{op}{rVal.ToString("F0", CultureInfo.InvariantCulture)}";
+                }
+                else if (c.ConfluenceScore < BotConstants.Thresholds.MinConfluence1h4h && c.ConfluenceScore > 0 && cuts.Count == 0)
+                {
+                    confPart = $"şərt {c.ConfluenceScore}<{BotConstants.Thresholds.MinConfluence1h4h.ToString("F0", CultureInfo.InvariantCulture)}";
+                }
+                else
+                {
+                    confPart = $"şərt {c.ConfluenceScore}";
+                }
+
+                // 2) BÜTÜN digər kəsimlər
+                var otherParts = new List<string>();
+                foreach (var cut in cuts)
+                {
+                    if (cut.Kind == "şərt" || cut.Kind == "gözləmə")
+                        continue;
+
+                    if (cut.Kind == "həcm")
+                    {
+                        decimal l = cut.Left ?? 0m;
+                        decimal r = cut.Right ?? BotConstants.Thresholds.MinVolumeSurgeRatio;
+                        string op = !string.IsNullOrEmpty(cut.Op) ? cut.Op : "<";
+                        otherParts.Add($"həcm {l.ToString("0.##", CultureInfo.InvariantCulture)}{op}{r.ToString("F2", CultureInfo.InvariantCulture)}");
+                    }
+                    else if (cut.Kind == "adx")
+                    {
+                        decimal l = cut.Left ?? 0m;
+                        decimal r = cut.Right ?? (c.Timeframe == "4h" ? BotConstants.Thresholds.MinAdx4h : BotConstants.Thresholds.MinAdx1h);
+                        string op = !string.IsNullOrEmpty(cut.Op) ? cut.Op : "<";
+                        otherParts.Add($"adx {l.ToString("0.#", CultureInfo.InvariantCulture)}{op}{r.ToString("F0", CultureInfo.InvariantCulture)}");
+                    }
+                    else if (cut.Kind == "rr")
+                    {
+                        decimal l = cut.Left ?? 0m;
+                        decimal r = cut.Right ?? BotConstants.Thresholds.MinRiskReward;
+                        string op = !string.IsNullOrEmpty(cut.Op) ? cut.Op : "<";
+                        otherParts.Add($"rr {l.ToString("0.##", CultureInfo.InvariantCulture)}{op}{r.ToString("F2", CultureInfo.InvariantCulture)}");
+                    }
+                    else if (cut.Kind == "sl")
+                    {
+                        decimal l = cut.Left ?? 0m;
+                        decimal r = cut.Right ?? BotConstants.Thresholds.MaxSlAtr;
+                        string op = !string.IsNullOrEmpty(cut.Op) ? cut.Op : ">";
+                        otherParts.Add($"sl {l.ToString("0.##", CultureInfo.InvariantCulture)}{op}{r.ToString("F2", CultureInfo.InvariantCulture)}");
+                    }
+                    else if (cut.Kind == "qapı")
+                    {
+                        otherParts.Add("qapı");
+                    }
+                    else if (cut.Kind == "range")
+                    {
+                        otherParts.Add("range");
+                    }
+                    else if (cut.Kind == "cb")
+                    {
+                        otherParts.Add("cb");
+                    }
+                    else if (cut.Kind == "-")
+                    {
+                        otherParts.Add("-");
+                    }
+                }
+
+                var distinctOther = otherParts.Distinct().ToList();
+                var allMarks = new List<string> { confPart };
+                allMarks.AddRange(distinctOther);
+                string marksText = string.Join("  ", allMarks);
+
+                if (isDualTf)
+                {
+                    var cTf = string.IsNullOrWhiteSpace(c.Timeframe) ? "1h" : c.Timeframe;
+                    coinLines.Add($"{sym,-6} {cTf}  {marksText}");
+                }
+                else
+                {
+                    coinLines.Add($"{sym,-6}  {marksText}");
+                }
             }
 
             if (coinLines.Count == 0)
             {
-                return new List<string> { p1Body.ToString().TrimEnd() };
+                return new List<string> { headerText };
             }
 
-            // Chunk coinLines so that each chunk <= 4096 characters and lines are never broken
-            var coinChunks = new List<List<string>>();
-            var currentChunk = new List<string>();
-            int currentChunkLen = 10; // header buffer like "[9/9]\n"
+            // TƏK send, [1/2] YOX. 4096 aşarsa sətir-sətir split, başlıqsız
+            var fullReport = headerText + "\n\n" + string.Join("\n", coinLines);
+            if (fullReport.Length <= 4096)
+            {
+                return new List<string> { fullReport.TrimEnd() };
+            }
+
+            var resultChunks = new List<string>();
+            var currentChunk = new StringBuilder();
+            currentChunk.AppendLine(headerText);
+            currentChunk.AppendLine();
 
             foreach (var line in coinLines)
             {
-                int lineLen = line.Length + 2; // \r\n
-                if (currentChunkLen + lineLen > 4096 && currentChunk.Count > 0)
+                if (currentChunk.Length + line.Length + 1 > 4096 && currentChunk.Length > 0)
                 {
-                    coinChunks.Add(currentChunk);
-                    currentChunk = new List<string>();
-                    currentChunkLen = 10;
+                    resultChunks.Add(currentChunk.ToString().TrimEnd());
+                    currentChunk.Clear();
                 }
-                currentChunk.Add(line);
-                currentChunkLen += lineLen;
+                currentChunk.AppendLine(line);
             }
-            if (currentChunk.Count > 0)
+            if (currentChunk.Length > 0)
             {
-                coinChunks.Add(currentChunk);
+                resultChunks.Add(currentChunk.ToString().TrimEnd());
             }
 
-            int totalChunks = 1 + coinChunks.Count;
-            var result = new List<string>();
+            return resultChunks;
+        }
+    }
 
-            // Message 1
-            result.Add($"[1/{totalChunks}]\n" + p1Body.ToString().TrimEnd());
+    public class CutMark
+    {
+        public string Kind { get; set; } = ""; // "şərt" | "həcm" | "adx" | "rr" | "sl" | "range" | "qapı" | "cb" | "gözləmə" | "-"
+        public decimal? Left { get; set; }
+        public decimal? Right { get; set; }
+        public string? Op { get; set; }
 
-            // Messages 2..n
-            for (int i = 0; i < coinChunks.Count; i++)
-            {
-                int chunkIndex = i + 2;
-                var chunkHeader = $"[{chunkIndex}/{totalChunks}]";
-                result.Add(chunkHeader + "\n" + string.Join("\n", coinChunks[i]));
-            }
+        public CutMark() { }
 
-            return result;
+        public CutMark(string kind, decimal? left = null, string? op = null, decimal? right = null)
+        {
+            Kind = kind;
+            Left = left;
+            Op = op;
+            Right = right;
         }
     }
 
@@ -1082,59 +1152,81 @@ namespace CryptoSense.Infrastructure.Telegram
         public string GroupReason { get; set; } = "scan yox";
         public string ReasonDescription { get; set; } = "bu saat baxılmayıb";
 
-        public string CutKind { get; set; } = "-"; // "şərt" | "həcm" | "adx" | "rr" | "sl" | "range" | "qapı" | "cb" | "scan" | "gözləmə"
+        // Legacy fields preserved for backward compatibility
+        public string CutKind { get; set; } = "-";
         public decimal? CutLeft { get; set; }
         public decimal? CutRight { get; set; }
         public string? CutOp { get; set; }
 
+        // BÜTÜN kəsimlər siyahısı
+        public List<CutMark> Cuts { get; set; } = new();
+
+        public List<CutMark> GetEffectiveCuts()
+        {
+            if (Cuts != null && Cuts.Count > 0)
+            {
+                return Cuts;
+            }
+
+            var legacyKind = ResolveEffectiveKind();
+            if (legacyKind == "gözləmə")
+            {
+                return new List<CutMark> { new CutMark("gözləmə") };
+            }
+            if (legacyKind == "şərt")
+            {
+                return new List<CutMark> { new CutMark("şərt", CutLeft ?? ConfluenceScore, CutOp ?? "<", CutRight ?? BotConstants.Thresholds.MinConfluence1h4h) };
+            }
+            if (legacyKind == "həcm")
+            {
+                return new List<CutMark> { new CutMark("həcm", CutLeft, CutOp ?? "<", CutRight ?? BotConstants.Thresholds.MinVolumeSurgeRatio) };
+            }
+            if (legacyKind == "adx")
+            {
+                return new List<CutMark> { new CutMark("adx", CutLeft, CutOp ?? "<", CutRight ?? (Timeframe == "4h" ? BotConstants.Thresholds.MinAdx4h : BotConstants.Thresholds.MinAdx1h)) };
+            }
+            if (legacyKind == "sl")
+            {
+                return new List<CutMark> { new CutMark("sl", CutLeft, CutOp ?? ">", CutRight ?? BotConstants.Thresholds.MaxSlAtr) };
+            }
+            if (legacyKind == "rr")
+            {
+                return new List<CutMark> { new CutMark("rr", CutLeft, CutOp ?? "<", CutRight ?? BotConstants.Thresholds.MinRiskReward) };
+            }
+            if (legacyKind == "range" || legacyKind == "qapı" || legacyKind == "cb")
+            {
+                return new List<CutMark> { new CutMark(legacyKind) };
+            }
+
+            if (legacyKind == "-" || string.IsNullOrWhiteSpace(legacyKind))
+            {
+                return new List<CutMark> { new CutMark("-") };
+            }
+
+            return new List<CutMark> { new CutMark(legacyKind) };
+        }
+
         public string GetCutDisplay()
         {
-            string kind = ResolveEffectiveKind();
-
-            if (kind == "gözləmə")
+            var effectiveCuts = GetEffectiveCuts();
+            if (effectiveCuts.Any(c => c.Kind == "gözləmə"))
                 return "gözləmə";
 
-            if (CutLeft.HasValue && CutRight.HasValue && !string.IsNullOrEmpty(CutOp))
+            var cutStrings = new List<string>();
+            foreach (var cut in effectiveCuts)
             {
-                string lStr;
-                string rStr;
-                if (kind == "şərt")
+                if (cut.Left.HasValue && cut.Right.HasValue && !string.IsNullOrEmpty(cut.Op))
                 {
-                    lStr = CutLeft.Value.ToString("F0", CultureInfo.InvariantCulture);
-                    rStr = CutRight.Value.ToString("F0", CultureInfo.InvariantCulture);
-                }
-                else if (kind == "adx")
-                {
-                    lStr = CutLeft.Value.ToString("0.#", CultureInfo.InvariantCulture);
-                    rStr = CutRight.Value.ToString("F0", CultureInfo.InvariantCulture);
-                }
-                else if (kind == "sl")
-                {
-                    lStr = CutLeft.Value.ToString("0.##", CultureInfo.InvariantCulture);
-                    rStr = CutRight.Value.ToString("F2", CultureInfo.InvariantCulture);
-                }
-                else if (kind == "rr")
-                {
-                    lStr = CutLeft.Value.ToString("0.##", CultureInfo.InvariantCulture);
-                    rStr = CutRight.Value.ToString("F2", CultureInfo.InvariantCulture);
-                }
-                else if (kind == "həcm")
-                {
-                    lStr = CutLeft.Value.ToString("0.##", CultureInfo.InvariantCulture);
-                    rStr = CutRight.Value.ToString("F2", CultureInfo.InvariantCulture);
+                    string lStr = cut.Left.Value.ToString("0.##", CultureInfo.InvariantCulture);
+                    string rStr = cut.Right.Value.ToString("0.##", CultureInfo.InvariantCulture);
+                    cutStrings.Add($"{lStr}{cut.Op}{rStr}");
                 }
                 else
                 {
-                    lStr = CutLeft.Value.ToString("0.##", CultureInfo.InvariantCulture);
-                    rStr = CutRight.Value.ToString("0.##", CultureInfo.InvariantCulture);
+                    cutStrings.Add(cut.Kind);
                 }
-                return $"{lStr}{CutOp}{rStr}";
             }
-
-            if (kind == "scan" || kind == "-" || string.IsNullOrWhiteSpace(kind))
-                return "-";
-
-            return kind;
+            return cutStrings.Count > 0 ? string.Join(" ", cutStrings) : "-";
         }
 
         public string ResolveEffectiveKind()

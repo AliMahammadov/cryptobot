@@ -37,8 +37,8 @@ namespace CryptoSense.Worker
                 Console.WriteLine($"[SCAN_CYCLE_SKIP] reason=CIRCUIT_BREAKER cbUntil={_circuitBreakerUntil:HH:mm:ss}UTC");
                 foreach (var c in TelegramBotService.Default40Coins)
                 {
-                    _latestCoinEvaluations[$"{c}|1h"] = new CoinSkipDetail { Symbol = c, Timeframe = "1h", Bias = "neytral", ConfluenceScore = 0, GroupReason = "circuit breaker", ReasonDescription = "Circuit Breaker aktivdir", CutKind = "cb" };
-                    _latestCoinEvaluations[$"{c}|4h"] = new CoinSkipDetail { Symbol = c, Timeframe = "4h", Bias = "neytral", ConfluenceScore = 0, GroupReason = "circuit breaker", ReasonDescription = "Circuit Breaker aktivdir", CutKind = "cb" };
+                    _latestCoinEvaluations[$"{c}|1h"] = new CoinSkipDetail { Symbol = c, Timeframe = "1h", Bias = "neytral", ConfluenceScore = 0, GroupReason = "circuit breaker", ReasonDescription = "Circuit Breaker aktivdir", CutKind = "cb", Cuts = new List<CutMark> { new CutMark("cb") } };
+                    _latestCoinEvaluations[$"{c}|4h"] = new CoinSkipDetail { Symbol = c, Timeframe = "4h", Bias = "neytral", ConfluenceScore = 0, GroupReason = "circuit breaker", ReasonDescription = "Circuit Breaker aktivdir", CutKind = "cb", Cuts = new List<CutMark> { new CutMark("cb") } };
                 }
                 LatestTelemetrySnapshot = _hourlyTelemetry.Clone();
                 await MaybeSendHourlyHeartbeatAsync(stoppingToken);
@@ -94,8 +94,8 @@ namespace CryptoSense.Worker
                 Console.WriteLine($"[SCAN_CYCLE_SKIP] reason=MAX_OPEN count={openTradesCount} activeLocks={_coinActiveLocks.Count} max={MaxGlobalOpenPositions}");
                 foreach (var c in TelegramBotService.Default40Coins)
                 {
-                    _latestCoinEvaluations[$"{c}|1h"] = new CoinSkipDetail { Symbol = c, Timeframe = "1h", Bias = "neytral", ConfluenceScore = 0, GroupReason = "açıq mövqe", ReasonDescription = $"Maksimum açıq mövqe ({openTradesCount}/{MaxGlobalOpenPositions}) dolub", CutKind = "cb" };
-                    _latestCoinEvaluations[$"{c}|4h"] = new CoinSkipDetail { Symbol = c, Timeframe = "4h", Bias = "neytral", ConfluenceScore = 0, GroupReason = "açıq mövqe", ReasonDescription = $"Maksimum açıq mövqe ({openTradesCount}/{MaxGlobalOpenPositions}) dolub", CutKind = "cb" };
+                    _latestCoinEvaluations[$"{c}|1h"] = new CoinSkipDetail { Symbol = c, Timeframe = "1h", Bias = "neytral", ConfluenceScore = 0, GroupReason = "açıq mövqe", ReasonDescription = $"Maksimum açıq mövqe ({openTradesCount}/{MaxGlobalOpenPositions}) dolub", CutKind = "cb", Cuts = new List<CutMark> { new CutMark("cb") } };
+                    _latestCoinEvaluations[$"{c}|4h"] = new CoinSkipDetail { Symbol = c, Timeframe = "4h", Bias = "neytral", ConfluenceScore = 0, GroupReason = "açıq mövqe", ReasonDescription = $"Maksimum açıq mövqe ({openTradesCount}/{MaxGlobalOpenPositions}) dolub", CutKind = "cb", Cuts = new List<CutMark> { new CutMark("cb") } };
                 }
                 LatestTelemetrySnapshot = _hourlyTelemetry.Clone();
                 await MaybeSendHourlyHeartbeatAsync(stoppingToken);
@@ -116,8 +116,8 @@ namespace CryptoSense.Worker
                     Console.WriteLine($"[SCAN_CYCLE_SKIP] reason=DAILY_LOSS pnl={todayClosedPnL:F2}% threshold={BotConstants.Thresholds.DailyLossThreshold:F1}%");
                     foreach (var c in TelegramBotService.Default40Coins)
                     {
-                        _latestCoinEvaluations[$"{c}|1h"] = new CoinSkipDetail { Symbol = c, Timeframe = "1h", Bias = "neytral", ConfluenceScore = 0, GroupReason = "itki limiti", ReasonDescription = $"Günlük itki limiti ({todayClosedPnL:F2}% ≤ {BotConstants.Thresholds.DailyLossThreshold:F1}%) keçib", CutKind = "cb" };
-                        _latestCoinEvaluations[$"{c}|4h"] = new CoinSkipDetail { Symbol = c, Timeframe = "4h", Bias = "neytral", ConfluenceScore = 0, GroupReason = "itki limiti", ReasonDescription = $"Günlük itki limiti ({todayClosedPnL:F2}% ≤ {BotConstants.Thresholds.DailyLossThreshold:F1}%) keçib", CutKind = "cb" };
+                        _latestCoinEvaluations[$"{c}|1h"] = new CoinSkipDetail { Symbol = c, Timeframe = "1h", Bias = "neytral", ConfluenceScore = 0, GroupReason = "itki limiti", ReasonDescription = $"Günlük itki limiti ({todayClosedPnL:F2}% ≤ {BotConstants.Thresholds.DailyLossThreshold:F1}%) keçib", CutKind = "cb", Cuts = new List<CutMark> { new CutMark("cb") } };
+                        _latestCoinEvaluations[$"{c}|4h"] = new CoinSkipDetail { Symbol = c, Timeframe = "4h", Bias = "neytral", ConfluenceScore = 0, GroupReason = "itki limiti", ReasonDescription = $"Günlük itki limiti ({todayClosedPnL:F2}% ≤ {BotConstants.Thresholds.DailyLossThreshold:F1}%) keçib", CutKind = "cb", Cuts = new List<CutMark> { new CutMark("cb") } };
                     }
                     LatestTelemetrySnapshot = _hourlyTelemetry.Clone();
                     await MaybeSendHourlyHeartbeatAsync(stoppingToken);
@@ -196,8 +196,8 @@ namespace CryptoSense.Worker
                 if (_coinCooldowns.TryGetValue(sym, out var cooldownUntil) && scanNowUtc < cooldownUntil)
                 {
                     Interlocked.Increment(ref _hourlyTelemetry.SkipLock);
-                    _latestCoinEvaluations[$"{sym}|1h"] = new CoinSkipDetail { Symbol = sym, Timeframe = "1h", Bias = "neytral", ConfluenceScore = 0, GroupReason = "açıq mövqe", ReasonDescription = "Bağlanış sonrası soyuma dövrü (cooldown) aktivdir", CutKind = "cb" };
-                    _latestCoinEvaluations[$"{sym}|4h"] = new CoinSkipDetail { Symbol = sym, Timeframe = "4h", Bias = "neytral", ConfluenceScore = 0, GroupReason = "açıq mövqe", ReasonDescription = "Bağlanış sonrası soyuma dövrü (cooldown) aktivdir", CutKind = "cb" };
+                    _latestCoinEvaluations[$"{sym}|1h"] = new CoinSkipDetail { Symbol = sym, Timeframe = "1h", Bias = "neytral", ConfluenceScore = 0, GroupReason = "açıq mövqe", ReasonDescription = "Bağlanış sonrası soyuma dövrü (cooldown) aktivdir", CutKind = "cb", Cuts = new List<CutMark> { new CutMark("cb") } };
+                    _latestCoinEvaluations[$"{sym}|4h"] = new CoinSkipDetail { Symbol = sym, Timeframe = "4h", Bias = "neytral", ConfluenceScore = 0, GroupReason = "açıq mövqe", ReasonDescription = "Bağlanış sonrası soyuma dövrü (cooldown) aktivdir", CutKind = "cb", Cuts = new List<CutMark> { new CutMark("cb") } };
                     continue;
                 }
 
@@ -205,8 +205,8 @@ namespace CryptoSense.Worker
                 if (_coinActiveLocks.ContainsKey(sym) || _scanningCoins.ContainsKey(sym))
                 {
                     Interlocked.Increment(ref _hourlyTelemetry.SkipLock);
-                    _latestCoinEvaluations[$"{sym}|1h"] = new CoinSkipDetail { Symbol = sym, Timeframe = "1h", Bias = "neytral", ConfluenceScore = 0, GroupReason = "açıq mövqe", ReasonDescription = "Aktiv açıq mövqe mövcuddur", CutKind = "cb" };
-                    _latestCoinEvaluations[$"{sym}|4h"] = new CoinSkipDetail { Symbol = sym, Timeframe = "4h", Bias = "neytral", ConfluenceScore = 0, GroupReason = "açıq mövqe", ReasonDescription = "Aktiv açıq mövqe mövcuddur", CutKind = "cb" };
+                    _latestCoinEvaluations[$"{sym}|1h"] = new CoinSkipDetail { Symbol = sym, Timeframe = "1h", Bias = "neytral", ConfluenceScore = 0, GroupReason = "açıq mövqe", ReasonDescription = "Aktiv açıq mövqe mövcuddur", CutKind = "cb", Cuts = new List<CutMark> { new CutMark("cb") } };
+                    _latestCoinEvaluations[$"{sym}|4h"] = new CoinSkipDetail { Symbol = sym, Timeframe = "4h", Bias = "neytral", ConfluenceScore = 0, GroupReason = "açıq mövqe", ReasonDescription = "Aktiv açıq mövqe mövcuddur", CutKind = "cb", Cuts = new List<CutMark> { new CutMark("cb") } };
                     continue;
                 }
 
@@ -214,8 +214,8 @@ namespace CryptoSense.Worker
                 {
                     _coinActiveLocks.TryAdd(sym, 1);
                     Interlocked.Increment(ref _hourlyTelemetry.SkipLock);
-                    _latestCoinEvaluations[$"{sym}|1h"] = new CoinSkipDetail { Symbol = sym, Timeframe = "1h", Bias = "neytral", ConfluenceScore = 0, GroupReason = "açıq mövqe", ReasonDescription = "Aktiv açıq mövqe mövcuddur", CutKind = "cb" };
-                    _latestCoinEvaluations[$"{sym}|4h"] = new CoinSkipDetail { Symbol = sym, Timeframe = "4h", Bias = "neytral", ConfluenceScore = 0, GroupReason = "açıq mövqe", ReasonDescription = "Aktiv açıq mövqe mövcuddur", CutKind = "cb" };
+                    _latestCoinEvaluations[$"{sym}|1h"] = new CoinSkipDetail { Symbol = sym, Timeframe = "1h", Bias = "neytral", ConfluenceScore = 0, GroupReason = "açıq mövqe", ReasonDescription = "Aktiv açıq mövqe mövcuddur", CutKind = "cb", Cuts = new List<CutMark> { new CutMark("cb") } };
+                    _latestCoinEvaluations[$"{sym}|4h"] = new CoinSkipDetail { Symbol = sym, Timeframe = "4h", Bias = "neytral", ConfluenceScore = 0, GroupReason = "açıq mövqe", ReasonDescription = "Aktiv açıq mövqe mövcuddur", CutKind = "cb", Cuts = new List<CutMark> { new CutMark("cb") } };
                     continue;
                 }
 
@@ -250,8 +250,8 @@ namespace CryptoSense.Worker
                         {
                             _coinActiveLocks.TryAdd(sym, 1);
                             Interlocked.Increment(ref _hourlyTelemetry.SkipLock);
-                            _latestCoinEvaluations[$"{sym}|1h"] = new CoinSkipDetail { Symbol = sym, Timeframe = "1h", Bias = "neytral", ConfluenceScore = 0, GroupReason = "açıq mövqe", ReasonDescription = "Aktiv açıq mövqe mövcuddur", CutKind = "cb" };
-                            _latestCoinEvaluations[$"{sym}|4h"] = new CoinSkipDetail { Symbol = sym, Timeframe = "4h", Bias = "neytral", ConfluenceScore = 0, GroupReason = "açıq mövqe", ReasonDescription = "Aktiv açıq mövqe mövcuddur", CutKind = "cb" };
+                            _latestCoinEvaluations[$"{sym}|1h"] = new CoinSkipDetail { Symbol = sym, Timeframe = "1h", Bias = "neytral", ConfluenceScore = 0, GroupReason = "açıq mövqe", ReasonDescription = "Aktiv açıq mövqe mövcuddur", CutKind = "cb", Cuts = new List<CutMark> { new CutMark("cb") } };
+                            _latestCoinEvaluations[$"{sym}|4h"] = new CoinSkipDetail { Symbol = sym, Timeframe = "4h", Bias = "neytral", ConfluenceScore = 0, GroupReason = "açıq mövqe", ReasonDescription = "Aktiv açıq mövqe mövcuddur", CutKind = "cb", Cuts = new List<CutMark> { new CutMark("cb") } };
                             return;
                         }
 
@@ -262,8 +262,8 @@ namespace CryptoSense.Worker
                             if (DateTime.UtcNow - lastClosed.ClosedAt.Value < cooldownRequired)
                             {
                                 Interlocked.Increment(ref _hourlyTelemetry.SkipLock);
-                                _latestCoinEvaluations[$"{sym}|1h"] = new CoinSkipDetail { Symbol = sym, Timeframe = "1h", Bias = "neytral", ConfluenceScore = 0, GroupReason = "açıq mövqe", ReasonDescription = "Bağlanış sonrası soyuma dövrü aktivdir", CutKind = "cb" };
-                                _latestCoinEvaluations[$"{sym}|4h"] = new CoinSkipDetail { Symbol = sym, Timeframe = "4h", Bias = "neytral", ConfluenceScore = 0, GroupReason = "açıq mövqe", ReasonDescription = "Bağlanış sonrası soyuma dövrü aktivdir", CutKind = "cb" };
+                                _latestCoinEvaluations[$"{sym}|1h"] = new CoinSkipDetail { Symbol = sym, Timeframe = "1h", Bias = "neytral", ConfluenceScore = 0, GroupReason = "açıq mövqe", ReasonDescription = "Bağlanış sonrası soyuma dövrü aktivdir", CutKind = "cb", Cuts = new List<CutMark> { new CutMark("cb") } };
+                                _latestCoinEvaluations[$"{sym}|4h"] = new CoinSkipDetail { Symbol = sym, Timeframe = "4h", Bias = "neytral", ConfluenceScore = 0, GroupReason = "açıq mövqe", ReasonDescription = "Bağlanış sonrası soyuma dövrü aktivdir", CutKind = "cb", Cuts = new List<CutMark> { new CutMark("cb") } };
                                 return;
                             }
                         }
@@ -353,163 +353,143 @@ namespace CryptoSense.Worker
                                     coinBias = "short meyl";
                                 }
 
-                                string coinGroup = "gözləmə";
-                                string cutKind = "gözləmə";
-                                decimal? cutLeft = null;
-                                decimal? cutRight = null;
-                                string? cutOp = null;
+                                var cutMarks = new List<CutMark>();
 
                                 if (isFreshnessWait)
                                 {
                                     Interlocked.Increment(ref _hourlyTelemetry.SkipGozleme);
-                                    coinGroup = "gözləmə";
-                                    cutKind = "gözləmə";
-                                }
-                                else if (hasBtcGate)
-                                {
-                                    if (signal.AnalysisReasons!.Any(r => r.Contains("SKIP_BTC_RESIDUAL")))
-                                        Interlocked.Increment(ref _hourlyTelemetry.SkipBtcResidual);
-                                    else if (signal.AnalysisReasons!.Any(r => r.Contains("SKIP_BTC_BEAR_LONG")))
-                                        Interlocked.Increment(ref _hourlyTelemetry.SkipBtcBearLong);
-                                    else
-                                        Interlocked.Increment(ref _hourlyTelemetry.SkipBtc4hOppose);
-                                    coinGroup = "qapı";
-                                    cutKind = "qapı";
-                                }
-                                else if (hasStaleTrend)
-                                {
-                                    Interlocked.Increment(ref _hourlyTelemetry.SkipStaleTrend);
-                                    coinGroup = "satış st";
-                                    cutKind = "qapı";
-                                }
-                                else if (hasBtcBounce)
-                                {
-                                    Interlocked.Increment(ref _hourlyTelemetry.SkipBtcBounce);
-                                    coinGroup = "qapı";
-                                    cutKind = "qapı";
-                                }
-                                else if (hasDirLock)
-                                {
-                                    Interlocked.Increment(ref _hourlyTelemetry.SkipDirLock);
-                                    coinGroup = "circuit breaker";
-                                    cutKind = "cb";
-                                }
-                                else if (hasBtcRange)
-                                {
-                                    Interlocked.Increment(ref _hourlyTelemetry.SkipBtcRange);
-                                    coinGroup = "range";
-                                    cutKind = "range";
-                                }
-                                else if (hasVolume)
-                                {
-                                    Interlocked.Increment(ref _hourlyTelemetry.SkipVolume);
-                                    coinGroup = "həcm";
-                                    cutKind = "həcm";
-                                    cutOp = "<";
-                                    cutRight = BotConstants.Thresholds.MinVolumeSurgeRatio;
-                                    var volReason = signal.AnalysisReasons!.FirstOrDefault(r => r.Contains("SKIP_VOLUME"));
-                                    if (volReason != null)
-                                    {
-                                        var m = System.Text.RegularExpressions.Regex.Match(volReason, @"Vol\s+([0-9]+(\.[0-9]+)?)", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-                                        if (m.Success && decimal.TryParse(m.Groups[1].Value, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var v))
-                                        {
-                                            cutLeft = v;
-                                        }
-                                    }
-                                    if (!cutLeft.HasValue && indResLocal != null)
-                                    {
-                                        cutLeft = indResLocal.VolumeSurgeRatio;
-                                    }
-                                }
-                                else if (hasAdxFilter)
-                                {
-                                    Interlocked.Increment(ref _hourlyTelemetry.SkipGozleme);
-                                    coinGroup = "adx";
-                                    cutKind = "adx";
-                                    cutOp = "<";
-                                    cutRight = minAdxReq;
-                                    var adxReason = signal.AnalysisReasons!.FirstOrDefault(r => r.Contains("Rejim Filtri") && r.Contains("ADX"));
-                                    if (adxReason != null)
-                                    {
-                                        var m = System.Text.RegularExpressions.Regex.Match(adxReason, @"ADX\s*\(?([0-9]+(\.[0-9]+)?)\)?", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-                                        if (m.Success && decimal.TryParse(m.Groups[1].Value, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var a))
-                                        {
-                                            cutLeft = a;
-                                        }
-                                    }
-                                    if (!cutLeft.HasValue)
-                                    {
-                                        cutLeft = adxValLocal;
-                                    }
-                                }
-                                else if (hasSL)
-                                {
-                                    Interlocked.Increment(ref _hourlyTelemetry.SkipSL);
-                                    coinGroup = "SL";
-                                    cutKind = "sl";
-                                    cutOp = ">";
-                                    cutRight = BotConstants.Thresholds.MaxSlAtr;
-                                    var slReason = signal.AnalysisReasons!.FirstOrDefault(r => r.Contains("SKIP_SL_TOO_WIDE"));
-                                    if (slReason != null)
-                                    {
-                                        var m = System.Text.RegularExpressions.Regex.Match(slReason, @"([0-9]+(\.[0-9]+)?)", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-                                        if (m.Success && decimal.TryParse(m.Groups[1].Value, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var sVal))
-                                        {
-                                            cutLeft = sVal;
-                                        }
-                                    }
-                                }
-                                else if (hasRR)
-                                {
-                                    Interlocked.Increment(ref _hourlyTelemetry.SkipRR);
-                                    coinGroup = "R:R";
-                                    cutKind = "rr";
-                                    cutOp = "<";
-                                    cutRight = BotConstants.Thresholds.MinRiskReward;
-                                    var rrReason = signal.AnalysisReasons!.FirstOrDefault(r => r.Contains("SKIP_LOW_RR"));
-                                    if (rrReason != null)
-                                    {
-                                        var m = System.Text.RegularExpressions.Regex.Match(rrReason, @"R:R\s+([0-9]+(\.[0-9]+)?)", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-                                        if (m.Success && decimal.TryParse(m.Groups[1].Value, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var rrVal))
-                                        {
-                                            cutLeft = rrVal;
-                                        }
-                                    }
-                                }
-                                else if (hasConfluence)
-                                {
-                                    Interlocked.Increment(ref _hourlyTelemetry.SkipConfluence);
-                                    coinGroup = "güc/şərt";
-                                    cutKind = "şərt";
-                                    cutLeft = Math.Round(signal.ConfluenceScore, 0);
-                                    cutOp = "<";
-                                    cutRight = BotConstants.Thresholds.MinConfluence1h4h;
-                                }
-                                else if (hasChase)
-                                {
-                                    Interlocked.Increment(ref _hourlyTelemetry.SkipChase);
-                                    coinGroup = "chase";
-                                    cutKind = "qapı";
+                                    cutMarks.Add(new CutMark("gözləmə"));
                                 }
                                 else
                                 {
-                                    Interlocked.Increment(ref _hourlyTelemetry.SkipGozleme);
-                                    coinGroup = "gözləmə";
-                                    cutKind = "gözləmə";
+                                    if (hasBtcGate || hasStaleTrend || hasBtcBounce || hasChase)
+                                    {
+                                        if (signal.AnalysisReasons != null && signal.AnalysisReasons.Any(r => r.Contains("SKIP_BTC_RESIDUAL")))
+                                            Interlocked.Increment(ref _hourlyTelemetry.SkipBtcResidual);
+                                        else if (signal.AnalysisReasons != null && signal.AnalysisReasons.Any(r => r.Contains("SKIP_BTC_BEAR_LONG")))
+                                            Interlocked.Increment(ref _hourlyTelemetry.SkipBtcBearLong);
+                                        else if (hasStaleTrend)
+                                            Interlocked.Increment(ref _hourlyTelemetry.SkipStaleTrend);
+                                        else if (hasBtcBounce)
+                                            Interlocked.Increment(ref _hourlyTelemetry.SkipBtcBounce);
+                                        else if (hasChase)
+                                            Interlocked.Increment(ref _hourlyTelemetry.SkipChase);
+                                        else
+                                            Interlocked.Increment(ref _hourlyTelemetry.SkipBtc4hOppose);
+
+                                        cutMarks.Add(new CutMark("qapı"));
+                                    }
+
+                                    if (hasBtcRange)
+                                    {
+                                        Interlocked.Increment(ref _hourlyTelemetry.SkipBtcRange);
+                                        cutMarks.Add(new CutMark("range"));
+                                    }
+
+                                    if (hasDirLock)
+                                    {
+                                        Interlocked.Increment(ref _hourlyTelemetry.SkipDirLock);
+                                        cutMarks.Add(new CutMark("cb"));
+                                    }
+
+                                    if (hasVolume)
+                                    {
+                                        Interlocked.Increment(ref _hourlyTelemetry.SkipVolume);
+                                        decimal? volLeft = null;
+                                        var volReason = signal.AnalysisReasons!.FirstOrDefault(r => r.Contains("SKIP_VOLUME"));
+                                        if (volReason != null)
+                                        {
+                                            var m = System.Text.RegularExpressions.Regex.Match(volReason, @"Vol\s+([0-9]+(\.[0-9]+)?)", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+                                            if (m.Success && decimal.TryParse(m.Groups[1].Value, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var v))
+                                            {
+                                                volLeft = v;
+                                            }
+                                        }
+                                        if (!volLeft.HasValue && indResLocal != null)
+                                        {
+                                            volLeft = indResLocal.VolumeSurgeRatio;
+                                        }
+                                        cutMarks.Add(new CutMark("həcm", volLeft, "<", BotConstants.Thresholds.MinVolumeSurgeRatio));
+                                    }
+
+                                    if (hasAdxFilter)
+                                    {
+                                        Interlocked.Increment(ref _hourlyTelemetry.SkipGozleme);
+                                        decimal? adxLeft = null;
+                                        var adxReason = signal.AnalysisReasons!.FirstOrDefault(r => r.Contains("Rejim Filtri") && r.Contains("ADX"));
+                                        if (adxReason != null)
+                                        {
+                                            var m = System.Text.RegularExpressions.Regex.Match(adxReason, @"ADX\s*\(?([0-9]+(\.[0-9]+)?)\)?", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+                                            if (m.Success && decimal.TryParse(m.Groups[1].Value, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var a))
+                                            {
+                                                adxLeft = a;
+                                            }
+                                        }
+                                        if (!adxLeft.HasValue)
+                                        {
+                                            adxLeft = adxValLocal;
+                                        }
+                                        cutMarks.Add(new CutMark("adx", adxLeft, "<", minAdxReq));
+                                    }
+
+                                    if (hasRR)
+                                    {
+                                        Interlocked.Increment(ref _hourlyTelemetry.SkipRR);
+                                        decimal? rrLeft = null;
+                                        var rrReason = signal.AnalysisReasons!.FirstOrDefault(r => r.Contains("SKIP_LOW_RR"));
+                                        if (rrReason != null)
+                                        {
+                                            var m = System.Text.RegularExpressions.Regex.Match(rrReason, @"R:R\s+([0-9]+(\.[0-9]+)?)", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+                                            if (m.Success && decimal.TryParse(m.Groups[1].Value, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var rrVal))
+                                            {
+                                                rrLeft = rrVal;
+                                            }
+                                        }
+                                        cutMarks.Add(new CutMark("rr", rrLeft, "<", BotConstants.Thresholds.MinRiskReward));
+                                    }
+
+                                    if (hasSL)
+                                    {
+                                        Interlocked.Increment(ref _hourlyTelemetry.SkipSL);
+                                        decimal? slLeft = null;
+                                        var slReason = signal.AnalysisReasons!.FirstOrDefault(r => r.Contains("SKIP_SL_TOO_WIDE") || r.Contains("SKIP_SL_TOO_TIGHT") || r.Contains("SKIP_NO_SWING"));
+                                        if (slReason != null)
+                                        {
+                                            var m = System.Text.RegularExpressions.Regex.Match(slReason, @"([0-9]+(\.[0-9]+)?)", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+                                            if (m.Success && decimal.TryParse(m.Groups[1].Value, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var sVal))
+                                            {
+                                                slLeft = sVal;
+                                            }
+                                        }
+                                        cutMarks.Add(new CutMark("sl", slLeft, ">", BotConstants.Thresholds.MaxSlAtr));
+                                    }
+
+                                    if (hasConfluence)
+                                    {
+                                        Interlocked.Increment(ref _hourlyTelemetry.SkipConfluence);
+                                        cutMarks.Add(new CutMark("şərt", Math.Round(signal.ConfluenceScore, 0), "<", BotConstants.Thresholds.MinConfluence1h4h));
+                                    }
+
+                                    if (cutMarks.Count == 0 && !isTradeQualified)
+                                    {
+                                        cutMarks.Add(new CutMark("-"));
+                                    }
                                 }
 
+                                var firstCut = cutMarks.FirstOrDefault();
                                 _latestCoinEvaluations[$"{sym}|{tf}"] = new CoinSkipDetail
                                 {
                                     Symbol = sym,
                                     Timeframe = tf,
                                     Bias = coinBias,
                                     ConfluenceScore = (int)Math.Clamp(Math.Round(signal.ConfluenceScore), 0, 100),
-                                    GroupReason = coinGroup,
+                                    GroupReason = firstCut?.Kind ?? "scan yox",
                                     ReasonDescription = "",
-                                    CutKind = cutKind,
-                                    CutLeft = cutLeft,
-                                    CutRight = cutRight,
-                                    CutOp = cutOp
+                                    CutKind = firstCut?.Kind ?? "-",
+                                    CutLeft = firstCut?.Left,
+                                    CutRight = firstCut?.Right,
+                                    CutOp = firstCut?.Op,
+                                    Cuts = cutMarks
                                 };
                             }
 
@@ -554,7 +534,7 @@ namespace CryptoSense.Worker
                                 {
                                     Interlocked.Increment(ref _hourlyTelemetry.SkipDirLock);
                                     Console.WriteLine($"[MarketScanner] SKIP_DIR_LOCK: {signal.Symbol} {signal.Direction} blocked by circuit breaker direction lock");
-                                    _latestCoinEvaluations[$"{signal.Symbol}|{signal.Timeframe}"] = new CoinSkipDetail { Symbol = signal.Symbol, Timeframe = signal.Timeframe, Bias = signal.Direction == SignalDirection.Buy ? "long meyl" : "short meyl", ConfluenceScore = (int)Math.Clamp(Math.Round(signal.ConfluenceScore), 0, 100), GroupReason = "circuit breaker", ReasonDescription = "İstiqamət kilidi (direction lock) aktivdir", CutKind = "cb" };
+                                    _latestCoinEvaluations[$"{signal.Symbol}|{signal.Timeframe}"] = new CoinSkipDetail { Symbol = signal.Symbol, Timeframe = signal.Timeframe, Bias = signal.Direction == SignalDirection.Buy ? "long meyl" : "short meyl", ConfluenceScore = (int)Math.Clamp(Math.Round(signal.ConfluenceScore), 0, 100), GroupReason = "circuit breaker", ReasonDescription = "İstiqamət kilidi (direction lock) aktivdir", CutKind = "cb", Cuts = new List<CutMark> { new CutMark("cb") } };
                                     continue;
                                 }
                                 var candleDuration = signal.Timeframe switch
@@ -572,7 +552,7 @@ namespace CryptoSense.Worker
                                     SignalEngine.InvalidateCandleCache(signal.Symbol, signal.Timeframe, signal.SourceCandleOpenTimeUtc);
                                     Console.WriteLine($"[MarketScanner] SKIP_CYCLE_LAG: {signal.Symbol} lag={emitLagMs:F0}ms > {maxAllowedLagMs}ms");
                                     Console.WriteLine($"[EMIT_RETRY_ARMED] {signal.Symbol} {signal.Timeframe} candle={signal.SourceCandleOpenTimeUtc:yyyy-MM-dd HH:mm} reason=CYCLE_LAG");
-                                    _latestCoinEvaluations[$"{signal.Symbol}|{signal.Timeframe}"] = new CoinSkipDetail { Symbol = signal.Symbol, Timeframe = signal.Timeframe, Bias = signal.Direction == SignalDirection.Buy ? "long meyl" : "short meyl", ConfluenceScore = (int)Math.Clamp(Math.Round(signal.ConfluenceScore), 0, 100), GroupReason = "gecikmə", ReasonDescription = "Şam gecikməsi (cycle lag) aşkarlandı", CutKind = "gözləmə" };
+                                    _latestCoinEvaluations[$"{signal.Symbol}|{signal.Timeframe}"] = new CoinSkipDetail { Symbol = signal.Symbol, Timeframe = signal.Timeframe, Bias = signal.Direction == SignalDirection.Buy ? "long meyl" : "short meyl", ConfluenceScore = (int)Math.Clamp(Math.Round(signal.ConfluenceScore), 0, 100), GroupReason = "gecikmə", ReasonDescription = "Şam gecikməsi (cycle lag) aşkarlandı", CutKind = "gözləmə", Cuts = new List<CutMark> { new CutMark("gözləmə") } };
                                     continue;
                                 }
 
@@ -600,7 +580,7 @@ namespace CryptoSense.Worker
                                     SignalEngine.InvalidateCandleCache(signal.Symbol, signal.Timeframe, signal.SourceCandleOpenTimeUtc);
                                     Console.WriteLine($"[MarketScanner] SKIP_STALE: {signal.Symbol} dataAgeMs={(snap?.DataAgeMs ?? -1)} source={snap?.Source}");
                                     Console.WriteLine($"[EMIT_RETRY_ARMED] {signal.Symbol} {signal.Timeframe} candle={signal.SourceCandleOpenTimeUtc:yyyy-MM-dd HH:mm} reason=STALE");
-                                    _latestCoinEvaluations[$"{signal.Symbol}|{signal.Timeframe}"] = new CoinSkipDetail { Symbol = signal.Symbol, Timeframe = signal.Timeframe, Bias = signal.Direction == SignalDirection.Buy ? "long meyl" : "short meyl", ConfluenceScore = (int)Math.Clamp(Math.Round(signal.ConfluenceScore), 0, 100), GroupReason = "köhnə data", ReasonDescription = "WebSocket qiymət məlumatı köhnədir (stale data)", CutKind = "gözləmə" };
+                                    _latestCoinEvaluations[$"{signal.Symbol}|{signal.Timeframe}"] = new CoinSkipDetail { Symbol = signal.Symbol, Timeframe = signal.Timeframe, Bias = signal.Direction == SignalDirection.Buy ? "long meyl" : "short meyl", ConfluenceScore = (int)Math.Clamp(Math.Round(signal.ConfluenceScore), 0, 100), GroupReason = "köhnə data", ReasonDescription = "WebSocket qiymət məlumatı köhnədir (stale data)", CutKind = "gözləmə", Cuts = new List<CutMark> { new CutMark("gözləmə") } };
                                     continue;
                                 }
 

@@ -256,6 +256,7 @@ namespace CryptoSense.Infrastructure.Testing
             {
                 var sig3m = await _signalEngine.AnalyzeCoinAsync("BTCUSDT", "3m", isLiveScan: false);
                 var sig5m = await _signalEngine.AnalyzeCoinAsync("ETHUSDT", "5m", isLiveScan: false);
+                Console.WriteLine($"[Test 13 Debug] sig3m: Price={sig3m.CurrentPrice}, TP1={sig3m.TakeProfit1}, Type='{sig3m.SignalType}' | sig5m: Price={sig5m.CurrentPrice}, TP1={sig5m.TakeProfit1}, Type='{sig5m.SignalType}'");
                 return sig3m.CurrentPrice > 0 && sig5m.CurrentPrice > 0 && 
                        (sig3m.TakeProfit1 > 0 || sig3m.SignalType.Contains("NEYTRAL") || sig3m.SignalType.Contains("GÖZLƏMƏ"));
             });
@@ -2556,16 +2557,16 @@ namespace CryptoSense.Infrastructure.Testing
                     SkipGozleme = 4
                 };
 
-                // A. başlıq 41 koin (40+1), 2 tf olsa belə 80 yazılmasın
+                // A. mətndə «bakı» yox, «saat» yox, HH:mm | şərt≥ var
                 var dualTf41Coins = new List<CoinSkipDetail>();
                 for (int i = 0; i < 40; i++)
                 {
                     var sym = $"BASE{i:D2}USDT";
-                    dualTf41Coins.Add(new CoinSkipDetail { Symbol = sym, Timeframe = "1h", CutKind = "şərt", CutLeft = 60, CutOp = "<", CutRight = BotConstants.Thresholds.MinConfluence1h4h });
-                    dualTf41Coins.Add(new CoinSkipDetail { Symbol = sym, Timeframe = "4h", CutKind = "range" });
+                    dualTf41Coins.Add(new CoinSkipDetail { Symbol = sym, Timeframe = "1h", ConfluenceScore = 60, Cuts = new List<CutMark> { new CutMark("şərt", 60, "<", BotConstants.Thresholds.MinConfluence1h4h) } });
+                    dualTf41Coins.Add(new CoinSkipDetail { Symbol = sym, Timeframe = "4h", ConfluenceScore = 80, Cuts = new List<CutMark> { new CutMark("range") } });
                 }
-                dualTf41Coins.Add(new CoinSkipDetail { Symbol = "EXTRA01USDT", Timeframe = "1h", CutKind = "şərt", CutLeft = 60, CutOp = "<", CutRight = BotConstants.Thresholds.MinConfluence1h4h });
-                dualTf41Coins.Add(new CoinSkipDetail { Symbol = "EXTRA01USDT", Timeframe = "4h", CutKind = "range" });
+                dualTf41Coins.Add(new CoinSkipDetail { Symbol = "EXTRA01USDT", Timeframe = "1h", ConfluenceScore = 60, Cuts = new List<CutMark> { new CutMark("şərt", 60, "<", BotConstants.Thresholds.MinConfluence1h4h) } });
+                dualTf41Coins.Add(new CoinSkipDetail { Symbol = "EXTRA01USDT", Timeframe = "4h", ConfluenceScore = 80, Cuts = new List<CutMark> { new CutMark("range") } });
 
                 var report41 = TelegramMessageFormatter.FormatHourSkipReport(
                     candleCloseUtc: DateTime.UtcNow,
@@ -2578,20 +2579,32 @@ namespace CryptoSense.Infrastructure.Testing
                     newSignalsCount: 0);
 
                 var text41 = string.Join("\n", report41);
+
+                // A assertions
+                bool hasNoBaki = !text41.Contains("bakı", StringComparison.OrdinalIgnoreCase);
+                bool hasNoSaat = !text41.Contains("saat", StringComparison.OrdinalIgnoreCase);
+                bool hasHhMmShert = System.Text.RegularExpressions.Regex.IsMatch(text41, @"\d{2}:\d{2}\s*\|\s*şərt≥");
+                if (!hasNoBaki || !hasNoSaat || !hasHhMmShert)
+                {
+                    Console.WriteLine($"[Test 69 Fail - A] Line 1 must be 'HH:mm | şərt≥...', no 'bakı', no 'saat'. Text:\n{text41}");
+                    return false;
+                }
+
+                // F. koin 41 (40+1), 80/82 yox
                 bool has41Coins = text41.Contains("koin 41 (40+1)");
                 bool hasNo80or82 = !text41.Contains("koin 80") && !text41.Contains("koin 82") && !text41.Contains("koin  80") && !text41.Contains("koin  82");
                 if (!has41Coins || !hasNo80or82)
                 {
-                    Console.WriteLine($"[Test 69 Fail - A] Header must show 'koin 41 (40+1)', not 80/82. Text:\n{text41}");
+                    Console.WriteLine($"[Test 69 Fail - F] Header must show 'koin 41 (40+1)', not 80/82. Text:\n{text41}");
                     return false;
                 }
 
-                // B. kəsilməyən tf mətndə yox (freshness gözləmə tf-i listə salınmır)
+                // E. kəsilməyən / gözləmə sətir yox (freshness gözləmə tf-i listə salınmır)
                 var testCoinsWithFreshness = new List<CoinSkipDetail>
                 {
                     new CoinSkipDetail { Symbol = "UNCUTUSDT", Timeframe = "1h", CutKind = "gözləmə", GroupReason = "gözləmə" },
-                    new CoinSkipDetail { Symbol = "ETHUSDT", Timeframe = "1h", CutKind = "şərt", CutLeft = 62, CutOp = "<", CutRight = BotConstants.Thresholds.MinConfluence1h4h },
-                    new CoinSkipDetail { Symbol = "ETHUSDT", Timeframe = "4h", CutKind = "range" }
+                    new CoinSkipDetail { Symbol = "ETHUSDT", Timeframe = "1h", ConfluenceScore = 62, Cuts = new List<CutMark> { new CutMark("şərt", 62, "<", BotConstants.Thresholds.MinConfluence1h4h) } },
+                    new CoinSkipDetail { Symbol = "ETHUSDT", Timeframe = "4h", ConfluenceScore = 87, Cuts = new List<CutMark> { new CutMark("range") } }
                 };
                 var reportFresh = TelegramMessageFormatter.FormatHourSkipReport(
                     candleCloseUtc: DateTime.UtcNow,
@@ -2605,25 +2618,90 @@ namespace CryptoSense.Infrastructure.Testing
                 var textFresh = string.Join("\n", reportFresh);
                 if (textFresh.Contains("UNCUT"))
                 {
-                    Console.WriteLine($"[Test 69 Fail - B] Freshness waiting / uncut coin 'UNCUT' must NOT be in cut lines:\n{textFresh}");
+                    Console.WriteLine($"[Test 69 Fail - E] Freshness waiting / uncut coin 'UNCUT' must NOT be in cut lines:\n{textFresh}");
                     return false;
                 }
 
-                // C. kəsilən sətir `62<75` və ya `0.71<0.85` formasındadır, cümlə yox
+                // B, C, D sample cuts
                 var sampleCuts = new List<CoinSkipDetail>
                 {
-                    new CoinSkipDetail { Symbol = "ETHUSDT", Timeframe = "1h", CutKind = "şərt", CutLeft = 62, CutOp = "<", CutRight = BotConstants.Thresholds.MinConfluence1h4h },
-                    new CoinSkipDetail { Symbol = "ETHUSDT", Timeframe = "4h", CutKind = "range" },
-                    new CoinSkipDetail { Symbol = "SOLUSDT", Timeframe = "4h", CutKind = "həcm", CutLeft = 0.62m, CutOp = "<", CutRight = BotConstants.Thresholds.MinVolumeSurgeRatio },
-                    new CoinSkipDetail { Symbol = "AVAXUSDT", Timeframe = "4h", CutKind = "rr", CutLeft = 1.12m, CutOp = "<", CutRight = BotConstants.Thresholds.MinRiskReward },
-                    new CoinSkipDetail { Symbol = "INJUSDT", Timeframe = "4h", CutKind = "sl", CutLeft = 3.4m, CutOp = ">", CutRight = BotConstants.Thresholds.MaxSlAtr },
-                    new CoinSkipDetail { Symbol = "XAUTUSDT", Timeframe = "4h", CutKind = "şərt", CutLeft = 68, CutOp = "<", CutRight = BotConstants.Thresholds.MinConfluence1h4h },
-                    new CoinSkipDetail { Symbol = "AVAXUSDT", Timeframe = "1h", CutKind = "-" }
+                    new CoinSkipDetail
+                    {
+                        Symbol = "ETHUSDT",
+                        Timeframe = "1h",
+                        ConfluenceScore = 62,
+                        Cuts = new List<CutMark>
+                        {
+                            new CutMark("şərt", 62, "<", BotConstants.Thresholds.MinConfluence1h4h),
+                            new CutMark("həcm", 0.52m, "<", BotConstants.Thresholds.MinVolumeSurgeRatio),
+                            new CutMark("adx", 18m, "<", BotConstants.Thresholds.MinAdx1h)
+                        }
+                    },
+                    new CoinSkipDetail
+                    {
+                        Symbol = "ETHUSDT",
+                        Timeframe = "4h",
+                        ConfluenceScore = 87,
+                        Cuts = new List<CutMark>
+                        {
+                            new CutMark("range")
+                        }
+                    },
+                    new CoinSkipDetail
+                    {
+                        Symbol = "SOLUSDT",
+                        Timeframe = "4h",
+                        ConfluenceScore = 78,
+                        Cuts = new List<CutMark>
+                        {
+                            new CutMark("həcm", 0.62m, "<", BotConstants.Thresholds.MinVolumeSurgeRatio)
+                        }
+                    },
+                    new CoinSkipDetail
+                    {
+                        Symbol = "AVAXUSDT",
+                        Timeframe = "4h",
+                        ConfluenceScore = 80,
+                        Cuts = new List<CutMark>
+                        {
+                            new CutMark("rr", 1.12m, "<", BotConstants.Thresholds.MinRiskReward)
+                        }
+                    },
+                    new CoinSkipDetail
+                    {
+                        Symbol = "INJUSDT",
+                        Timeframe = "4h",
+                        ConfluenceScore = 82,
+                        Cuts = new List<CutMark>
+                        {
+                            new CutMark("sl", 3.4m, ">", BotConstants.Thresholds.MaxSlAtr)
+                        }
+                    },
+                    new CoinSkipDetail
+                    {
+                        Symbol = "XAUTUSDT",
+                        Timeframe = "4h",
+                        ConfluenceScore = 68,
+                        Cuts = new List<CutMark>
+                        {
+                            new CutMark("şərt", 68, "<", BotConstants.Thresholds.MinConfluence1h4h)
+                        }
+                    },
+                    new CoinSkipDetail
+                    {
+                        Symbol = "AVAXUSDT",
+                        Timeframe = "1h",
+                        ConfluenceScore = 0,
+                        Cuts = new List<CutMark>
+                        {
+                            new CutMark("-")
+                        }
+                    }
                 };
 
                 var cutsReport = TelegramMessageFormatter.FormatHourSkipReport(
                     candleCloseUtc: DateTime.UtcNow,
-                    timeframe: "1h",
+                    timeframe: "1h, 4h",
                     baseCoinsCount: 5,
                     userExtraCoinsCount: 0,
                     compass: compass,
@@ -2632,21 +2710,64 @@ namespace CryptoSense.Infrastructure.Testing
                     newSignalsCount: 0);
                 var cutsText = string.Join("\n", cutsReport);
 
-                bool hasEth1h = cutsText.Contains("ETH   1h  62<75");
-                bool hasEth4h = cutsText.Contains("ETH   4h  range");
-                bool hasSol4h = cutsText.Contains("SOL   4h  0.62<0.85");
-                bool hasAvax4h = cutsText.Contains("AVAX  4h  1.12<1.50");
-                bool hasInj4h = cutsText.Contains("INJ   4h  3.4>2.80") || cutsText.Contains("INJ   4h  3.40>2.80");
-                bool hasXaut4h = cutsText.Contains("XAUT  4h  68<75");
-                bool hasAvax1h = cutsText.Contains("AVAX  1h  -");
-
-                if (!hasEth1h || !hasEth4h || !hasSol4h || !hasAvax4h || !hasInj4h || !hasXaut4h || !hasAvax1h)
+                // B. ETH sətirdə şərt 62<75 VƏ həcm VƏ adx eyni sətirdə
+                var ethLines = cutsText.Split('\n').Where(l => l.Contains("ETH")).ToList();
+                var eth1hLine = ethLines.FirstOrDefault(l => l.Contains("1h"));
+                bool ethHasAll = eth1hLine != null
+                    && eth1hLine.Contains("şərt 62<75")
+                    && eth1hLine.Contains("həcm 0.52<0.85")
+                    && eth1hLine.Contains("adx 18<20");
+                if (!ethHasAll)
                 {
-                    Console.WriteLine($"[Test 69 Fail - C] Cut lines do not match expected format:\n{cutsText}");
+                    Console.WriteLine($"[Test 69 Fail - B] ETH line must contain 'şərt 62<75', 'həcm', 'adx' in same line:\n{eth1hLine ?? "null"}");
                     return false;
                 }
 
-                // D. Güclü Yüksəliş / SuperTrend / Aydın trend / OXU mətndə yox
+                // C. rr həmişə x<1.50, çılpaq "rr" yox
+                bool hasRrFormatted = cutsText.Contains("rr 1.12<1.50");
+                bool noNakedRr = !System.Text.RegularExpressions.Regex.IsMatch(cutsText, @"\brr\b(?!\s*[0-9]+(\.[0-9]+)?<)");
+                if (!hasRrFormatted || !noNakedRr)
+                {
+                    Console.WriteLine($"[Test 69 Fail - C] RR must be formatted as 'rr x<1.50', no naked 'rr':\n{cutsText}");
+                    return false;
+                }
+
+                // D. yalnız range: «şərt 87  range»
+                bool hasRangeOnly = cutsText.Contains("şərt 87  range");
+                if (!hasRangeOnly)
+                {
+                    Console.WriteLine($"[Test 69 Fail - D] Expected 'şərt 87  range'. Text:\n{cutsText}");
+                    return false;
+                }
+
+                // G. 1 mesaj (və ya overflow), [1/2] yox
+                bool isSingleMsg = cutsReport.Count == 1;
+                bool hasNoHalf = !cutsText.Contains("[1/2]") && !cutsText.Contains("[1/1]") && !cutsText.Contains("[2/2]") && !text41.Contains("[1/2]");
+                if (!isSingleMsg || !hasNoHalf)
+                {
+                    Console.WriteLine($"[Test 69 Fail - G] Must be 1 message without [1/2]. Got {cutsReport.Count} msgs.");
+                    return false;
+                }
+
+                // Single timeframe test: koin sətrində tf təkrarlanmır
+                var singleTfReport = TelegramMessageFormatter.FormatHourSkipReport(
+                    candleCloseUtc: DateTime.UtcNow,
+                    timeframe: "1h",
+                    baseCoinsCount: 5,
+                    userExtraCoinsCount: 0,
+                    compass: compass,
+                    coins: sampleCuts,
+                    telemetry: tel,
+                    newSignalsCount: 0);
+                var singleText = string.Join("\n", singleTfReport);
+                var singleEthLine = singleText.Split('\n').FirstOrDefault(l => l.Contains("ETH"));
+                if (singleEthLine != null && (singleEthLine.Contains("ETH    1h") || singleEthLine.Contains("ETH   1h")))
+                {
+                    Console.WriteLine($"[Test 69 Fail] Single tf must NOT repeat tf in coin row:\n{singleEthLine}");
+                    return false;
+                }
+
+                // Prohibited words check
                 bool hasNoOxu = !cutsText.Contains("OXU");
                 bool hasNoYazma = !cutsText.Contains("yazma");
                 bool hasNoAydinTrend = !cutsText.Contains("Aydın trend");
@@ -2655,22 +2776,24 @@ namespace CryptoSense.Infrastructure.Testing
                 bool hasNoSistemIsleyir = !cutsText.Contains("Sistem işləyir");
                 bool hasNoSuperTrend = !cutsText.Contains("SuperTrend təsdiqi") && !cutsText.Contains("SuperTrend");
                 bool hasNoMeyl = !cutsText.Contains("meyl");
+                bool hasNoKesen = !cutsText.Contains("kəsən  ");
 
-                if (!hasNoOxu || !hasNoYazma || !hasNoAydinTrend || !hasNoGucluYukselis || !hasNoAMeyar || !hasNoSistemIsleyir || !hasNoSuperTrend || !hasNoMeyl)
+                if (!hasNoOxu || !hasNoYazma || !hasNoAydinTrend || !hasNoGucluYukselis || !hasNoAMeyar || !hasNoSistemIsleyir || !hasNoSuperTrend || !hasNoMeyl || !hasNoKesen)
                 {
-                    Console.WriteLine($"[Test 69 Fail - D] Report contains forbidden prose text:\n{cutsText}");
+                    Console.WriteLine($"[Test 69 Fail - Prose] Report contains forbidden prose text:\n{cutsText}");
                     return false;
                 }
 
-                // E. 1h freshness çoxluğu → boş göndərmə
+                // 1h freshness çoxluğu → deferral check
                 var unreadyEvals = new List<CoinSkipDetail>
                 {
-                    new CoinSkipDetail { Symbol = "BTCUSDT", Timeframe = "1h", CutKind = "gözləmə" },
-                    new CoinSkipDetail { Symbol = "ETHUSDT", Timeframe = "1h", CutKind = "gözləmə" },
-                    new CoinSkipDetail { Symbol = "SOLUSDT", Timeframe = "1h", CutKind = "-" }
+                    new CoinSkipDetail { Symbol = "BTCUSDT", Timeframe = "1h", CutKind = "gözləmə", Cuts = new List<CutMark> { new CutMark("gözləmə") } },
+                    new CoinSkipDetail { Symbol = "ETHUSDT", Timeframe = "1h", CutKind = "gözləmə", Cuts = new List<CutMark> { new CutMark("gözləmə") } },
+                    new CoinSkipDetail { Symbol = "SOLUSDT", Timeframe = "1h", CutKind = "-", Cuts = new List<CutMark> { new CutMark("-") } }
                 };
                 int unreadyCount = unreadyEvals.Count(c =>
                     c.CutKind == "gözləmə" ||
+                    c.Cuts.Any(x => x.Kind == "gözləmə") ||
                     (!string.IsNullOrWhiteSpace(c.ReasonDescription) && c.ReasonDescription.Contains("gözlənilir", StringComparison.OrdinalIgnoreCase)) ||
                     (c.ConfluenceScore == 50 && c.GroupReason == "gözləmə") ||
                     (!string.IsNullOrWhiteSpace(c.ReasonDescription) && c.ReasonDescription.Contains("bu saat baxılmayıb", StringComparison.OrdinalIgnoreCase)) ||
@@ -2678,11 +2801,11 @@ namespace CryptoSense.Infrastructure.Testing
                 bool isDeferred = unreadyCount > unreadyEvals.Count / 2;
                 if (!isDeferred)
                 {
-                    Console.WriteLine("[Test 69 Fail - E] 1h freshness excess must defer heartbeat");
+                    Console.WriteLine("[Test 69 Fail - Deferral] 1h freshness excess must defer heartbeat");
                     return false;
                 }
 
-                // F. BTC sətrində long|short və D (dominans>0)
+                // BTC sətrində long|short və D (dominans>0)
                 var testCompass = new BtcMarketCompass
                 {
                     Regime = BtcMarketRegime.Ranging,
@@ -2692,7 +2815,7 @@ namespace CryptoSense.Infrastructure.Testing
                 };
                 var btcReport = TelegramMessageFormatter.FormatHourSkipReport(
                     candleCloseUtc: DateTime.UtcNow,
-                    timeframe: "1h",
+                    timeframe: "1h, 4h",
                     baseCoinsCount: 5,
                     userExtraCoinsCount: 0,
                     compass: testCompass,
@@ -2703,11 +2826,11 @@ namespace CryptoSense.Infrastructure.Testing
                 bool hasBtcHeader = btcText.Contains("BTC  1h long  |  4h long  |  range  |  D 52.4  |  qapı bağlı");
                 if (!hasBtcHeader)
                 {
-                    Console.WriteLine($"[Test 69 Fail - F] BTC line mismatch. Expected 'BTC  1h long  |  4h long  |  range  |  D 52.4  |  qapı bağlı'. Got:\n{btcText}");
+                    Console.WriteLine($"[Test 69 Fail - BTC] BTC line mismatch. Expected 'BTC  1h long  |  4h long  |  range  |  D 52.4  |  qapı bağlı'. Got:\n{btcText}");
                     return false;
                 }
 
-                // G. FormatSignalAlert / FormatOutcomeAlert PASS, 0 xəta 0 warning
+                // H. FormatSignalAlert / FormatOutcomeAlert PASS, 0 xəta 0 warning
                 var sampleSignal = new FuturesSignal
                 {
                     SignalNumber = 999,
@@ -2737,7 +2860,7 @@ namespace CryptoSense.Infrastructure.Testing
                 bool hasAdx4h = btcText.Contains($"{BotConstants.Thresholds.MinAdx4h:F0}");
                 if (!hasConf || !hasRr || !hasSl || !hasVol || !hasAdx1h || !hasAdx4h)
                 {
-                    Console.WriteLine($"[Test 69 Fail] Thresholds must match BotConstants:\n{btcText}");
+                    Console.WriteLine($"[Test 69 Fail - Thresholds] Thresholds must match BotConstants:\n{btcText}");
                     return false;
                 }
 

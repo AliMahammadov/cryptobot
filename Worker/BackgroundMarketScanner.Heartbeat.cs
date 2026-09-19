@@ -131,7 +131,8 @@ namespace CryptoSense.Worker
                                 ConfluenceScore = 0,
                                 GroupReason = "scan yox",
                                 ReasonDescription = "bu saat baxılmayıb",
-                                CutKind = "-"
+                                CutKind = "-",
+                                Cuts = new List<CutMark> { new CutMark("-") }
                             });
                         }
                     }
@@ -142,6 +143,7 @@ namespace CryptoSense.Worker
                 {
                     int unreadyCount = oneHourEvals.Count(c =>
                         c.CutKind == "gözləmə" ||
+                        c.Cuts.Any(x => x.Kind == "gözləmə") ||
                         (!string.IsNullOrWhiteSpace(c.ReasonDescription) && c.ReasonDescription.Contains("gözlənilir", StringComparison.OrdinalIgnoreCase)) ||
                         (c.ConfluenceScore == 50 && c.GroupReason == "gözləmə") ||
                         (!string.IsNullOrWhiteSpace(c.ReasonDescription) && c.ReasonDescription.Contains("bu saat baxılmayıb", StringComparison.OrdinalIgnoreCase)) ||
